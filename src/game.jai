@@ -1,6 +1,7 @@
 
 // I feel silly for taking so long to see this language, compiler, and module set for what it is: a gift 
 // that paves the way toward what I want to do.
+// TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
 main :: () {
     setup_success := true;
@@ -20,7 +21,6 @@ main :: () {
         per_frame_time = new_time;
 
         reset_temporary_storage();
-        sleep_milliseconds(1);
     }
 }
 

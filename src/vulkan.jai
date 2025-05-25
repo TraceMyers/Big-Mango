@@ -19,6 +19,12 @@ ENABLE_VALIDATION_LAYERS :: true;
 
 // TODO: custom validation layer callback
 // TODO: allocator
+// TODO: if graphics and present end up with different queues, validation complains about things I don't understand / haven't looked into
+// TODO: I have a VkQueueWaitIdle in the part where we get the next swapchain image. It's there to prevent a situation where the signal semaphore is still signaled...? I suppose meaning that post-present, the semaphore resets. apparently VK_EXT_swapchain_maintenance1 provides a solution for this issue. or, maybe just having one set of sync primitives per image would do it. I'm not really sure. I need to take an hour or two to understand what's going on.
+// TODO: to fix the above thing, I can probably just reference the main vulkan tutorial
+// TODO: do  I have to recreate the views whe I remake a swapchain?
+// TODO: mark the swapchain dirty when its dimensions don't match window dimensions
+// TODO: need non-vsync present mode. otherwise, I can't see performance problems coming from afar.
 
 Vulkan :: struct {
     scope_initialize :: () -> bool {
@@ -26,10 +32,13 @@ Vulkan :: struct {
         if init_success then create_surface();
         if init_success then select_physical_device();
         if init_success then create_logical_device();
-        if init_success then create_swapchain(null);
+        if init_success then create_swapchain();
         if init_success then create_image_views();
         // if init_success then create_graphics_pipeline();
         if init_success then init_commands();
+        if init_success {
+            rm_log("vulkan init success");
+        }
         return init_success;
     }
     scope_deinitialize :: () {
@@ -42,6 +51,8 @@ Vulkan :: struct {
             vkDestroySemaphore(logical_device, it.render_semaphore, null);
             vkDestroySemaphore(logical_device, it.swapchain_semaphore, null);
         }
+        array_reset(*command_frames);
+
         vkDestroyPipelineLayout(logical_device, test_pipeline_layout, null);
         test_pipeline_layout = null;
         reset(*swapchain);
@@ -54,48 +65,39 @@ Vulkan :: struct {
     }
 }
 
+should_rebuild_swapchain :: () -> bool {
+    window_dimensions := get_window_dimensions();
+    if swapchain.extent.width != xx window_dimensions.x || swapchain.extent.height != xx window_dimensions.y {
+        return true;
+    } else return false;
+}
+
 vk_render_frame :: () {
+    if quit {
+        return;
+    }
+    if should_rebuild_swapchain() {
+        vkQueueWaitIdle(graphics_queue);
+        create_swapchain();
+        create_image_views();
+    }
+
     current_frame := get_current_frame_data();
-    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, ONE_SECOND_IN_NANOSECONDS), "failed to wait for the render fence");
-    vk_validate(vkResetFences(logical_device, 1, *current_frame.fence), "failed to reset the render fence");
-    
-    image_index: u32;
-    vk_validate(vkAcquireNextImageKHR(logical_device, swapchain.vk_obj, ONE_SECOND_IN_NANOSECONDS, current_frame.swapchain_semaphore, null, *image_index), "failed to wait to get an image from the swapchain");
-
-    cmd := current_frame.command_buffer;
-    vk_validate(vkResetCommandBuffer(cmd, 0), "failed to reset the main command buffer");
-    command_buffer_begin := VkCommandBufferBeginInfo.{
-        flags = .ONE_TIME_SUBMIT_BIT
-    };
-    vk_validate(vkBeginCommandBuffer(cmd, *command_buffer_begin), "failed to begin the main command buffer");
-
-    transition_image(cmd, swapchain.images[image_index], .UNDEFINED, .GENERAL);
-
-    blue := respace(sin(seconds_since_init() / 2.0).(float32), .{-1, 1}, .{0, 1});
-    clear_value := VkClearColorValue.{
-        _float32 = .[0, 0, blue, 1]
-    };
-    clear_range := VkImageSubresourceRange.{
-        aspectMask = .COLOR_BIT, 
-        baseMipLevel = 0,
-        levelCount = VK_REMAINING_MIP_LEVELS,
-        baseArrayLayer = 0,
-        layerCount = VK_REMAINING_ARRAY_LAYERS
-    };
-    vkCmdClearColorImage(cmd, swapchain.images[image_index], .GENERAL, *clear_value, 1, *clear_range);
-
-    transition_image(cmd, swapchain.images[image_index], .GENERAL, .PRESENT_SRC_KHR);
-
+    image_index := wait_for_next_swapchain_image(current_frame);
+    render_target := swapchain.images[image_index];
+    cmd := begin_command_buffer(current_frame);
+    transition_image(cmd, render_target, .UNDEFINED, .GENERAL);
+    clear_image(cmd, render_target);
+    transition_image(cmd, render_target, .GENERAL, .PRESENT_SRC_KHR);
     vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
 
     submit_command_info := command_buffer_submit_info(cmd);
     wait_info := semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, current_frame.swapchain_semaphore);
     signal_info := semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, current_frame.render_semaphore);
-
     submit_info := roll_submit_info(*submit_command_info, *signal_info, *wait_info);
 
     // smoke
-    vk_validate(vkQueueSubmit2(graphics_queue, 1, *submit_info, current_frame.fence), "failed to submit draw commands to the graphics queue");
+    vk_validate(vkQueueSubmit2(graphics_queue, 1, *submit_info, null), "failed to submit draw commands to the graphics queue");
 
     present_info := VkPresentInfoKHR.{
         pSwapchains = *swapchain.vk_obj,
@@ -104,10 +106,13 @@ vk_render_frame :: () {
         waitSemaphoreCount = 1,
         pImageIndices = *image_index,
     };
+    present_fence_info := VkSwapchainPresentFenceInfoEXT.{
+        swapchainCount = 1,
+        pFences=*current_frame.fence,
+    };
+    present_info.pNext = *present_fence_info;
 
     vk_validate(vkQueuePresentKHR(graphics_queue, *present_info), "failed to present the render target");
-
-
     frame += 1;
 }
 
@@ -170,6 +175,44 @@ roll_submit_info :: inline (cmd: *VkCommandBufferSubmitInfo, signal_semaphore_in
     };
 }
 
+clear_image :: (cmd: VkCommandBuffer, target: VkImage) {
+    // blue := respace(sin(seconds_since_init() / 2.0).(float32), .{-1, 1}, .{0, 1});
+    // red := 1.0 - blue;
+    // green := red * 0.5;
+    // clear_value := VkClearColorValue.{
+    //     _float32 = .[red, green, blue, 1]
+    // };
+    clear_value := VkClearColorValue.{
+        _float32 = .[0, 0, 1, 1]
+    };
+    clear_range := VkImageSubresourceRange.{
+        aspectMask = .COLOR_BIT, 
+        baseMipLevel = 0,
+        levelCount = VK_REMAINING_MIP_LEVELS,
+        baseArrayLayer = 0,
+        layerCount = VK_REMAINING_ARRAY_LAYERS
+    };
+    vkCmdClearColorImage(cmd, target, .GENERAL, *clear_value, 1, *clear_range);
+}
+
+begin_command_buffer :: (frame: *Frame_Data) -> VkCommandBuffer {
+    cmd := frame.command_buffer;
+    vk_validate(vkResetCommandBuffer(cmd, 0), "failed to reset the main command buffer");
+    command_buffer_begin := VkCommandBufferBeginInfo.{
+        flags = .ONE_TIME_SUBMIT_BIT
+    };
+    vk_validate(vkBeginCommandBuffer(cmd, *command_buffer_begin), "failed to begin the main command buffer");
+    return cmd;
+}
+
+wait_for_next_swapchain_image :: (current_frame: *Frame_Data) -> u32 {
+    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, ONE_SECOND_IN_NANOSECONDS), "failed to wait for the render fence");
+    vk_validate(vkResetFences(logical_device, 1, *current_frame.fence), "failed to reset the render fence");
+    image_index: u32;
+    vk_validate(vkAcquireNextImageKHR(logical_device, swapchain.vk_obj, ONE_SECOND_IN_NANOSECONDS, current_frame.swapchain_semaphore, null, *image_index), "failed to wait to get an image from the swapchain");
+    return image_index;
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // initialize
 
@@ -179,7 +222,7 @@ create_vk_instance :: () {
     vk_init_validate(instance_extensions_are_supported(required_instance_extensions), "required instance extensions unsupported");
 
     no_validation := !ENABLE_VALIDATION_LAYERS;
-    layers_supported := validation_layers_are_supported(required_layers);
+    layers_supported := layers_are_supported(required_layers);
     vk_init_validate(no_validation || layers_supported, "the required validation layers are not supported");
 
     app_info := VkApplicationInfo .{
@@ -253,6 +296,14 @@ create_logical_device :: () {
 
     enable_device_features: VkPhysicalDeviceFeatures;
 
+    maintenance1_enable := VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT.{
+        swapchainMaintenance1 = VK_TRUE
+    };
+    sync_feature_enable := VkPhysicalDeviceSynchronization2Features.{
+        synchronization2 = VK_TRUE,
+        pNext = *maintenance1_enable
+    };
+
     device_create_info := VkDeviceCreateInfo.{
         pQueueCreateInfos = queue_create_infos.array.data,
         queueCreateInfoCount = xx queue_create_infos.array.count,
@@ -260,7 +311,8 @@ create_logical_device :: () {
         enabledLayerCount = xx required_layers.count,
         ppEnabledLayerNames = xx required_layers.data,
         enabledExtensionCount = xx required_device_extensions.count,
-        ppEnabledExtensionNames = required_device_extensions.data
+        ppEnabledExtensionNames = required_device_extensions.data,
+        pNext = *sync_feature_enable
     };
 
     result := vkCreateDevice(physical_device.vk_obj, *device_create_info, null, *logical_device);
@@ -269,10 +321,11 @@ create_logical_device :: () {
     vkGetDeviceQueue(logical_device, xx physical_device.graphics_index, 0, *graphics_queue);
 }
 
-create_swapchain :: (old_swapchain: VkSwapchainKHR) {
+create_swapchain :: () {
     auto_release_temp();
 
-    reset(*swapchain);
+    old_swapchain := swapchain.vk_obj;
+    reset(*swapchain, false);
 
     support_info: Swapchain_Support_Info;
     vk_init_validate(get_swapchain_support_info(physical_device.vk_obj, *support_info, temp), "unable to get swapchain support info for the selected physical device");
@@ -294,7 +347,7 @@ create_swapchain :: (old_swapchain: VkSwapchainKHR) {
         // layers per image
         imageArrayLayers = 1,
         // render directly to the image
-        imageUsage = .COLOR_ATTACHMENT_BIT,
+        imageUsage = .COLOR_ATTACHMENT_BIT | .TRANSFER_DST_BIT,
         // how to transform the image before... presenting?
         preTransform = support_info.capabilities.currentTransform,
         // whether the alpha channel should blend with other windows
@@ -311,7 +364,7 @@ create_swapchain :: (old_swapchain: VkSwapchainKHR) {
         create_info.queueFamilyIndexCount = xx queue_family_indices.count;
         create_info.pQueueFamilyIndices = queue_family_indices.data;
     } else {
-        // best perf. only one queue family owns an image at a time.
+        // best perf according to somebody. only one queue family owns an image at a time.
         create_info.imageSharingMode = .EXCLUSIVE; 
     }
 
@@ -319,6 +372,10 @@ create_swapchain :: (old_swapchain: VkSwapchainKHR) {
 
     success:, swapchain.images = get_swapchain_images(context.allocator);
     vk_init_validate(success, "unable to get the array of swapchain images");
+
+    if old_swapchain {
+        vkDestroySwapchainKHR(logical_device, old_swapchain, null);
+    }
 }
 
 create_image_views :: () {
@@ -456,6 +513,9 @@ create_graphics_pipeline :: () {
 init_commands :: () {
     auto_release_temp();
 
+    assert(command_frames.data == null);
+    command_frames = alloc_array(Frame_Data, swapchain.images.count);
+
     command_pool_info := VkCommandPoolCreateInfo.{
         flags = .RESET_COMMAND_BUFFER_BIT,
         queueFamilyIndex = xx physical_device.graphics_index
@@ -466,7 +526,7 @@ init_commands :: () {
     };
     semaphore_info := VkSemaphoreCreateInfo.{};
 
-    for 0..1 {
+    for 0..command_frames.count-1 {
         vk_init_validate(vkCreateCommandPool(logical_device, *command_pool_info, null, *command_frames[it].command_pool), "failed to create a command pool");
         command_alloc_info := VkCommandBufferAllocateInfo.{
             commandPool = command_frames[it].command_pool,
@@ -486,8 +546,11 @@ init_commands :: () {
 
 create_shader_module_from_file :: (filename: string) -> VkShaderModule {
     auto_release_temp();
-    scope_set_allocator(temp);
-    file_data := read_entire_file(filename, true);
+    file_data: string;
+    {
+        scope_set_allocator(temp);
+        file_data = read_entire_file(filename, true);
+    }
     return create_shader_module(file_data);
 }
 
@@ -557,13 +620,13 @@ to_string :: (data: []u8) -> string {
     return string.{c_style_strlen(data.data), data.data};
 }
 
-validation_layers_are_supported :: (validation_layers: []*u8) -> bool {
+layers_are_supported :: (layers: []*u8) -> bool {
     auto_release_temp();
     
     success, available_layers := get_available_layer_properties();
     if !success then return false;
 
-    for need_layer : validation_layers {
+    for need_layer : layers {
         layer_found: bool;
         for have_layer : available_layers {
             max_read_ct := have_layer.layerName.count;
@@ -573,7 +636,7 @@ validation_layers_are_supported :: (validation_layers: []*u8) -> bool {
             }
         }
         if !layer_found {
-            rm_warning("unable to find validation layer % in available layers", to_string(need_layer));
+            rm_warning("unable to find layer % in available layers", to_string(need_layer));
             return false;
         }
     }
@@ -690,6 +753,7 @@ score_physical_device :: (device: VkPhysicalDevice) -> score: s32 {
         return 0;
     }
 
+
     score : s32 = ifx properties.deviceType == .DISCRETE_GPU then (100).(s32) else (1).(s32);
     score += properties.limits.maxImageDimension2D.(s32);
     if dummy_device.graphics_index == dummy_device.present_index then score += 25;
@@ -721,20 +785,31 @@ set_physical_device_queue_family_capabilities :: (device: *Physical_Device) -> b
     success, queue_family_properties := get_physical_device_queue_family_properties(device.vk_obj);
     if !success then return false;
 
+    GRAPHICS_AND_COMPUTE : VkQueueFlagBits : (.GRAPHICS_BIT | .COMPUTE_BIT);
+
     for family : queue_family_properties {
         present_support: VkBool32;
         vkGetPhysicalDeviceSurfaceSupportKHR(device.vk_obj, xx it_index, surface, *present_support);
+        // just try to get them all on the same queue for now. maybe forever?
         if present_support {
-            device.present_index = xx it_index;
+            if (family.queueFlags & GRAPHICS_AND_COMPUTE) == GRAPHICS_AND_COMPUTE {
+                device.present_index = xx it_index;
+                device.graphics_index = xx it_index;
+                device.compute_index = xx it_index;
+            } else if device.present_index == -1 {
+                device.present_index = xx it_index;
+            } 
         }
-        if family.queueFlags & .GRAPHICS_BIT {
+        if family.queueFlags & .GRAPHICS_BIT && device.graphics_index == -1 {
             device.graphics_index = xx it_index;
         }
-        if family.queueFlags & .COMPUTE_BIT {
+        if family.queueFlags & .COMPUTE_BIT && device.compute_index == -1 {
             device.compute_index = xx it_index;
         }
         if family.queueFlags & .TRANSFER_BIT {
-            device.transfer_index = xx it_index;
+            if device.transfer_index == -1 || family.queueFlags & (.GRAPHICS_BIT | .COMPUTE_BIT) == 0 {
+                device.transfer_index = xx it_index;
+            }
         }
     }
     return true;
@@ -761,16 +836,10 @@ choose_swapchain_present_mode :: (info: *Swapchain_Support_Info) -> VkPresentMod
 }
 
 choose_swapchain_extent :: (using info: *Swapchain_Support_Info) -> VkExtent2D {
-    _, _, width, height, success := get_dimensions(window, true);
-    if !success {
-        rm_error("failed getting the window dimensions");
-        // something probably obviously wrong, so it's noticeable
-        width = 64;
-        height = 64;
-    }
+    window_dimensions := get_window_dimensions();
     extent := VkExtent2D.{
-        clamp(width.(u32), capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
-        clamp(height.(u32), capabilities.minImageExtent.height, capabilities.maxImageExtent.height),
+        clamp(window_dimensions.x.(u32), capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+        clamp(window_dimensions.y.(u32), capabilities.minImageExtent.height, capabilities.maxImageExtent.height),
     };
     return extent;
 }
@@ -928,8 +997,10 @@ Swapchain :: struct {
     image_views: []VkImageView;
 }
 
-reset :: (swapchain: *Swapchain) {
-    vkDestroySwapchainKHR(logical_device, swapchain.vk_obj, null);
+reset :: (swapchain: *Swapchain, destroy_vk_obj := true) {
+    if destroy_vk_obj {
+        vkDestroySwapchainKHR(logical_device, swapchain.vk_obj, null);
+    }
     for swapchain.image_views {
         vkDestroyImageView(logical_device, it, null);
     }
@@ -947,7 +1018,7 @@ Frame_Data :: struct {
 }
 
 get_current_frame_data :: () -> *Frame_Data {
-    return *command_frames[frame & 0x1];
+    return *command_frames[frame % command_frames.count.(u64)];
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -966,7 +1037,7 @@ surface: VkSurfaceKHR;
 // a series of render targets and information about them. the images that will be drawn to and presented at the same time.
 swapchain: Swapchain;
 
-command_frames: [2]Frame_Data;
+command_frames: []Frame_Data;
 
 frame: u64;
 
@@ -989,11 +1060,13 @@ init_success := true;
 required_instance_extensions := (*u8).[
     "VK_KHR_surface",
     "VK_KHR_win32_surface",
+    "VK_KHR_get_surface_capabilities2",
+    "VK_EXT_surface_maintenance1",
 ];
 
 required_device_extensions := (*u8).[
     "VK_KHR_swapchain",
-    // "VK_KHR_dynamic_rendering"
+    "VK_EXT_swapchain_maintenance1",
 ];
 
 #import "vulkan-jai";
