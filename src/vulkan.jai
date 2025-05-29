@@ -24,6 +24,7 @@ ENABLE_VALIDATION_LAYERS :: true;
 // TODO: do I have to recreate the views whe I remake a swapchain?
 // TODO: mark the swapchain dirty when its dimensions don't match window dimensions
 // TODO: need non-vsync present mode. otherwise, I can't see performance problems coming from afar.
+// TODO: it might be better to have one big descriptor pool
 
 Vulkan :: struct {
     scope_initialize :: () -> bool {
@@ -32,11 +33,12 @@ Vulkan :: struct {
         if init_success then create_surface();
         if init_success then select_physical_device();
         if init_success then create_logical_device();
-        if init_success then init_allocator();
+        if init_success then create_allocator();
         if init_success then create_swapchain();
         if init_success then create_draw_image();
-        // if init_success then create_graphics_pipeline();
+        if init_success then create_pipelines();
         if init_success then create_frame_data();
+        if init_success then create_descriptors();
         if init_success {
             rm_log("vulkan init success");
         }
@@ -97,8 +99,8 @@ vk_render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .TRANSFER_SRC_OPTIMAL);
     transition_image(cmd, render_target, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
     copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*draw_image.extent).(*VkExtent2D).*);
-    transition_image(cmd, render_target, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR);
 
+    transition_image(cmd, render_target, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR);
     vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
 
     submit_command_info := command_buffer_submit_info(cmd);
@@ -410,16 +412,18 @@ create_draw_image :: () {
     // fail without helpful error msg when image extent is bad.
     assert(draw_image.extent.width > 0 && draw_image.extent.height > 0);
     vk_init_validate(vmaCreateImage(vk_allocator, *draw_image_info, *image_alloc_info, *draw_image.vk_obj, *draw_image.allocation, null), "failed to create the main image for drawing");
+    
+    deletion_queue_add(*game_deletion_queue, vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation));
 
     draw_image_view_info := image_view_create_info(draw_image.format, draw_image.vk_obj, .COLOR_BIT);
     vk_init_validate(vkCreateImageView(logical_device, *draw_image_view_info, null, *draw_image.image_view), "failed to create the view of the main image for drawing");
 
-    array_add(*game_deletion_queue, .{
-        proc_1arg=(_:*void){
-            vkDestroyImageView(logical_device, draw_image.image_view, null);
-            vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
-        }
-    });
+    deletion_queue_add(*game_deletion_queue, vkDestroyImageView(logical_device, draw_image.image_view, null));
+}
+
+
+create_pipelines :: () {
+    
 }
 
 create_graphics_pipeline :: () {
@@ -563,7 +567,7 @@ create_frame_data :: () {
     }
 }
 
-init_allocator :: () {
+create_allocator :: () {
     allocator_info := VmaAllocatorCreateInfo.{
         physicalDevice = physical_device.vk_obj,
         device = logical_device,
@@ -574,7 +578,36 @@ init_allocator :: () {
         vulkanApiVersion = VK_API_VERSION_1_3
     };
     vk_init_validate(vmaCreateAllocator(*allocator_info, *vk_allocator), "failed to create an instance of Vulkan Memory Allocator");
-    array_add(*game_deletion_queue, .{arg1=vk_allocator, proc_1arg=(allocator:*void){vmaDestroyAllocator(xx allocator);}});
+    deletion_queue_add(*game_deletion_queue, vmaDestroyAllocator(xx vk_allocator));
+}
+
+create_descriptors :: () {
+    // pool will hold 10 sets, each with 1 image
+    ratios := Descriptor_Pool_Size_Ratio.[.{.STORAGE_IMAGE, 1}];
+    init_pool(*game_descriptor_pool, 10, ratios);
+    deletion_queue_add(*game_deletion_queue,  vkDestroyDescriptorPool(logical_device, game_descriptor_pool, null));
+
+    bindings := VkDescriptorSetLayoutBinding.[
+        .{binding=0, descriptorCount=1, descriptorType=.STORAGE_IMAGE}
+    ];
+    draw_image_descriptor_layout = build_descriptor_set_layout(bindings, .COMPUTE_BIT);
+    draw_image_descriptors = allocate_descriptor_set(game_descriptor_pool, draw_image_descriptor_layout);
+
+    info := VkDescriptorImageInfo.{
+        imageLayout=.GENERAL,
+        imageView = draw_image.image_view
+    };
+
+    draw_image_write := VkWriteDescriptorSet.{
+        dstBinding = 0,
+        dstSet = draw_image_descriptors,
+        descriptorCount = 1,
+        descriptorType = .STORAGE_IMAGE,
+        pImageInfo = *info
+    };
+
+    vkUpdateDescriptorSets(logical_device, 1, *draw_image_write, 0, null);
+    deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null));
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -662,7 +695,7 @@ Vk_Validate_Severity :: enum {
     ASSERT;
 }
 
-vk_validate :: (result: $T, error_msg: string, severity := Vk_Validate_Severity.ASSERT, msg_args: ..Any, caller_loc := #caller_location) -> bool #expand 
+vk_validate :: (result: $T, error_msg: string, msg_args: ..Any, $severity := Vk_Validate_Severity.ASSERT, caller_loc := #caller_location) -> bool #expand 
 #modify { return T == bool || T == VkResult; } {
     error_code_str: string;
     #if T == VkResult {
@@ -672,11 +705,11 @@ vk_validate :: (result: $T, error_msg: string, severity := Vk_Validate_Severity.
         failure := !result;
     }
     if failure {
-        if severity == .WARNING_MESSAGE {
+        #if severity == .WARNING_MESSAGE {
             rm_warning(tprint("vulkan %:: %", error_code_str, error_msg), ..msg_args, true, caller_loc);
         } else {
             rm_error(tprint("vulkan %:: %", error_code_str, error_msg), ..msg_args, true, caller_loc);
-            if severity == .ASSERT {
+            #if severity == .ASSERT {
                 assert(false);
             }
         }
@@ -830,7 +863,7 @@ score_physical_device :: (device: VkPhysicalDevice) -> score: s32 {
 }
 
 get_swapchain_support_info :: (device: VkPhysicalDevice, info: *Swapchain_Support_Info, allocator: Allocator) -> bool {
-    if !vk_validate(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, *info.capabilities), "unable to get surface capabilities of a physical device", .WARNING_MESSAGE) {
+    if !vk_validate(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, *info.capabilities), "unable to get surface capabilities of a physical device", severity=.WARNING_MESSAGE) {
         return false;
     }
     {
@@ -1135,6 +1168,54 @@ Graphics_Image :: struct {
     format: VkFormat;
 }
 
+Deletion_Queue_Item :: struct {
+    arg1: *void;
+    arg2: *void;
+    union {
+        proc: ();
+        proc_1arg: (*void);
+        proc_2arg: (*void, *void);
+    }
+// #place proc_1arg;
+};
+
+
+Frame_Data :: struct {
+    command_pool: VkCommandPool;
+    command_buffer: VkCommandBuffer;
+    swapchain_semaphore: VkSemaphore;
+    render_semaphore: VkSemaphore;
+    fence: VkFence;
+    deletion_queue: [..]Deletion_Queue_Item;
+}
+
+Descriptor_Pool_Size_Ratio :: struct {
+    type: VkDescriptorType;
+    ratio: float32;
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// methods
+
+deletion_queue_add :: (deletion_queue: *[..]Deletion_Queue_Item, code: $Code, $args: ..Code) #expand {
+    #if args.count == 0 {
+        array_add(deletion_queue, .{ proc=(){ #insert code; }});
+    } else #if args.count == 1 {
+        #insert -> string {
+            argname := #run code_string(args[0]);
+            call_str := #run code_string(code);
+            return tprint("array_add(deletion_queue, .{arg1=`%, proc_1arg=(%: *void) { %; }});", argname, argname, call_str);
+        }
+    } else #if args.count == 2 {
+        #insert -> string {
+            argname1 := #run code_string(args[0]);
+            argname2 := #run code_string(args[1]);
+            call_str := #run code_string(code);
+            return tprint("array_add(deletion_queue, .{arg1=`%, arg2=`%, proc_2arg=(%: *void, %: *void) { %; }});", argname1, argname2, argname1, argname2, call_str);
+        }
+    }
+}
+
 reset :: (swapchain: *Swapchain, destroy_vk_obj := true) {
     if destroy_vk_obj {
         vkDestroySwapchainKHR(logical_device, swapchain.vk_obj, null);
@@ -1147,17 +1228,74 @@ reset :: (swapchain: *Swapchain, destroy_vk_obj := true) {
     swapchain.* = .{};
 }
 
-Frame_Data :: struct {
-    command_pool: VkCommandPool;
-    command_buffer: VkCommandBuffer;
-    swapchain_semaphore: VkSemaphore;
-    render_semaphore: VkSemaphore;
-    fence: VkFence;
-    deletion_queue: [..]Deletion_Queue_Item;
-}
-
 get_current_frame_data :: () -> *Frame_Data {
     return *command_frames[frame % command_frames.count.(u64)];
+}
+
+flush_deletion_queue :: (deletion_queue: [..]Deletion_Queue_Item, free_memory := false) {
+    for < deletion_queue {
+        if it.arg2 == null {
+            it.proc_1arg(it.arg1);
+        } else {
+            it.proc_2arg(it.arg1, it.arg2);
+        }
+    }
+    if free_memory {
+        array_reset(*deletion_queue);
+    } else {
+        array_reset_keeping_memory(*deletion_queue);
+    }
+}
+
+// this is inflexible and probably not great going forward due to forcing the stages to be uniform
+build_descriptor_set_layout :: (layout_builder: []VkDescriptorSetLayoutBinding, shader_stages: VkShaderStageFlags, p_next: *void = null, flags: VkDescriptorSetLayoutCreateFlags = 0) -> VkDescriptorSetLayout {
+    for *layout_builder {
+        it.stageFlags |= shader_stages;
+    }
+    info := VkDescriptorSetLayoutCreateInfo.{
+        pBindings = layout_builder.data,
+        bindingCount = xx layout_builder.count,
+        flags = flags,
+        pNext = p_next
+    };
+
+    set: VkDescriptorSetLayout;
+    vk_validate(vkCreateDescriptorSetLayout(logical_device, *info, null, *set), "failed to create a descriptor set layout");
+    return set;
+}
+
+// TODO: why is this the way it is
+init_pool :: (pool: *VkDescriptorPool, max_sets: u32, ratios: []Descriptor_Pool_Size_Ratio) {
+    sizes := temp_dynamic_array(VkDescriptorPoolSize, ratios.count);
+    descriptor_count : u32 = 0;
+    for ratios {
+        count := (it.ratio * max_sets).(u32);
+        descriptor_count += count;
+        array_add(*sizes, .{type=it.type, descriptorCount=count});
+    }
+    vk_validate(descriptor_count <= max_sets, "too many descriptor sets: % given a max set count of %", descriptor_count, max_sets);
+    info := VkDescriptorPoolCreateInfo.{
+        maxSets = max_sets,
+        poolSizeCount = xx sizes.count,
+        pPoolSizes = sizes.data
+    };
+    vk_validate(vkCreateDescriptorPool(logical_device, *info, null, pool), "failed creating descriptor pool");
+}
+
+// NOTE: resetting a pool is confirmed by gpu manufacterers to be a fast path to destroy descriptor sets.
+reset :: (pool: VkDescriptorPool) {
+    vk_validate(vkResetDescriptorPool(logical_device, pool, 0), "failed resetting descriptor pool");
+}
+
+allocate_descriptor_set :: (pool: VkDescriptorPool, layout: VkDescriptorSetLayout) -> VkDescriptorSet {
+    info := VkDescriptorSetAllocateInfo.{
+        descriptorPool = pool,
+        descriptorSetCount = 1,
+        pSetLayouts = *layout
+    };
+    descriptor_set: VkDescriptorSet;
+    vk_validate(vkAllocateDescriptorSets(logical_device, *info, *descriptor_set), "failed to allocate a descriptor set");
+    return descriptor_set;
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1180,36 +1318,20 @@ frame: u64;
 
 draw_image: Graphics_Image;
 draw_extent: VkExtent2D;
+draw_image_descriptors: VkDescriptorSet;
+draw_image_descriptor_layout: VkDescriptorSetLayout;
 
 vk_allocator: VmaAllocator;
 
-Deletion_Queue_Item :: struct {
-    arg1: *void;
-    arg2: *void;
-    proc_1arg: (*void);
-#place proc_1arg;
-    proc_2arg: (*void, *void);
-};
-
 game_deletion_queue: [..]Deletion_Queue_Item;
-
-flush_deletion_queue :: (deletion_queue: [..]Deletion_Queue_Item, free_memory := false) {
-    for < deletion_queue {
-        if it.arg2 == null {
-            it.proc_1arg(it.arg1);
-        } else {
-            it.proc_2arg(it.arg1, it.arg2);
-        }
-    }
-    if free_memory {
-        array_reset(*deletion_queue);
-    } else {
-        array_reset_keeping_memory(*deletion_queue);
-    }
-}
+game_descriptor_pool: VkDescriptorPool;
 
 // eh
 test_pipeline_layout: VkPipelineLayout;
+
+gradient_pipeline: VkPipeline;
+gradient_pipeline_layout: VkPipelineLayout;
+
 init_success := true;
 
 // jai will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
@@ -1236,36 +1358,6 @@ required_device_extensions := (*u8).[
     "VK_KHR_buffer_device_address",
 ];
 
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// test shader zone
-
 ONE_MILLISECOND_IN_NANSOSECONDS :: 1_000_000;
 ONE_SECOND_IN_NANOSECONDS :: 1_000_000_000;
 
-test_vertex_shader := #string HERE
-#version 450
-
-vec2 positions[3] = vec2[](
-    vec2(0.0, -0.5),
-    vec2(0.5, 0.5),
-    vec2(-0.5, 0.5)
-);
-
-void main() {
-    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-}
-HERE
-
-test_fragment_shader := #string HERE
-#version 450
-
-layout(location = 0) out vec4 outColor;
-
-void main() {
-    outColor = vec4(1.0, 0.0, 0.0, 1.0);
-}
-HERE
-
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

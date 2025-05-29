@@ -11,7 +11,6 @@ Window :: struct {
     scope_deinitialize :: () {}
 }
 
-window_resizing: bool;
 
 update_window_events :: (delta_time: float) {
     Input.update_window_events();
@@ -23,16 +22,13 @@ update_window_events :: (delta_time: float) {
                 if it.key_code == .ESCAPE then quit = true;
             }
         }
-
     }
 
-    window_resizing = false;
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.
     for record: resizes {
         if record.window == window {
             window_width = record.width;
             window_height = record.height;
-            window_resizing = true;
         }
     }
 }
