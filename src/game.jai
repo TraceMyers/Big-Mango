@@ -4,6 +4,7 @@
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
 main :: () {
+    defer rm_log("good exit");
     setup_success := true;
     scope_system_setup(Window, *setup_success);
     scope_system_setup(Vulkan, *setup_success);
@@ -24,13 +25,6 @@ main :: () {
     }
 }
 
-Window :: struct {
-    scope_initialize :: () -> bool {
-        window = create_window(256, 256, "a butt");
-        return window != null;
-    }
-    scope_deinitialize :: () {}
-}
 
 window: Window_Type;
 delta_time := 0.01;
@@ -40,9 +34,11 @@ quit := false;
 #import "Basic";
 #import "String";
 #import "Red_Mango_Core";
+#import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=true, USE_LOCAL_VULKAN_DYNAMIC_LIB=false);
 #import "Window_Creation";
 #import "Math";
 #import "File";
+#import "Thread";
 Input :: #import "Input";
 
 #if OS == .WINDOWS {

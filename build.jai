@@ -1,6 +1,5 @@
 
-// TODO: this build script depends on git, which is silly
-compile_shaders := true;
+compile_shaders := false;
 
 #run {
     if compile_shaders {
@@ -16,10 +15,10 @@ compile_shaders := true;
         scope_set_working_directory("modules");
         run_command("git", "clone", "https://github.com/TraceMyers/Red_Mango_Core");
     }
-    clone_vulkan := !is_directory("modules/vulkan-jai");
+    clone_vulkan := !is_directory("modules/Vulkan_With_VMA");
     if clone_vulkan {
         scope_set_working_directory("modules");
-        run_command("git", "clone", "https://github.com/rytc/vulkan-jai");
+        run_command("git", "clone", "https://github.com/TraceMyers/Vulkan_With_VMA");
     }
 
     set_build_options_dc(.{do_output=false});
@@ -28,9 +27,12 @@ compile_shaders := true;
 
     // react to arguments
     args : []string = build_options.compile_time_command_line;
+    updating := false;
     for args {
-        if it == "update-red-mango-core" {
-            if !update_red_mango_core() {
+        if it == "update" {
+            updating = true;
+        } else if updating {
+            if !update_module(it) {
                 return;
             }
         }
@@ -39,21 +41,30 @@ compile_shaders := true;
     build_options.output_type = .EXECUTABLE;
     build_options.output_executable_name = "game";
     build_options.output_path = "bin";
+
+    linker_args: [..]string;
+    for build_options.additional_linker_arguments {
+        array_add(*linker_args, it);
+    }
+    // vulkan memory allocator depends on this
+    array_add(*linker_args, "libcpmt.lib");
+    build_options.additional_linker_arguments = linker_args;
+
     set_build_options(build_options, w);
     // build
     add_build_file("src/game.jai", w);
 }
 
 // pull this repository when the argument to do so is passed.
-update_red_mango_core :: () -> bool {
-    log("\nupdating red mango core\n ");
-    if !is_directory("modules/Red_Mango_Core") {
-        log("failed to update because ($project dir)/modules/Red_Mango_Core does not exist");
+update_module :: (module_name: string) -> bool {
+    log("\nupdating %\n ", module_name);
+    module_dir := tprint("modules/%", module_name);
+    if !is_directory(module_dir) {
+        log("failed to update because ($project dir)/% does not exist", module_dir);
         return false;
     }
-    scope_set_working_directory("modules/Red_Mango_Core");
-    run_command("git", "fetch", "--all");
-    run_command("git", "reset", "--hard", "origin/master");
+    scope_set_working_directory(module_dir);
+    run_command("git", "pull");
     log("   ");
     return true;
 }

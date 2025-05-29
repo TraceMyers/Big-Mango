@@ -1,4 +1,3 @@
-
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // config
 
@@ -22,20 +21,22 @@ ENABLE_VALIDATION_LAYERS :: true;
 // TODO: if graphics and present end up with different queues, validation complains about things I don't understand / haven't looked into
 // TODO: I have a VkQueueWaitIdle in the part where we get the next swapchain image. It's there to prevent a situation where the signal semaphore is still signaled...? I suppose meaning that post-present, the semaphore resets. apparently VK_EXT_swapchain_maintenance1 provides a solution for this issue. or, maybe just having one set of sync primitives per image would do it. I'm not really sure. I need to take an hour or two to understand what's going on.
 // TODO: to fix the above thing, I can probably just reference the main vulkan tutorial
-// TODO: do  I have to recreate the views whe I remake a swapchain?
+// TODO: do I have to recreate the views whe I remake a swapchain?
 // TODO: mark the swapchain dirty when its dimensions don't match window dimensions
 // TODO: need non-vsync present mode. otherwise, I can't see performance problems coming from afar.
 
 Vulkan :: struct {
     scope_initialize :: () -> bool {
+        pre_init();
         if init_success then create_vk_instance();
         if init_success then create_surface();
         if init_success then select_physical_device();
         if init_success then create_logical_device();
+        if init_success then init_allocator();
         if init_success then create_swapchain();
-        if init_success then create_image_views();
+        if init_success then create_draw_image();
         // if init_success then create_graphics_pipeline();
-        if init_success then init_commands();
+        if init_success then create_frame_data();
         if init_success {
             rm_log("vulkan init success");
         }
@@ -50,8 +51,11 @@ Vulkan :: struct {
             vkDestroyFence(logical_device, it.fence, null);
             vkDestroySemaphore(logical_device, it.render_semaphore, null);
             vkDestroySemaphore(logical_device, it.swapchain_semaphore, null);
+            flush_deletion_queue(it.deletion_queue, true);
         }
         array_reset(*command_frames);
+
+        flush_deletion_queue(game_deletion_queue, true);
 
         vkDestroyPipelineLayout(logical_device, test_pipeline_layout, null);
         test_pipeline_layout = null;
@@ -79,16 +83,22 @@ vk_render_frame :: () {
     if should_rebuild_swapchain() {
         vkQueueWaitIdle(graphics_queue);
         create_swapchain();
-        create_image_views();
     }
 
     current_frame := get_current_frame_data();
     image_index := wait_for_next_swapchain_image(current_frame);
+    flush_deletion_queue(current_frame.deletion_queue);
     render_target := swapchain.images[image_index];
+
     cmd := begin_command_buffer(current_frame);
-    transition_image(cmd, render_target, .UNDEFINED, .GENERAL);
-    clear_image(cmd, render_target);
-    transition_image(cmd, render_target, .GENERAL, .PRESENT_SRC_KHR);
+
+    transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
+    clear_image(cmd, draw_image.vk_obj);
+    transition_image(cmd, draw_image.vk_obj, .GENERAL, .TRANSFER_SRC_OPTIMAL);
+    transition_image(cmd, render_target, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
+    copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*draw_image.extent).(*VkExtent2D).*);
+    transition_image(cmd, render_target, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR);
+
     vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
 
     submit_command_info := command_buffer_submit_info(cmd);
@@ -148,48 +158,13 @@ transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLa
     vkCmdPipelineBarrier2(cmd, *dependency_info);
 }
 
-semaphore_submit_info :: inline (stage_mask: VkPipelineStageFlags2, semaphore: VkSemaphore) -> VkSemaphoreSubmitInfo {
-    return .{
-        semaphore = semaphore,
-        stageMask = stage_mask,
-        // deviceIndex = 0,
-        value = 1
-    };
-}
-
-command_buffer_submit_info :: inline (cmd: VkCommandBuffer) -> VkCommandBufferSubmitInfo {
-    return .{
-        commandBuffer = cmd,
-        // deviceMask = 0
-    };
-}
-
-roll_submit_info :: inline (cmd: *VkCommandBufferSubmitInfo, signal_semaphore_info: *VkSemaphoreSubmitInfo, wait_semaphore_info: *VkSemaphoreSubmitInfo) -> VkSubmitInfo2 {
-    return .{
-        waitSemaphoreInfoCount = ifx wait_semaphore_info == null then (0).(u32) else (1).(u32),
-        pWaitSemaphoreInfos = wait_semaphore_info,
-        signalSemaphoreInfoCount = ifx signal_semaphore_info == null then (0).(u32) else (1).(u32),
-        pSignalSemaphoreInfos = signal_semaphore_info,
-        commandBufferInfoCount = 1,
-        pCommandBufferInfos = cmd
-    };
-}
-
 clear_image :: (cmd: VkCommandBuffer, target: VkImage) {
-    // blue := respace(sin(seconds_since_init() / 2.0).(float32), .{-1, 1}, .{0, 1});
-    // red := 1.0 - blue;
-    // green := red * 0.5;
-    // clear_value := VkClearColorValue.{
-    //     _float32 = .[red, green, blue, 1]
-    // };
     clear_value := VkClearColorValue.{
-        _float32 = .[0, 0, 1, 1]
+        _float32 = .[1, 0, 0, 1]
     };
     clear_range := VkImageSubresourceRange.{
         aspectMask = .COLOR_BIT, 
-        baseMipLevel = 0,
         levelCount = VK_REMAINING_MIP_LEVELS,
-        baseArrayLayer = 0,
         layerCount = VK_REMAINING_ARRAY_LAYERS
     };
     vkCmdClearColorImage(cmd, target, .GENERAL, *clear_value, 1, *clear_range);
@@ -215,6 +190,10 @@ wait_for_next_swapchain_image :: (current_frame: *Frame_Data) -> u32 {
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // initialize
+
+pre_init :: () {
+    array_reserve(*game_deletion_queue, 2048);
+}
 
 create_vk_instance :: () {
     auto_release_temp();
@@ -296,8 +275,15 @@ create_logical_device :: () {
 
     enable_device_features: VkPhysicalDeviceFeatures;
 
+    // note this has extra features I have no idea what they do.
+    // the main feature is to be able to deal directly in GPU pointers
+    buffer_device_address_enable := VkPhysicalDeviceBufferDeviceAddressFeatures.{
+        bufferDeviceAddress = VK_TRUE
+    };
+    // enables syncing a fence on present
     maintenance1_enable := VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT.{
-        swapchainMaintenance1 = VK_TRUE
+        swapchainMaintenance1 = VK_TRUE,
+        pNext = *buffer_device_address_enable
     };
     sync_feature_enable := VkPhysicalDeviceSynchronization2Features.{
         synchronization2 = VK_TRUE,
@@ -376,10 +362,6 @@ create_swapchain :: () {
     if old_swapchain {
         vkDestroySwapchainKHR(logical_device, old_swapchain, null);
     }
-}
-
-create_image_views :: () {
-    auto_release_temp();
 
     swapchain.image_views = alloc_array(VkImageView, swapchain.images.count);
     for swapchain.images {
@@ -398,6 +380,46 @@ create_image_views :: () {
         };
         vk_init_validate(vkCreateImageView(logical_device, *create_info, null, *swapchain.image_views[it_index]), "unable to create an image view for a swapchain image");
     }
+}
+
+create_draw_image :: () {
+    auto_release_temp();
+    // TODO: maybe remove color attachment functionality from the swapchain
+    window_dims := get_window_dimensions();
+    draw_image.extent = VkExtent3D.{
+        xx window_dims.x,
+        xx window_dims.y,
+        (1).(u32)
+    };
+
+    draw_image.format = .R16G16B16A16_SFLOAT;
+    draw_image_usages: VkImageUsageFlags;
+    draw_image_usages |= .TRANSFER_SRC_BIT;
+    draw_image_usages |= .TRANSFER_DST_BIT;
+    draw_image_usages |= .STORAGE_BIT;
+    draw_image_usages |= .COLOR_ATTACHMENT_BIT;
+
+    draw_image_info := image_create_info(draw_image.format, draw_image_usages, draw_image.extent);
+
+    image_alloc_info := VmaAllocationCreateInfo.{
+        usage = .GPU_ONLY,
+        requiredFlags = .DEVICE_LOCAL_BIT
+    };
+
+    // TODO: maybe turn image creation into a function
+    // fail without helpful error msg when image extent is bad.
+    assert(draw_image.extent.width > 0 && draw_image.extent.height > 0);
+    vk_init_validate(vmaCreateImage(vk_allocator, *draw_image_info, *image_alloc_info, *draw_image.vk_obj, *draw_image.allocation, null), "failed to create the main image for drawing");
+
+    draw_image_view_info := image_view_create_info(draw_image.format, draw_image.vk_obj, .COLOR_BIT);
+    vk_init_validate(vkCreateImageView(logical_device, *draw_image_view_info, null, *draw_image.image_view), "failed to create the view of the main image for drawing");
+
+    array_add(*game_deletion_queue, .{
+        proc_1arg=(_:*void){
+            vkDestroyImageView(logical_device, draw_image.image_view, null);
+            vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
+        }
+    });
 }
 
 create_graphics_pipeline :: () {
@@ -510,7 +532,7 @@ create_graphics_pipeline :: () {
 
 }
 
-init_commands :: () {
+create_frame_data :: () {
     auto_release_temp();
 
     assert(command_frames.data == null);
@@ -537,8 +559,22 @@ init_commands :: () {
         vk_init_validate(vkCreateFence(logical_device, *fence_info, null, *command_frames[it].fence), "failed to create a render fence");
         vk_init_validate(vkCreateSemaphore(logical_device, *semaphore_info, null, *command_frames[it].render_semaphore), "failed to create a semaphore for syncing render to present");
         vk_init_validate(vkCreateSemaphore(logical_device, *semaphore_info, null, *command_frames[it].swapchain_semaphore), "failed to create a semaphore for syncing render commands to a swapchain image request");
+        array_reserve(*command_frames[it].deletion_queue, 2048);
     }
+}
 
+init_allocator :: () {
+    allocator_info := VmaAllocatorCreateInfo.{
+        physicalDevice = physical_device.vk_obj,
+        device = logical_device,
+        instance = vk_instance,
+        // BUFFER_DEVICE_ADDRESS enables the ability to use pointers to gpu data
+        // could, for example, pass those pointers into shaders
+        flags = .BUFFER_DEVICE_ADDRESS_BIT, 
+        vulkanApiVersion = VK_API_VERSION_1_3
+    };
+    vk_init_validate(vmaCreateAllocator(*allocator_info, *vk_allocator), "failed to create an instance of Vulkan Memory Allocator");
+    array_add(*game_deletion_queue, .{arg1=vk_allocator, proc_1arg=(allocator:*void){vmaDestroyAllocator(xx allocator);}});
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -564,6 +600,39 @@ create_shader_module :: (spirv: string) -> VkShaderModule {
         return null;
     }
     return module;
+}
+
+// TODO: could maybe use some more params? I guess that'll be obvious later
+// according to vkguide.dev, Blit is more flexible (images can have different extents), Copy is faster, and eventually you just want to write your own custom fragment shader so you can do extra things while copying.
+copy_image :: (cmd: VkCommandBuffer, dst: VkImage, src: VkImage, dst_dims: VkExtent2D, src_dims: VkExtent2D) {
+    blit_region := VkImageBlit2.{
+        srcOffsets = .[
+            .{}, 
+            .{xx src_dims.width, xx src_dims.height, 1}
+        ],
+        dstOffsets = .[
+            .{},
+            .{xx dst_dims.width, xx dst_dims.height, 1}
+        ],
+        srcSubresource = .{
+            aspectMask = .COLOR_BIT,
+            layerCount = 1
+        },
+        dstSubresource = .{
+            aspectMask = .COLOR_BIT,
+            layerCount = 1
+        }
+    };
+    blit_info := VkBlitImageInfo2.{
+        dstImage = dst,
+        dstImageLayout = .TRANSFER_DST_OPTIMAL,
+        srcImage = src,
+        srcImageLayout = .TRANSFER_SRC_OPTIMAL,
+        filter = .LINEAR,
+        regionCount = 1,
+        pRegions = *blit_region
+    };
+    vkCmdBlitImage2(cmd, *blit_info);
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -891,6 +960,10 @@ HERE,
     );
 }
 
+// generate_vk_obj_destroyer :: (gen_proc_name: string, gen_proc_args: string, vk_proc_name: string, vk_proc_args: []string) -> string {
+
+// }
+
 #insert #run generate_vk_array_getter(
     "get_available_layer_properties", 
     "",  
@@ -957,6 +1030,63 @@ HERE,
 );
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// info struct makers
+
+image_create_info :: inline (format: VkFormat, usage_flags: VkImageUsageFlags, extent: VkExtent3D, mip_levels : u32 = 1, msaa_samples: VkSampleCountFlags = ._1_BIT /*1 = no msaa*/, tiling_format := VkImageTiling.OPTIMAL) -> VkImageCreateInfo {
+    return VkImageCreateInfo.{
+        imageType = ._2D,
+        format = format,
+        extent = extent,
+        mipLevels = mip_levels,
+        arrayLayers = 1,
+        samples = msaa_samples,
+        tiling = tiling_format,
+        usage = usage_flags
+    };
+}
+
+image_view_create_info :: inline (format: VkFormat, image: VkImage, aspect_flags: VkImageAspectFlags, mip_levels: u32 = 1) -> VkImageViewCreateInfo {
+    return VkImageViewCreateInfo.{
+        viewType = ._2D,
+        image = image,
+        format = format,
+        subresourceRange = .{
+            levelCount = mip_levels,
+            layerCount = 1,
+            aspectMask = aspect_flags
+        }
+    };
+}
+
+semaphore_submit_info :: inline (stage_mask: VkPipelineStageFlags2, semaphore: VkSemaphore) -> VkSemaphoreSubmitInfo {
+    return .{
+        semaphore = semaphore,
+        stageMask = stage_mask,
+        // deviceIndex = 0,
+        value = 1
+    };
+}
+
+command_buffer_submit_info :: inline (cmd: VkCommandBuffer) -> VkCommandBufferSubmitInfo {
+    return .{
+        commandBuffer = cmd,
+        // deviceMask = 0
+    };
+}
+
+roll_submit_info :: inline (cmd: *VkCommandBufferSubmitInfo, signal_semaphore_info: *VkSemaphoreSubmitInfo, wait_semaphore_info: *VkSemaphoreSubmitInfo) -> VkSubmitInfo2 {
+    return .{
+        waitSemaphoreInfoCount = ifx wait_semaphore_info == null then (0).(u32) else (1).(u32),
+        pWaitSemaphoreInfos = wait_semaphore_info,
+        signalSemaphoreInfoCount = ifx signal_semaphore_info == null then (0).(u32) else (1).(u32),
+        pSignalSemaphoreInfos = signal_semaphore_info,
+        commandBufferInfoCount = 1,
+        pCommandBufferInfos = cmd
+    };
+}
+
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // types
 
 Queue_Family_Capability_Flags :: enum_flags {
@@ -997,6 +1127,14 @@ Swapchain :: struct {
     image_views: []VkImageView;
 }
 
+Graphics_Image :: struct {
+    vk_obj: VkImage;   
+    image_view: VkImageView;
+    allocation: VmaAllocation;
+    extent: VkExtent3D;
+    format: VkFormat;
+}
+
 reset :: (swapchain: *Swapchain, destroy_vk_obj := true) {
     if destroy_vk_obj {
         vkDestroySwapchainKHR(logical_device, swapchain.vk_obj, null);
@@ -1015,6 +1153,7 @@ Frame_Data :: struct {
     swapchain_semaphore: VkSemaphore;
     render_semaphore: VkSemaphore;
     fence: VkFence;
+    deletion_queue: [..]Deletion_Queue_Item;
 }
 
 get_current_frame_data :: () -> *Frame_Data {
@@ -1036,18 +1175,44 @@ graphics_queue: VkQueue;
 surface: VkSurfaceKHR;
 // a series of render targets and information about them. the images that will be drawn to and presented at the same time.
 swapchain: Swapchain;
-
 command_frames: []Frame_Data;
-
 frame: u64;
+
+draw_image: Graphics_Image;
+draw_extent: VkExtent2D;
+
+vk_allocator: VmaAllocator;
+
+Deletion_Queue_Item :: struct {
+    arg1: *void;
+    arg2: *void;
+    proc_1arg: (*void);
+#place proc_1arg;
+    proc_2arg: (*void, *void);
+};
+
+game_deletion_queue: [..]Deletion_Queue_Item;
+
+flush_deletion_queue :: (deletion_queue: [..]Deletion_Queue_Item, free_memory := false) {
+    for < deletion_queue {
+        if it.arg2 == null {
+            it.proc_1arg(it.arg1);
+        } else {
+            it.proc_2arg(it.arg1, it.arg2);
+        }
+    }
+    if free_memory {
+        array_reset(*deletion_queue);
+    } else {
+        array_reset_keeping_memory(*deletion_queue);
+    }
+}
 
 // eh
 test_pipeline_layout: VkPipelineLayout;
-
 init_success := true;
 
-// jai will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string
-// don't appear to be null-terminated, thus the (*u8).[] arrays
+// jai will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 
 #if ENABLE_VALIDATION_LAYERS {
     required_layers := (*u8).[
@@ -1067,9 +1232,10 @@ required_instance_extensions := (*u8).[
 required_device_extensions := (*u8).[
     "VK_KHR_swapchain",
     "VK_EXT_swapchain_maintenance1",
+    "VK_KHR_external_memory_win32", // TODO: ofc this is windows only...
+    "VK_KHR_buffer_device_address",
 ];
 
-#import "vulkan-jai";
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // test shader zone
@@ -1100,3 +1266,6 @@ void main() {
     outColor = vec4(1.0, 0.0, 0.0, 1.0);
 }
 HERE
+
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

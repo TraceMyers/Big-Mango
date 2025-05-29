@@ -1,4 +1,16 @@
 
+Window :: struct {
+    scope_initialize :: () -> bool {
+        window = create_window(256, 256, "a butt");
+        // get initial dimensions because we won't update this until the first resize
+        if window != null {
+            _, _, window_width=, window_height=, success := get_dimensions(window, true);
+            return true;
+        } else return false;
+    }
+    scope_deinitialize :: () {}
+}
+
 window_resizing: bool;
 
 update_window_events :: (delta_time: float) {
@@ -28,6 +40,7 @@ update_window_events :: (delta_time: float) {
 get_window_dimensions :: () -> Int_Vector2 {
     return .{window_width, window_height};
 }
+
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
