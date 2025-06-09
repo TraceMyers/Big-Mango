@@ -1,27 +1,31 @@
 
-Window :: struct {
-    scope_initialize :: () -> bool {
-        window = create_window(256, 256, "a butt");
+boot_input :: (stage: Boot_Stage) -> bool {
+    if stage == .STARTUP {
+        window = create_window(1024, 1024, "a butt");
         // get initial dimensions because we won't update this until the first resize
         if window != null {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
             return true;
-        } else return false;
+        } 
+        return false;
+    } else {
+        return true;
     }
-    scope_deinitialize :: () {}
 }
-
 
 update_window_events :: (delta_time: float) {
     Input.update_window_events();
 
     for Input.events_this_frame {
+        imgui_process_event(it);
         if it.type == .QUIT then quit = true;
+
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
             }
         }
+
     }
 
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.

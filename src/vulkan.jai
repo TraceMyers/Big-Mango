@@ -1,4 +1,4 @@
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // config
 
 ENABLE_VALIDATION_LAYERS :: true;
@@ -14,10 +14,11 @@ ENABLE_VALIDATION_LAYERS :: true;
 // - need one VkCommandPool and ! VkCommandBuffer to each thread, and commands can be recorded in parallel
 //      all buffers can then be submitted on one thread. (vkQueueSubmit is not thread safe0
 //      "big engines" have a thread just for submitting. I suppose that would be easy to do, so why not?
+// - a combined immage sampler is where the image and the sampler are.. combined. SAMPLED_IMAGE, I guess
+// you store once, and create multiple samplers.
 
 
 // TODO: custom validation layer callback
-// TODO: allocator
 // TODO: if graphics and present end up with different queues, validation complains about things I don't understand / haven't looked into
 // TODO: I have a VkQueueWaitIdle in the part where we get the next swapchain image. It's there to prevent a situation where the signal semaphore is still signaled...? I suppose meaning that post-present, the semaphore resets. apparently VK_EXT_swapchain_maintenance1 provides a solution for this issue. or, maybe just having one set of sync primitives per image would do it. I'm not really sure. I need to take an hour or two to understand what's going on.
 // TODO: to fix the above thing, I can probably just reference the main vulkan tutorial
@@ -25,27 +26,30 @@ ENABLE_VALIDATION_LAYERS :: true;
 // TODO: mark the swapchain dirty when its dimensions don't match window dimensions
 // TODO: need non-vsync present mode. otherwise, I can't see performance problems coming from afar.
 // TODO: it might be better to have one big descriptor pool
+// TODO: learn about gamma correction and why it's necessary to display the image as intended. put gamma into the post-processing shader rather than doing it in the exture sampler.
+// TODO: shader hash table
+// TODO: creating shader modules should use a bump allocator
 
-Vulkan :: struct {
-    scope_initialize :: () -> bool {
+boot_vulkan :: (stage: Boot_Stage) -> bool {
+    if stage == .STARTUP {
+        // ----------------------------------------------------------------------------------------------------- startup
         pre_init();
         if init_success then create_vk_instance();
         if init_success then create_surface();
         if init_success then select_physical_device();
         if init_success then create_logical_device();
+        if init_success then load_extra_procedures();
         if init_success then create_allocator();
         if init_success then create_swapchain();
         if init_success then create_draw_image();
-        if init_success then create_pipelines();
         if init_success then create_frame_data();
+        if init_success then create_experimental_data();
         if init_success then create_descriptors();
-        if init_success {
-            rm_log("vulkan init success");
-        }
+        if init_success then create_pipelines();
         return init_success;
-    }
-    scope_deinitialize :: () {
-        if !init_success then return;
+    } else {
+        // ---------------------------------------------------------------------------------------------------- shutdown
+        if !init_success then return false;
         vkDeviceWaitIdle(logical_device);
 
         for command_frames {
@@ -56,19 +60,36 @@ Vulkan :: struct {
             flush_deletion_queue(it.deletion_queue, true);
         }
         array_reset(*command_frames);
+        array_reset(*shader_hash_table);
+
+        if draw_image_descriptor_layout {
+            vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null);
+            draw_image_descriptor_layout = null;
+        }
+        if draw_image.vk_obj {
+            vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
+            draw_image.vk_obj = null;
+        }
+        if draw_image.image_view {
+            vkDestroyImageView(logical_device, draw_image.image_view, null);
+            draw_image.image_view = null;
+        }
+        reset(*swapchain);
 
         flush_deletion_queue(game_deletion_queue, true);
 
-        vkDestroyPipelineLayout(logical_device, test_pipeline_layout, null);
-        test_pipeline_layout = null;
-        reset(*swapchain);
         vkDestroyDevice(logical_device, null);
         logical_device = null;
         vkDestroySurfaceKHR(vk_instance, surface, null);
         surface = null;
         vkDestroyInstance(vk_instance, null);
         vk_instance = null;
+        return true;
     }
+}
+
+shutdown_vulkan :: () {
+
 }
 
 should_rebuild_swapchain :: () -> bool {
@@ -78,29 +99,86 @@ should_rebuild_swapchain :: () -> bool {
     } else return false;
 }
 
-vk_render_frame :: () {
+render_frame :: () {
+    if !init_success {
+        return;
+    }
     if quit {
         return;
     }
-    if should_rebuild_swapchain() {
-        vkQueueWaitIdle(graphics_queue);
-        create_swapchain();
-    }
 
     current_frame := get_current_frame_data();
-    image_index := wait_for_next_swapchain_image(current_frame);
+    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, ONE_SECOND_IN_NANOSECONDS), "failed to wait for the render fence");
+    vk_validate(vkResetFences(logical_device, 1, *current_frame.fence), "failed to reset the render fence");
+
+    if should_rebuild_swapchain() {
+        immediate_submit();
+        vkQueueWaitIdle(graphics_queue);
+        vkQueueWaitIdle(transfer_queue);
+        create_swapchain();
+        create_draw_image();
+        update_draw_image_descriptor_set();
+        if !vk_validate(init_success, "failed to recreate the swapchain.") {
+            quit = true;
+            return;
+        }
+    }
+
+    image_index := acquire_next_swapchain_image(current_frame);
     flush_deletion_queue(current_frame.deletion_queue);
     render_target := swapchain.images[image_index];
+    render_target_view := swapchain.image_views[image_index];
+
+    draw_extent.width = draw_image.extent.width;
+    draw_extent.height = draw_image.extent.height;
 
     cmd := begin_command_buffer(current_frame);
 
+    immediate_submit();
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // compute draw
+    // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
-    clear_image(cmd, draw_image.vk_obj);
-    transition_image(cmd, draw_image.vk_obj, .GENERAL, .TRANSFER_SRC_OPTIMAL);
+
+    // test_draw_textured_image(cmd, draw_image.vk_obj);
+    draw_sphere(cmd, draw_image.vk_obj);
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // graphics pipeline draw
+    // -----------------------------------------------------------------------------------------------------------------
+    transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
+    begin_rendering(cmd);
+
+    // draw_triangle(cmd, draw_image.vk_obj);
+    draw_mesh(cmd, draw_image.vk_obj);
+
+    vkCmdEndRendering(cmd);
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // copy graphics to swapchain
+    // -----------------------------------------------------------------------------------------------------------------
+    transition_image(cmd, draw_image.vk_obj, .COLOR_ATTACHMENT_OPTIMAL, .TRANSFER_SRC_OPTIMAL);
     transition_image(cmd, render_target, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
     copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*draw_image.extent).(*VkExtent2D).*);
 
-    transition_image(cmd, render_target, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR);
+    // -----------------------------------------------------------------------------------------------------------------
+    // imgui draws directly to the swapchain
+    // -----------------------------------------------------------------------------------------------------------------
+    transition_image(cmd, render_target, .TRANSFER_DST_OPTIMAL, .COLOR_ATTACHMENT_OPTIMAL);
+    vk_draw_imgui(cmd, render_target_view);
+    transition_image(cmd, render_target, .COLOR_ATTACHMENT_OPTIMAL, .PRESENT_SRC_KHR);
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // clear / prepare for immediated draws
+    // -----------------------------------------------------------------------------------------------------------------
+    transition_image(cmd, draw_image.vk_obj, .TRANSFER_SRC_OPTIMAL, .GENERAL);
+    clear_image(cmd, draw_image.vk_obj);
+    transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // submit and present
+    // -----------------------------------------------------------------------------------------------------------------
     vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
 
     submit_command_info := command_buffer_submit_info(cmd);
@@ -129,10 +207,56 @@ vk_render_frame :: () {
 }
 
 
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // tick:15
+
+begin_rendering :: (cmd: VkCommandBuffer) {
+    color_attachment := VkRenderingAttachmentInfo.{
+        // sType:              VkStructureType = .RENDERING_ATTACHMENT_INFO;
+        // pNext:              *void;
+        imageView = draw_image.image_view,
+        // imageView:          VkImageView;
+        imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        // resolveMode:        VkResolveModeFlagBits;
+        // resolveImageView:   VkImageView;
+        // resolveImageLayout: VkImageLayout;
+        loadOp = .LOAD,
+        storeOp = .STORE,
+        // clearValue:         VkClearValue;
+    };
+
+    rendering_info := VkRenderingInfo.{
+        // pNext:                *void;
+        // flags:                VkRenderingFlags;
+        renderArea = .{
+            .{0,0},
+            draw_extent,
+        },
+        layerCount = 1,
+        // viewMask:             u32;
+        colorAttachmentCount = 1,
+        pColorAttachments = *color_attachment,
+        // pDepthAttachment:     *VkRenderingAttachmentInfo;
+        // pStencilAttachment:   *VkRenderingAttachmentInfo;
+    };
+    viewport := VkViewport.{
+        x = 0,
+        y = 0,
+        width = xx draw_extent.width,
+        height = xx draw_extent.height,
+        minDepth = 0.0,
+        maxDepth = 1.0
+    };
+    scissor := VkRect2D.{
+        .{0,0},
+        draw_extent
+    };
+    vkCmdSetViewport(cmd, 0, 1, *viewport);
+    vkCmdSetScissor(cmd, 0, 1, *scissor);
+    vkCmdBeginRendering(cmd, *rendering_info);
+}
 
 transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLayout, new_layout: VkImageLayout) {
     image_barrier := VkImageMemoryBarrier2.{
@@ -161,33 +285,67 @@ transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLa
 }
 
 clear_image :: (cmd: VkCommandBuffer, target: VkImage) {
-    clear_value := VkClearColorValue.{
-        _float32 = .[1, 0, 0, 1]
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+    push_constants := Rect_Draw.{
+        clear_color,
+        .{0,0},
+        .{xx draw_extent.width, xx draw_extent.height},
     };
-    clear_range := VkImageSubresourceRange.{
-        aspectMask = .COLOR_BIT, 
-        levelCount = VK_REMAINING_MIP_LEVELS,
-        layerCount = VK_REMAINING_ARRAY_LAYERS
-    };
-    vkCmdClearColorImage(cmd, target, .GENERAL, *clear_value, 1, *clear_range);
+
+    vkCmdBindPipeline(cmd, .COMPUTE, rect_pipeline);
+    vkCmdBindDescriptorSets(cmd, .COMPUTE, rect_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
+    vkCmdPushConstants(cmd, rect_pipeline_layout, .COMPUTE_BIT, 0, size_of(Rect_Draw), *push_constants);
+    vkCmdDispatch(cmd, xx ceil(xx draw_extent.width / 32.0), xx ceil(xx draw_extent.height / 32.0), 1);
+}
+
+test_draw_textured_image :: (cmd: VkCommandBuffer, target: VkImage) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+    // push_constants := Vector2.[
+    //     .{0, 0},
+    //     .{1200, 675}
+    // ];
+    // vkCmdBindPipeline(cmd, .COMPUTE, tex_pipeline);
+    // descriptors := VkDescriptorSet.[
+    //     draw_image_descriptors,
+    //     test_tex_descriptors
+    // ];
+    // vkCmdBindDescriptorSets(cmd, .COMPUTE, tex_pipeline_layout, 0, xx descriptors.count, descriptors.data, 0, null);
+    // vkCmdPushConstants(cmd, tex_pipeline_layout, .COMPUTE_BIT, 0, size_of(Vector2) * 2, *push_constants);
+    // vkCmdDispatch(cmd, xx ceil(push_constants[1].x/32.0), xx ceil(push_constants[1].y/32.0), 1);
 }
 
 begin_command_buffer :: (frame: *Frame_Data) -> VkCommandBuffer {
     cmd := frame.command_buffer;
-    vk_validate(vkResetCommandBuffer(cmd, 0), "failed to reset the main command buffer");
-    command_buffer_begin := VkCommandBufferBeginInfo.{
-        flags = .ONE_TIME_SUBMIT_BIT
-    };
-    vk_validate(vkBeginCommandBuffer(cmd, *command_buffer_begin), "failed to begin the main command buffer");
+    begin_command_buffer(cmd);
     return cmd;
 }
 
-wait_for_next_swapchain_image :: (current_frame: *Frame_Data) -> u32 {
-    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, ONE_SECOND_IN_NANOSECONDS), "failed to wait for the render fence");
-    vk_validate(vkResetFences(logical_device, 1, *current_frame.fence), "failed to reset the render fence");
+begin_command_buffer :: (cmd: VkCommandBuffer) {
+    vk_validate(vkResetCommandBuffer(cmd, 0), "failed to reset the main command buffer");
+    command_buffer_begin := VkCommandBufferBeginInfo.{flags = .ONE_TIME_SUBMIT_BIT};
+    vk_validate(vkBeginCommandBuffer(cmd, *command_buffer_begin), "failed to begin the main command buffer");
+}
+
+acquire_next_swapchain_image :: (current_frame: *Frame_Data) -> u32 {
     image_index: u32;
     vk_validate(vkAcquireNextImageKHR(logical_device, swapchain.vk_obj, ONE_SECOND_IN_NANOSECONDS, current_frame.swapchain_semaphore, null, *image_index), "failed to wait to get an image from the swapchain");
     return image_index;
+}
+
+vk_draw_imgui :: (cmd: VkCommandBuffer, view: VkImageView) {
+    color_attachment := rendering_attachment_info(view, null, .COLOR_ATTACHMENT_OPTIMAL);
+    rendering_info := VkRenderingInfo.{
+        renderArea = .{
+            .{0,0},
+            draw_extent,
+        },
+        layerCount = 1,
+        colorAttachmentCount = 1,
+        pColorAttachments = *color_attachment,
+    };
+    vkCmdBeginRendering(cmd, *rendering_info);
+    ImGui.ImplVulkan_RenderDrawData(ImGui.GetDrawData(), cmd);
+    vkCmdEndRendering(cmd);
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -207,11 +365,11 @@ create_vk_instance :: () {
     vk_init_validate(no_validation || layers_supported, "the required validation layers are not supported");
 
     app_info := VkApplicationInfo .{
-        pApplicationName = "ImSimGame",
+        pApplicationName = "Big Mango",
         applicationVersion = VK_MAKE_VERSION(0,1,0),
         pEngineName = "Red_Mango",
         engineVersion = VK_MAKE_VERSION(0,1,0),
-        apiVersion = VK_API_VERSION_1_3
+        apiVersion = VK_API_VERSION
     };
     create_info := VkInstanceCreateInfo.{
         pApplicationInfo = *app_info,
@@ -223,10 +381,14 @@ create_vk_instance :: () {
     vk_init_validate(vkCreateInstance(*create_info, null, *vk_instance), "failed to create vulkan instance");
 }
 
+load_extra_procedures :: () {
+    // vkGetDeviceProcAddr(logical_device, "vkCmdPushConstants");
+}
+
 create_surface :: () {
     create_info := VkWin32SurfaceCreateInfoKHR.{
         hwnd = window,
-        hinstance = GetModuleHandleW(null)
+        hinstance = Win32.GetModuleHandleW(null)
     };
     vk_init_validate(vkCreateWin32SurfaceKHR(vk_instance, *create_info, null, *surface), "failed to create surface");
 }
@@ -277,10 +439,14 @@ create_logical_device :: () {
 
     enable_device_features: VkPhysicalDeviceFeatures;
 
+    dynamic_rendering_enable := VkPhysicalDeviceDynamicRenderingFeatures.{
+        dynamicRendering = VK_TRUE,
+    };
     // note this has extra features I have no idea what they do.
     // the main feature is to be able to deal directly in GPU pointers
     buffer_device_address_enable := VkPhysicalDeviceBufferDeviceAddressFeatures.{
-        bufferDeviceAddress = VK_TRUE
+        bufferDeviceAddress = VK_TRUE,
+        pNext = *dynamic_rendering_enable
     };
     // enables syncing a fence on present
     maintenance1_enable := VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT.{
@@ -307,6 +473,7 @@ create_logical_device :: () {
     vk_init_validate(result, "failed to create the logical device");
 
     vkGetDeviceQueue(logical_device, xx physical_device.graphics_index, 0, *graphics_queue);
+    vkGetDeviceQueue(logical_device, xx physical_device.transfer_index, 0, *transfer_queue);
 }
 
 create_swapchain :: () {
@@ -385,6 +552,13 @@ create_swapchain :: () {
 }
 
 create_draw_image :: () {
+    if draw_image.vk_obj {
+        vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
+    }
+    if draw_image.image_view {
+        vkDestroyImageView(logical_device, draw_image.image_view, null);
+    }
+
     auto_release_temp();
     // TODO: maybe remove color attachment functionality from the swapchain
     window_dims := get_window_dimensions();
@@ -413,28 +587,290 @@ create_draw_image :: () {
     assert(draw_image.extent.width > 0 && draw_image.extent.height > 0);
     vk_init_validate(vmaCreateImage(vk_allocator, *draw_image_info, *image_alloc_info, *draw_image.vk_obj, *draw_image.allocation, null), "failed to create the main image for drawing");
     
-    deletion_queue_add(*game_deletion_queue, vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation));
-
     draw_image_view_info := image_view_create_info(draw_image.format, draw_image.vk_obj, .COLOR_BIT);
     vk_init_validate(vkCreateImageView(logical_device, *draw_image_view_info, null, *draw_image.image_view), "failed to create the view of the main image for drawing");
-
-    deletion_queue_add(*game_deletion_queue, vkDestroyImageView(logical_device, draw_image.image_view, null));
 }
 
+copy_to_staging_buffer :: (memory: []u8) -> VkBuffer, VmaAllocation {
+    staging_buffer_alloc: VmaAllocation;
+    staging_buffer_alloc_info: VmaAllocationInfo;
+    staging_buffer_create_info := VmaAllocationCreateInfo.{
+        usage = .CPU_TO_GPU,
+        flags = .HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    };
+    buffer_create_info := VkBufferCreateInfo.{
+        usage = .TRANSFER_SRC_BIT,
+        size = xx memory.count
+    };
+
+    staging_buffer: VkBuffer;
+    vk_validate(vmaCreateBuffer(vk_allocator, *buffer_create_info, *staging_buffer_create_info, *staging_buffer, *staging_buffer_alloc, *staging_buffer_alloc_info), "failed to create a staging buffer for a texture");
+
+    buf_memory: *void;
+    vmaMapMemory(vk_allocator, staging_buffer_alloc, *buf_memory);
+    memcpy(buf_memory, memory.data, memory.count);
+    vmaUnmapMemory(vk_allocator, staging_buffer_alloc);
+    
+    return staging_buffer, staging_buffer_alloc;
+}
+
+immediate_submit_transfer_queue :: () {
+    cmd := transfer_command_buffer;
+    vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
+    cmd_submit_info := command_buffer_submit_info(cmd);
+    submit_info := roll_submit_info(*cmd_submit_info, null, null); 
+    vk_validate(vkQueueSubmit2(transfer_queue, 1, *submit_info, transfer_fence), "failed to submit transfer commands to the graphics queue");
+    vk_validate(vkWaitForFences(logical_device, 1, *transfer_fence, VK_TRUE, 99_999_999_999), "failed to wait for the transfer fence");
+    vk_validate(vkResetFences(logical_device, 1, *transfer_fence), "failed to reset the transfer fence");
+}
+
+immediate_submit_graphics_queue :: () {
+    cmd := immediate_command_buffer;
+    vk_validate(vkEndCommandBuffer(cmd), "failed to end the main command buffer");
+    cmd_submit_info := command_buffer_submit_info(cmd);
+    submit_info := roll_submit_info(*cmd_submit_info, null, null); 
+    vk_validate(vkQueueSubmit2(graphics_queue, 1, *submit_info, immediate_fence), "failed to submit transfer commands to the graphics queue");
+    vk_validate(vkWaitForFences(logical_device, 1, *immediate_fence, VK_TRUE, 99_999_999_999), "failed to wait for the transfer fence");
+    vk_validate(vkResetFences(logical_device, 1, *immediate_fence), "failed to reset the transfer fence");
+}
+
+copy_cpu_memory_to_texture :: (img: *Texture, memory: []u8) {
+    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(memory);
+    defer vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
+
+    cmd := transfer_command_buffer;
+    begin_command_buffer(cmd);
+
+    transition_image(cmd, img.vk_obj, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
+    copy_buffer_to_image(cmd, img.vk_obj, staging_buffer, .{img.extent.width, img.extent.height});
+    transition_image(cmd, img.vk_obj, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL);
+
+    immediate_submit_transfer_queue();
+}
+
+// TODO: figure out how to make this not just vertex input
+copy_cpu_memory_to_buffer :: (dst: VkBuffer, typed_memory: []$T, pipeline_stages: VkPipelineStageFlags) {
+    memory: []u8;
+    #if T == u8 {
+        memory = typed_memory;
+    } else {
+        memory.data = xx typed_memory.data;
+        memory.count = size_of(T) * typed_memory.count;
+    }
+
+    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(memory);
+    defer vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
+
+    cmd := transfer_command_buffer;
+    begin_command_buffer(cmd);
+
+    copy := VkBufferCopy.{0, 0, xx memory.count};
+    vkCmdCopyBuffer(cmd, staging_buffer, dst, 1, *copy);
+
+    transition_src_queue_index := VK_QUEUE_FAMILY_IGNORED;
+    transition_dst_queue_index := VK_QUEUE_FAMILY_IGNORED;
+    if physical_device.graphics_index != physical_device.transfer_index {
+        transition_src_queue_index = xx physical_device.transfer_index;
+        transition_dst_queue_index = xx physical_device.graphics_index;
+    }
+    buf_release_barrier := VkBufferMemoryBarrier.{
+        srcAccessMask = .TRANSFER_WRITE_BIT,
+        dstAccessMask = .NONE,
+        srcQueueFamilyIndex = transition_src_queue_index,
+        dstQueueFamilyIndex = transition_dst_queue_index,
+        buffer = dst,
+        size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, .TRANSFER_BIT, .BOTTOM_OF_PIPE_BIT, 0, 0, null, 1, *buf_release_barrier, 0, null);
+
+    immediate_submit_transfer_queue();
+
+    cmd2 := immediate_command_buffer;
+    begin_command_buffer(cmd2);
+
+    buf_acquire_barrier := VkBufferMemoryBarrier.{
+        srcAccessMask = .NONE,
+        dstAccessMask = .VERTEX_ATTRIBUTE_READ_BIT,
+        srcQueueFamilyIndex = transition_src_queue_index,
+        srcQueueFamilyIndex = transition_dst_queue_index,
+        buffer = dst,
+        size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd2, .TOP_OF_PIPE_BIT, .VERTEX_INPUT_BIT, 0, 0, null, 1, *buf_acquire_barrier, 0, null);
+
+    immediate_submit_graphics_queue();
+}
+
+create_experimental_data :: () {
+    {
+        img_path := "../content/experimental/pit_puppy.jpg";
+        width, height, channels: s32;
+        img_memory: []u8;
+        img_memory.data = stbi_load(img_path.data, *width, *height, *channels, 4);
+        img_memory.count = width * height * 4;
+        for 0..(width*height)-1 {
+            alpha_i := it * 4 + 3;
+            img_memory[alpha_i] = 255;
+        }
+        create_texture(*test_texture, width, height, *img_memory);
+
+        create_info := VkSamplerCreateInfo.{
+            minFilter = .LINEAR,
+            magFilter = .LINEAR,
+            mipmapMode = .NEAREST,
+            addressModeU = .REPEAT,
+            addressModeV = .REPEAT,
+            addressModeW = .REPEAT,
+        };
+        vk_init_validate(vkCreateSampler(logical_device, *create_info, null, *test_tex_sampler), "failed to create the test tex sampler");
+        deletion_queue_add(*game_deletion_queue, vkDestroySampler(logical_device, test_tex_sampler, null));
+    }
+    {
+        vertices := Mesh_Vertex.[
+            .{.{-0.5, -0.5, 0}, .{0,0}},
+            .{.{0.5, 0.5, 0}, .{1,1}},
+            .{.{-0.5, 0.5, 0}, .{0,1}},
+            .{.{0.5, -0.5, 0}, .{1,0}},
+            .{.{0.5, 0.5, 0}, .{1,1}},
+            .{.{-0.5, -0.5, 0}, .{0,0}},
+        ];
+        
+        create_info := VkBufferCreateInfo.{
+            size = xx (size_of(Mesh_Vertex) * vertices.count),
+            usage = .TRANSFER_DST_BIT | .VERTEX_BUFFER_BIT,
+            sharingMode = .EXCLUSIVE,
+            queueFamilyIndexCount = 1,
+            pQueueFamilyIndices = *physical_device.transfer_index
+        };
+        alloc_create_info := VmaAllocationCreateInfo.{
+            usage = .GPU_ONLY,
+            requiredFlags = .DEVICE_LOCAL_BIT,
+        };
+        alloc_info := VmaAllocationInfo.{};
+        vmaCreateBuffer(vk_allocator, *create_info, *alloc_create_info, *mesh_vertex_buffer, *mesh_vertex_buffer_allocation, *alloc_info);
+
+        deletion_queue_add(*game_deletion_queue, vmaDestroyBuffer(vk_allocator, mesh_vertex_buffer, mesh_vertex_buffer_allocation));
+
+        copy_cpu_memory_to_buffer(mesh_vertex_buffer, vertices, .VERTEX_INPUT_BIT);
+    }
+}
 
 create_pipelines :: () {
-    
+    create_rect_pipeline();
+    create_sphere_pipeline();
+    create_tex_pipeline();
+    create_graphics_pipeline();
+    if !init_success then return;
+}
+
+create_rect_pipeline :: () {
+    push_constant_description := VkPushConstantRange.{
+        stageFlags = .COMPUTE_BIT,
+        size = size_of(Rect_Draw),
+    };
+    compute_layout := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = 1,
+        pSetLayouts = *draw_image_descriptor_layout,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *push_constant_description
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *rect_pipeline_layout), "failed to create the bg rect pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, rect_pipeline_layout, null));
+
+    compute_draw_shader := load_shader("cmp_draw_rect.spv");
+
+    shader_stage_info := VkPipelineShaderStageCreateInfo.{
+        stage = .COMPUTE_BIT,
+        module = compute_draw_shader,
+        pName = "main"
+    };
+
+    compute_pipeline_info := VkComputePipelineCreateInfo.{
+        layout = rect_pipeline_layout,
+        stage = shader_stage_info
+    };
+
+    vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *rect_pipeline), "failed to create the bg draw pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, rect_pipeline, null));
+}
+
+create_sphere_pipeline :: () {
+    push_constant_description := VkPushConstantRange.{
+        stageFlags = .COMPUTE_BIT,
+        size = size_of(float) * 6,
+    };
+    compute_layout := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = 1,
+        pSetLayouts = *draw_image_descriptor_layout,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *push_constant_description
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *sphere_pipeline_layout), "failed to create the sphere rect pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, sphere_pipeline_layout, null));
+
+    compute_draw_shader := load_shader("compute_sphere.spv");
+
+    shader_stage_info := VkPipelineShaderStageCreateInfo.{
+        stage = .COMPUTE_BIT,
+        module = compute_draw_shader,
+        pName = "main"
+    };
+
+    compute_pipeline_info := VkComputePipelineCreateInfo.{
+        layout = sphere_pipeline_layout,
+        stage = shader_stage_info
+    };
+
+    vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *sphere_pipeline), "failed to create the sphere draw pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, sphere_pipeline, null));
+}
+
+create_tex_pipeline :: () {
+    push_constant_description := VkPushConstantRange.{
+        stageFlags = .COMPUTE_BIT,
+        size = size_of(Vector2) * 2,
+    };
+    layouts := VkDescriptorSetLayout.[
+        draw_image_descriptor_layout,
+        test_tex_descriptor_layout
+    ];
+    compute_layout := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = xx layouts.count,
+        pSetLayouts = layouts.data,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *push_constant_description
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *tex_pipeline_layout), "failed to create a pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, tex_pipeline_layout, null));
+
+    compute_draw_shader := create_shader_module_from_file("../shaders/cpt_draw_quad_textured.spv");
+    vk_init_validate(compute_draw_shader != null, "failed to create a shader");
+
+    shader_stage_info := VkPipelineShaderStageCreateInfo.{
+        stage = .COMPUTE_BIT,
+        module = compute_draw_shader,
+        pName = "main"
+    };
+
+    compute_pipeline_info := VkComputePipelineCreateInfo.{
+        layout = tex_pipeline_layout,
+        stage = shader_stage_info
+    };
+
+    vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *tex_pipeline), "failed to create the a pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, tex_pipeline, null));
+
+    vkDestroyShaderModule(logical_device, compute_draw_shader, null);
 }
 
 create_graphics_pipeline :: () {
     auto_release_temp();
 
-    test_frag := create_shader_module_from_file("shaders/frag.spv");
-    vk_init_validate(test_frag != null, "failed to create fragment shader module");
-    defer vkDestroyShaderModule(logical_device, test_frag, null);
-    test_vert := create_shader_module_from_file("shaders/vert.spv");
-    vk_init_validate(test_vert != null, "failed to create vertex shader module");
-    defer vkDestroyShaderModule(logical_device, test_vert, null);
+    test_frag := load_shader("mesh_frag.spv");
+    test_vert := load_shader("mesh_vert.spv");
 
     shader_stages := VkPipelineShaderStageCreateInfo.[
      .{
@@ -448,14 +884,16 @@ create_graphics_pipeline :: () {
         pName = "main"
     }];
 
+    vertex_bindings, vertex_attributes := vertex_descriptors(Mesh_Vertex);
+
     vertex_input_info := VkPipelineVertexInputStateCreateInfo.{
-        vertexBindingDescriptionCount = 0,
-        pVertexBindingDescriptions = null,
-        vertexAttributeDescriptionCount = 0,
-        pVertexAttributeDescriptions = null
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = *vertex_bindings,
+        vertexAttributeDescriptionCount = xx vertex_attributes.count,
+        pVertexAttributeDescriptions = vertex_attributes.data
     };
 
-    input_assemby_info := VkPipelineInputAssemblyStateCreateInfo.{
+    input_assembly_info := VkPipelineInputAssemblyStateCreateInfo.{
         topology = .TRIANGLE_LIST,
     };
 
@@ -468,16 +906,6 @@ create_graphics_pipeline :: () {
 
     scissor := VkRect2D.{
         extent = swapchain.extent
-    };
-
-    dynamic_states := VkDynamicState.[
-        .VIEWPORT,
-        .SCISSOR
-    ];
-
-    dynamic_state := VkPipelineDynamicStateCreateInfo.{
-        dynamicStateCount = xx dynamic_states.count,
-        pDynamicStates = dynamic_states.data
     };
 
     viewport_create_info := VkPipelineViewportStateCreateInfo.{
@@ -525,15 +953,74 @@ create_graphics_pipeline :: () {
         pAttachments = *color_blend_attachment
     };
 
-    pipeline_layout_info := VkPipelineLayoutCreateInfo.{
-        setLayoutCount = 0,
-        pSetLayouts = null,
-        pushConstantRangeCount = 0,
-        pPushConstantRanges = null
+    dynamic_states := VkDynamicState.[
+        .VIEWPORT,
+        .SCISSOR,
+        // .LINE_WIDTH,
+        // .DEPTH_BIAS,
+        // .BLEND_CONSTANTS,
+        // .DEPTH_BOUNDS,
+        // .STENCIL_COMPARE_MASK             :: 6;
+        // .STENCIL_WRITE_MASK               :: 7;
+        // .STENCIL_REFERENCE                :: 8;
+        // .VIEWPORT_W_SCALING_NV            :: 1000087000;
+        // .DISCARD_RECTANGLE_EXT            :: 1000099000;
+        // SAMPLE_LOCATIONS_EXT             :: 1000143000;
+    ];
+
+    dynamic_state := VkPipelineDynamicStateCreateInfo.{
+        dynamicStateCount = xx dynamic_states.count,
+        pDynamicStates = dynamic_states.data
     };
 
-    vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *test_pipeline_layout), "failed to create the graphics pipeline layout");
+    layouts := VkDescriptorSetLayout.[
+        mesh_descriptor_set_layout,
+    ];
 
+    projection_matrix_pc := VkPushConstantRange.{
+        stageFlags = .VERTEX_BIT,
+        offset = 0,
+        size = size_of(float32) * 16
+    };
+
+    pipeline_layout_info := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = xx layouts.count,
+        pSetLayouts = layouts.data,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *projection_matrix_pc
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *graphics_pipeline_layout), "failed to create the graphics pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, graphics_pipeline_layout, null));
+
+    color_attachment_format := VkFormat.R16G16B16A16_SFLOAT;
+    rendering_create_info := VkPipelineRenderingCreateInfo.{
+        colorAttachmentCount=1,
+        pColorAttachmentFormats = *color_attachment_format,
+    };
+
+    pipeline_create := VkGraphicsPipelineCreateInfo.{
+        pNext = *rendering_create_info,
+        stageCount = xx shader_stages.count,
+        pStages = shader_stages.data,
+        pVertexInputState = *vertex_input_info,
+        pInputAssemblyState = *input_assembly_info,
+        // pTessellationState:  *VkPipelineTessellationStateCreateInfo;
+        pViewportState = *viewport_create_info,
+        pRasterizationState = *rasterizer_create_info,
+        pMultisampleState = *multisample_create_info,
+        // pDepthStencilState:  *VkPipelineDepthStencilStateCreateInfo;
+        pColorBlendState = *color_blend_create,
+        pDynamicState = *dynamic_state,
+        layout = graphics_pipeline_layout,
+        // renderPass:          VkRenderPass;
+        // subpass:             u32;
+        // basePipelineHandle:  VkPipeline;
+        // basePipelineIndex:   s32;
+    };
+
+    vk_init_validate(vkCreateGraphicsPipelines(logical_device, VK_NULL_HANDLE, 1, *pipeline_create, null, *graphics_pipeline), "failed to create the the graphics pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, graphics_pipeline, null));
 }
 
 create_frame_data :: () {
@@ -565,6 +1052,42 @@ create_frame_data :: () {
         vk_init_validate(vkCreateSemaphore(logical_device, *semaphore_info, null, *command_frames[it].swapchain_semaphore), "failed to create a semaphore for syncing render commands to a swapchain image request");
         array_reserve(*command_frames[it].deletion_queue, 2048);
     }
+
+    fence_info.flags = 0;
+    {
+        vk_init_validate(vkCreateCommandPool(logical_device, *command_pool_info, null, *immediate_command_pool), "failed to create the immediate render command pool");
+
+        buffer_alloc_info := VkCommandBufferAllocateInfo.{
+            commandPool = immediate_command_pool,
+            commandBufferCount = 1,
+            level = .PRIMARY
+        };
+        vk_init_validate(vkAllocateCommandBuffers(logical_device, *buffer_alloc_info, *immediate_command_buffer), "unable to allocate the immediate render command buffer");
+        deletion_queue_add(*game_deletion_queue, vkDestroyCommandPool(logical_device, immediate_command_pool, null));
+
+        vk_init_validate(vkCreateFence(logical_device, *fence_info, null, *immediate_fence), "failed to create the immediate render fence");
+        deletion_queue_add(*game_deletion_queue, vkDestroyFence(logical_device, immediate_fence, null));
+
+        begin_command_buffer(immediate_command_buffer);
+    }
+    {
+        pool_info := VkCommandPoolCreateInfo.{
+            flags = .RESET_COMMAND_BUFFER_BIT,
+            queueFamilyIndex = xx physical_device.transfer_index
+        };
+        vk_init_validate(vkCreateCommandPool(logical_device, *pool_info, null, *transfer_command_pool), "failed to create the transfer command pool");
+
+        buffer_alloc_info := VkCommandBufferAllocateInfo.{
+            commandPool = transfer_command_pool,
+            commandBufferCount = 1,
+            level = .PRIMARY
+        };
+        vk_init_validate(vkAllocateCommandBuffers(logical_device, *buffer_alloc_info, *transfer_command_buffer), "failed to create the transfer command pool");
+        deletion_queue_add(*game_deletion_queue, vkDestroyCommandPool(logical_device, transfer_command_pool, null));
+
+        vk_init_validate(vkCreateFence(logical_device, *fence_info, null, *transfer_fence), "failed to creat ethe transfer fence");
+        deletion_queue_add(*game_deletion_queue, vkDestroyFence(logical_device, transfer_fence, null));
+    }
 }
 
 create_allocator :: () {
@@ -575,7 +1098,7 @@ create_allocator :: () {
         // BUFFER_DEVICE_ADDRESS enables the ability to use pointers to gpu data
         // could, for example, pass those pointers into shaders
         flags = .BUFFER_DEVICE_ADDRESS_BIT, 
-        vulkanApiVersion = VK_API_VERSION_1_3
+        vulkanApiVersion = VK_API_VERSION
     };
     vk_init_validate(vmaCreateAllocator(*allocator_info, *vk_allocator), "failed to create an instance of Vulkan Memory Allocator");
     deletion_queue_add(*game_deletion_queue, vmaDestroyAllocator(xx vk_allocator));
@@ -583,9 +1106,11 @@ create_allocator :: () {
 
 create_descriptors :: () {
     // pool will hold 10 sets, each with 1 image
-    ratios := Descriptor_Pool_Size_Ratio.[.{.STORAGE_IMAGE, 1}];
+    ratios := Descriptor_Pool_Size_Ratio.[.{.STORAGE_IMAGE, 0.2}, .{.COMBINED_IMAGE_SAMPLER, 0.5}, .{.UNIFORM_BUFFER, 0.3}];
     init_pool(*game_descriptor_pool, 10, ratios);
     deletion_queue_add(*game_deletion_queue,  vkDestroyDescriptorPool(logical_device, game_descriptor_pool, null));
+
+    // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     bindings := VkDescriptorSetLayoutBinding.[
         .{binding=0, descriptorCount=1, descriptorType=.STORAGE_IMAGE}
@@ -593,11 +1118,53 @@ create_descriptors :: () {
     draw_image_descriptor_layout = build_descriptor_set_layout(bindings, .COMPUTE_BIT);
     draw_image_descriptors = allocate_descriptor_set(game_descriptor_pool, draw_image_descriptor_layout);
 
+    update_draw_image_descriptor_set();
+
+    // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    bindings_2 := VkDescriptorSetLayoutBinding.[
+        .{binding=0, descriptorCount=1, descriptorType=.COMBINED_IMAGE_SAMPLER}
+    ];
+    test_tex_descriptor_layout = build_descriptor_set_layout(bindings_2, .COMPUTE_BIT);
+    test_tex_descriptors = allocate_descriptor_set(game_descriptor_pool, test_tex_descriptor_layout);
+
+    deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorSetLayout(logical_device, test_tex_descriptor_layout, null));
+
+    info := VkDescriptorImageInfo.{
+        sampler = test_tex_sampler,
+        imageLayout=.SHADER_READ_ONLY_OPTIMAL,
+        imageView=test_texture.image_view
+    };
+    write := VkWriteDescriptorSet.{
+        dstSet = test_tex_descriptors,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = *info
+    };
+    vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+
+    // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    ubo_layout_bindings := VkDescriptorSetLayoutBinding.[
+        // .{binding=0, descriptorType = .UNIFORM_BUFFER, descriptorCount = 1, stageFlags = .VERTEX_BIT},
+        .{binding=0, descriptorCount=1, descriptorType=.COMBINED_IMAGE_SAMPLER, stageFlags = .FRAGMENT_BIT}
+    ];
+    mesh_descriptor_set_layout = build_descriptor_set_layout(ubo_layout_bindings, 0);
+
+    deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorSetLayout(logical_device, mesh_descriptor_set_layout, null));
+
+    mesh_descriptors = allocate_descriptor_set(game_descriptor_pool, mesh_descriptor_set_layout);
+
+    write.dstSet = mesh_descriptors;
+
+    vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+}
+
+update_draw_image_descriptor_set :: () {
     info := VkDescriptorImageInfo.{
         imageLayout=.GENERAL,
         imageView = draw_image.image_view
     };
-
     draw_image_write := VkWriteDescriptorSet.{
         dstBinding = 0,
         dstSet = draw_image_descriptors,
@@ -605,20 +1172,36 @@ create_descriptors :: () {
         descriptorType = .STORAGE_IMAGE,
         pImageInfo = *info
     };
-
     vkUpdateDescriptorSets(logical_device, 1, *draw_image_write, 0, null);
-    deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null));
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // runtime
+
+load_shader :: (filename: string, add_to_deletion_queue := true) -> VkShaderModule {
+    hash := native_XXH64(filename.data, xx filename.count, 0);
+    for shader_hash_table {
+        if it.hash == hash {
+            return it.shader;
+        }
+    }
+    file_path := tprint("../shaders/%", filename);
+    shader := create_shader_module_from_file(file_path);
+    vk_validate(shader != null, "failed to load shader %", filename);
+    array_add(*shader_hash_table, .{hash, shader});
+    if add_to_deletion_queue {
+        deletion_queue_add(*game_deletion_queue, vkDestroyShaderModule(logical_device, shader, null), shader);
+    }
+    return shader;
+}
 
 create_shader_module_from_file :: (filename: string) -> VkShaderModule {
     auto_release_temp();
     file_data: string;
     {
         scope_set_allocator(temp);
-        file_data = read_entire_file(filename, true);
+        file_data=, success := read_entire_file(filename, true);
+        vk_validate(success, "failed to load shader binary for %", filename);
     }
     return create_shader_module(file_data);
 }
@@ -668,12 +1251,23 @@ copy_image :: (cmd: VkCommandBuffer, dst: VkImage, src: VkImage, dst_dims: VkExt
     vkCmdBlitImage2(cmd, *blit_info);
 }
 
+copy_buffer_to_image :: (cmd: VkCommandBuffer, dst: VkImage, src: VkBuffer, dst_dims: VkExtent2D) {
+    copy_region := VkBufferImageCopy.{
+        imageSubresource = .{
+            aspectMask = .COLOR_BIT,
+            layerCount = 1,
+        },
+        imageExtent = .{dst_dims.width, dst_dims.height, 1}
+    };
+    vkCmdCopyBufferToImage(cmd, src, dst, .TRANSFER_DST_OPTIMAL, 1, *copy_region);
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // init helpers
 
 // TODO: < 0 error values are total failure, > 0 mean something else. account for this.
 
-vk_init_validate :: (result: $T, error_msg: string, msg_args: ..Any, caller_loc := #caller_location) -> bool #expand 
+vk_init_validate :: (result: $T, error_msg: string, msg_args: ..Any, caller_loc := #caller_location) #expand 
 #modify { return T == bool || T == VkResult; } {
     error_code_str: string;
     #if T == VkResult {
@@ -685,7 +1279,6 @@ vk_init_validate :: (result: $T, error_msg: string, msg_args: ..Any, caller_loc 
     if failure {
         rm_error(tprint("vulkan init %:: %", error_code_str, error_msg), ..msg_args, true, caller_loc);
         init_success = false;
-        `return;
     }
 }
 
@@ -756,7 +1349,7 @@ get_unique_queue_family_indices :: () -> []u32 {
         if (already_made_queue & flag) != 0 {
             continue;
         }
-        bound_array_add(*unique_indices, xx it);
+        bound_array_add(*unique_indices, xx queue_family_indices[it]);
         already_made_queue |= flag;
     }
     return unique_indices.array;
@@ -917,8 +1510,8 @@ set_physical_device_queue_family_capabilities :: (device: *Physical_Device) -> b
     return true;
 }
 
-queue_family_index_array :: inline (physical_device: *Physical_Device) -> []s32 {
-    arr: []s32 = ---;
+queue_family_index_array :: inline (physical_device: *Physical_Device) -> []u32 {
+    arr: []u32 = ---;
     arr.count = 4;
     arr.data = *physical_device.present_index;
     return arr;
@@ -926,7 +1519,7 @@ queue_family_index_array :: inline (physical_device: *Physical_Device) -> []s32 
 
 choose_swapchain_surface_format :: (info: *Swapchain_Support_Info) -> VkSurfaceFormatKHR {
     for info.formats {
-        if it.format == .R8G8B8A8_SRGB && it.colorSpace == .COLOR_SPACE_SRGB_NONLINEAR_KHR {
+        if it.format == .R8G8B8A8_UNORM && it.colorSpace == .COLOR_SPACE_SRGB_NONLINEAR_KHR {
             return it;
         }
     }
@@ -934,6 +1527,7 @@ choose_swapchain_surface_format :: (info: *Swapchain_Support_Info) -> VkSurfaceF
 }
 
 choose_swapchain_present_mode :: (info: *Swapchain_Support_Info) -> VkPresentModeKHR {
+    // return .MAILBOX_KHR;
     return .FIFO_KHR;
 }
 
@@ -944,6 +1538,16 @@ choose_swapchain_extent :: (using info: *Swapchain_Support_Info) -> VkExtent2D {
         clamp(window_dimensions.y.(u32), capabilities.minImageExtent.height, capabilities.maxImageExtent.height),
     };
     return extent;
+}
+
+rendering_attachment_info :: (view: VkImageView, clear_value: *VkClearValue, layout: VkImageLayout) -> VkRenderingAttachmentInfo {
+    return VkRenderingAttachmentInfo.{
+        imageView=view,
+        imageLayout=layout,
+        loadOp = ifx clear_value != null then .CLEAR else .LOAD,
+        storeOp = .STORE,
+        clearValue = ifx clear_value != null then clear_value.* else .{}
+    };
 }
 
 // there are lots of tedious repetitions of the same process where you want an array of data from vulkan,
@@ -1118,6 +1722,185 @@ roll_submit_info :: inline (cmd: *VkCommandBufferSubmitInfo, signal_semaphore_in
     };
 }
 
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// #scope_export // -------------------------------------------------------------------------------------------- { EXPORT }
+
+immediate_submit :: () {
+    cmd := immediate_command_buffer;
+    if immediate_command_count > 0 {
+        vk_validate(vkEndCommandBuffer(cmd), "Failed to end the immediate command buffer");
+        cmd_submit_info := command_buffer_submit_info(cmd);
+        submit_info := roll_submit_info(*cmd_submit_info, null, null); 
+        vk_validate(vkQueueSubmit2(graphics_queue, 1, *submit_info, immediate_fence), "failed to submit immediate render commands to the graphics queue");
+        vk_validate(vkWaitForFences(logical_device, 1, *immediate_fence, VK_TRUE, 99_999_999_999), "failed to wait for the immediate render fence");
+        vk_validate(vkResetFences(logical_device, 1, *immediate_fence), "failed to reset the immediate render fence");
+        begin_command_buffer(cmd);
+        immediate_command_count = 0;
+    }
+}
+
+immediate_quad :: (p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, color := Vector4.{1,1,1,1}, uv0 := Vector2.{0,0}, uv1 := Vector2.{1,0}, uv2 := Vector2.{1,1}, uv3 := Vector2.{0, 1}) {
+    if game_frame_count == 0 then return;
+    cmd := immediate_command_buffer;
+    if immediate_mode == {
+    case .TEXTURE;
+    case .COLOR;
+    case .TEXT;
+        assert(false, "can't do text yet");
+    }
+}
+
+// what I'm doing rn is more about learning than doing it the right way. I know that a much better way would
+// be to roll a bunch of vertices/colors into a buffer then do a batched draw. to do that via compute *would*
+// actually be a learning experience, but doing it via vertex/fragment wouldn't really. anyway, I'm just
+// letting this be the way it is for now.
+immediate_draw_rect :: (rect: Rect_Draw) {
+    if game_frame_count == 0 then return;
+    cmd := immediate_command_buffer;
+    vkCmdBindPipeline(cmd, .COMPUTE, rect_pipeline);
+    vkCmdBindDescriptorSets(cmd, .COMPUTE, rect_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
+    width := rect.lower_right.x - rect.upper_left.x;
+    dispatch_width := ceil(width / 32.0);
+    height := rect.lower_right.y - rect.upper_left.x;
+    dispatch_height := ceil(height / 32.0);
+    vkCmdPushConstants(cmd, rect_pipeline_layout, .COMPUTE_BIT, 0, size_of(Rect_Draw), *rect);
+    vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
+    immediate_command_count += 1;
+}
+
+// TODO: mipmaps
+// TDOO: explicit pixel layout? maybe only need r8 and r8g8b8a8
+create_texture :: (
+    img: *Texture, 
+    width: s32, 
+    height: s32, 
+    memory: *[]u8 = null, 
+    srgb := false, 
+    build_mipmaps := false, 
+    auto_destroy := true,
+    cpu_memory_usage := enum {FREE; STBI_FREE; STORE_ON_TEXTURE; DO_NOTHING;}.STBI_FREE
+) -> bool {
+    bytes_per_pixel := memory.count / (width * height);
+    assert(bytes_per_pixel == 1 || bytes_per_pixel == 4);
+    if bytes_per_pixel == 1 {
+        img.format = ifx srgb then .R8_SRGB else .R8_UNORM;
+    } else {
+        img.format = ifx srgb then .R8G8B8A8_SRGB else .R8G8B8A8_UNORM;
+    }
+    img.extent = VkExtent3D.{
+        xx width,
+        xx height,
+        (1).(u32)
+    };
+    create_info := image_create_info(img.format, .SAMPLED_BIT | .TRANSFER_DST_BIT, img.extent);
+    alloc_info := VmaAllocationCreateInfo.{
+        usage = .GPU_ONLY,
+        requiredFlags = .DEVICE_LOCAL_BIT
+    };
+    assert(img.extent.width > 0 && img.extent.height > 0);
+    vk_validate(vmaCreateImage(vk_allocator, *create_info, *alloc_info, *img.vk_obj, *img.allocation, null), "failed to create an image for getrect");
+
+    view_create_info := image_view_create_info(img.format, img.vk_obj, .COLOR_BIT);
+    vk_validate(vkCreateImageView(logical_device, *view_create_info, null, *img.image_view), "failed to create an image view for getrect");
+
+    if auto_destroy {
+        array_add(*game_deletion_queue, .{arg1=img, proc_1arg=(img: *void){ 
+            vkDestroyImageView(logical_device, img.(*Texture).image_view, null);
+            vmaDestroyImage(vk_allocator, img.(*Texture).vk_obj, img.(*Texture).allocation);
+        }});
+    }
+
+    if memory != null {
+        assert(memory.count > 0);
+        copy_cpu_memory_to_texture(img, memory.*);
+    }
+
+    if #complete cpu_memory_usage == {
+    case .FREE;
+        free(memory.data);
+        memory.count = 0;
+    case .STBI_FREE;
+        stbi_image_free(memory.data);
+        memory.count = 0;
+    case .STORE_ON_TEXTURE;
+        img.cpu_memory = memory.*;
+    case .DO_NOTHING;
+    }
+
+    return true;
+}
+
+// TODO: texture destruction
+// destroy_texture :: (tex: *Texture) {
+
+// }
+
+Rect_Draw :: struct {
+    color: Vector4;
+    upper_left: Vector2;
+    lower_right: Vector2;
+}
+
+Immediate_Mode :: enum u8 {
+    TEXTURE;
+    COLOR;
+    TEXT;
+}
+
+rect_draws: [..]Rect_Draw;
+immediate_mode: Immediate_Mode;
+immediate_texture: Texture;
+
+// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+
+draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .COMPUTE, sphere_pipeline);
+    vkCmdBindDescriptorSets(cmd, .COMPUTE, sphere_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
+    Sphere_Constants :: struct {
+        pos_x: float;
+        pos_y: float;
+        pos_z: float;
+        radius: float;
+        norm_t: float;
+        norm_rand: float;
+    };
+    rnd := clamp(random_get(), 0, U64_MAX-256).(float) / U64_MAX.(float);
+    sphere := Sphere_Constants.{300, 300, 0, 200, sin(seconds_since_init().(float)), rnd};
+    vkCmdPushConstants(cmd, sphere_pipeline_layout, .COMPUTE_BIT, 0, size_of(float) * 6, *sphere);
+    diameter := 2.0 * sphere.radius;
+    dispatch_extent := ceil(diameter / 32.0);
+    vkCmdDispatch(cmd, xx dispatch_extent, xx dispatch_extent, 1);
+}
+
+draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+}
+
+draw_mesh :: (cmd: VkCommandBuffer, targe: VkImage) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
+    offset : u64 = 0;
+    vkCmdBindDescriptorSets(cmd, .GRAPHICS, graphics_pipeline_layout, 0, 1, *mesh_descriptors, 0, null);
+    vkCmdBindVertexBuffers(cmd, 0, 1, *mesh_vertex_buffer, *offset);
+    t := seconds_since_init().(float32);
+    cos_t := cos(t);
+    sin_t := sin(t);
+    view_projection := float.[
+        cos_t, 0, sin_t, 0,
+        0, 1, 0, 0,
+        -sin_t, 0, cos_t, 0,
+        0, 0, 0, 1,
+    ];
+    vkCmdPushConstants(cmd, graphics_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, view_projection.data);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+}
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // types
@@ -1130,10 +1913,10 @@ Queue_Family_Capability_Flags :: enum_flags {
 }
 
 Queue_Family_Indices :: struct {
-    present_index: s32 = -1;
-    graphics_index: s32 = -1;
-    compute_index: s32 = -1;
-    transfer_index: s32 = -1;
+    present_index: u32 = U32_MAX;
+    graphics_index: u32 = U32_MAX;
+    compute_index: u32 = U32_MAX;
+    transfer_index: u32 = U32_MAX;
 }
 
 Physical_Device :: struct {
@@ -1160,13 +1943,18 @@ Swapchain :: struct {
     image_views: []VkImageView;
 }
 
-Graphics_Image :: struct {
+// #scope_export // -------------------------------------------------------------------------------------------- { EXPORT }
+
+Texture :: struct {
     vk_obj: VkImage;   
     image_view: VkImageView;
     allocation: VmaAllocation;
     extent: VkExtent3D;
     format: VkFormat;
+    cpu_memory: []u8;
 }
+
+// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 Deletion_Queue_Item :: struct {
     arg1: *void;
@@ -1194,8 +1982,122 @@ Descriptor_Pool_Size_Ratio :: struct {
     ratio: float32;
 }
 
+Graphics_Pipeline_Build_Info :: struct {
+    shader_stages: []VkPipelineShaderStageCreateInfo;
+    input_assembly: VkPipelineInputAssemblyStateCreateInfo;
+    rasterization: VkPipelineRasterizationStateCreateInfo;
+    color_blend_attachment: VkPipelineColorBlendAttachmentState;
+    multisampling: VkPipelineMultisampleStateCreateInfo;
+    pipeline_layout: VkPipelineLayout;
+    depth_stencil: VkPipelineDepthStencilStateCreateInfo;
+    render_info: VkPipelineRenderingCreateInfo;
+    color_attachment_format: VkFormat;
+}
+
+Shader_Hash_Item :: struct {
+    hash: u64;
+    shader: VkShaderModule;
+}
+
+Mesh_Vertex :: struct {
+    position: Vector3;
+    uv: Vector2;
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods
+
+// TODO: srgb?
+// TODO: more layouts?
+vertex_descriptors :: ($T: Type, binding_index: u32 = 0) -> VkVertexInputBindingDescription, []VkVertexInputAttributeDescription {
+    binding := VkVertexInputBindingDescription.{
+        stride = size_of(T),
+        inputRate = .VERTEX
+    };
+
+    attributes: [..]VkVertexInputAttributeDescription;
+    attributes.allocator = temp;
+
+    struct_info := cast(*Type_Info_Struct)T;
+    assert(struct_info.members.count > 0);
+    for *struct_info.members {
+        format := vk_format(it);
+        assert(format != .UNDEFINED);
+        array_add(*attributes, .{
+            location = xx it_index,
+            binding = binding_index,
+            format = format,
+            offset = xx it.offset_in_bytes
+        });
+    }
+    return binding, attributes;
+}
+
+// TODO: more formats, unorm/snorm
+vk_format :: (info: *Type_Info_Struct_Member, depth := 0) -> VkFormat {
+    assert(depth <= 1);
+    format: VkFormat;
+    if info.type.type == .FLOAT {
+        format = ifx info.type.runtime_size == 4 then .R32_SFLOAT else .R64_SFLOAT;
+    } else if info.type.type == .INTEGER {
+        member_int_info := cast(*Type_Info_Integer)info.type;
+        is_signed := member_int_info.signed;
+        if info.type.runtime_size == {
+        case 1;
+            format = ifx is_signed then .R8_SINT else .R8_UINT;
+        case 2;
+            format = ifx is_signed then .R16_SINT else .R16_UINT;
+        case 4;
+            format = ifx is_signed then .R32_SINT else .R32_UINT;
+        case 8;
+            format = ifx is_signed then .R64_SINT else .R64_UINT;
+        }
+    } else if info.type.type == .STRUCT {
+        assert(depth == 0);
+        member_struct_info := cast(*Type_Info_Struct)info.type;
+        assert(member_struct_info.members.count > 0);
+        if member_struct_info.members.count == 1 {
+            format = vk_format(info, depth + 1);
+        } else {
+            only_one_field_type := true;
+            repeating_field_format: VkFormat;
+            // look for placements
+            unique_offsets: [..]s64;
+            unique_offsets.allocator = temp;
+            for *member_struct_info.members {
+                find_success, _ := array_find(unique_offsets, it.offset_in_bytes);
+                if find_success {
+                    continue;
+                }
+                if it.flags & .CONSTANT {
+                    continue;
+                }
+                field_format := vk_format(it, depth + 1);
+                // only structs with repeating fields of same type are allowed
+                if repeating_field_format == .UNDEFINED {
+                    repeating_field_format = field_format;
+                } else if repeating_field_format != field_format {
+                    only_one_field_type = false;
+                    break;
+                }
+                array_add(*unique_offsets, it.offset_in_bytes);
+            }
+            if only_one_field_type && repeating_field_format == .R32_SFLOAT {
+                if unique_offsets.count == {
+                case 2;
+                    format = .R32G32_SFLOAT;
+                case 3;
+                    format = .R32G32B32_SFLOAT;
+                case 4;
+                    format = .R32G32B32A32_SFLOAT;
+                }
+            }
+        }
+    }
+    return format;
+}
+
+// default_graphics_pipeline_build_info :: ()
 
 deletion_queue_add :: (deletion_queue: *[..]Deletion_Queue_Item, code: $Code, $args: ..Code) #expand {
     #if args.count == 0 {
@@ -1234,7 +2136,9 @@ get_current_frame_data :: () -> *Frame_Data {
 
 flush_deletion_queue :: (deletion_queue: [..]Deletion_Queue_Item, free_memory := false) {
     for < deletion_queue {
-        if it.arg2 == null {
+        if it.arg1 == null {
+            it.proc();
+        } else if it.arg2 == null {
             it.proc_1arg(it.arg1);
         } else {
             it.proc_2arg(it.arg1, it.arg2);
@@ -1298,6 +2202,8 @@ allocate_descriptor_set :: (pool: VkDescriptorPool, layout: VkDescriptorSetLayou
     return descriptor_set;
 }
 
+// immediate_submit :: ()
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // static data
 
@@ -1309,6 +2215,7 @@ physical_device: Physical_Device;
 logical_device: VkDevice;
 // queue to which command buffers are passed. a command buffer is just a buffer... of gpu command(s) (and maybe also associated data?)
 graphics_queue: VkQueue;
+transfer_queue: VkQueue;
 // an abstraction of the drawing surface / window. unnecessary if not drawing to a window.
 surface: VkSurfaceKHR;
 // a series of render targets and information about them. the images that will be drawn to and presented at the same time.
@@ -1316,25 +2223,59 @@ swapchain: Swapchain;
 command_frames: []Frame_Data;
 frame: u64;
 
-draw_image: Graphics_Image;
+draw_image: Texture;
+
 draw_extent: VkExtent2D;
 draw_image_descriptors: VkDescriptorSet;
 draw_image_descriptor_layout: VkDescriptorSetLayout;
 
+test_tex_descriptors: VkDescriptorSet;
+test_tex_descriptor_layout: VkDescriptorSetLayout;
+test_tex_sampler: VkSampler;
+
+mesh_descriptors: VkDescriptorSet;
+mesh_descriptor_set_layout: VkDescriptorSetLayout;
+
 vk_allocator: VmaAllocator;
 
 game_deletion_queue: [..]Deletion_Queue_Item;
+
 game_descriptor_pool: VkDescriptorPool;
 
 // eh
-test_pipeline_layout: VkPipelineLayout;
+graphics_pipeline: VkPipeline;
+graphics_pipeline_layout: VkPipelineLayout;
 
-gradient_pipeline: VkPipeline;
-gradient_pipeline_layout: VkPipelineLayout;
+rect_pipeline: VkPipeline;
+rect_pipeline_layout: VkPipelineLayout;
+
+sphere_pipeline: VkPipeline;
+sphere_pipeline_layout: VkPipelineLayout;
+
+tex_pipeline: VkPipeline;
+tex_pipeline_layout: VkPipelineLayout;
+
+immediate_fence: VkFence;
+immediate_command_buffer: VkCommandBuffer;
+immediate_command_pool: VkCommandPool;
+immediate_command_count := 0;
+
+transfer_fence: VkFence;
+transfer_command_buffer: VkCommandBuffer;
+transfer_command_pool: VkCommandPool;
+
+shader_hash_table: [..]Shader_Hash_Item;
+
+mesh_vertex_buffer: VkBuffer;
+mesh_vertex_buffer_allocation: VmaAllocation;
+
+test_texture: Texture;
 
 init_success := true;
 
-// jai will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
+clear_color := Vector4.{0,0,0,1};
+
+// jai compiler will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 
 #if ENABLE_VALIDATION_LAYERS {
     required_layers := (*u8).[
@@ -1356,8 +2297,10 @@ required_device_extensions := (*u8).[
     "VK_EXT_swapchain_maintenance1",
     "VK_KHR_external_memory_win32", // TODO: ofc this is windows only...
     "VK_KHR_buffer_device_address",
+    "VK_KHR_dynamic_rendering",
 ];
 
 ONE_MILLISECOND_IN_NANSOSECONDS :: 1_000_000;
 ONE_SECOND_IN_NANOSECONDS :: 1_000_000_000;
-
+VK_API_VERSION :: VK_API_VERSION_1_3;
+VK_MSAA_SAMPLES :: VkSampleCountFlagBits._1_BIT;
