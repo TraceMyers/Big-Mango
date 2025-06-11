@@ -23,10 +23,42 @@ update_window_events :: (delta_time: float) {
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
+
             }
         }
-
     }
+
+    speed := 2.0;
+    dt_speed := speed * delta_time;
+    if Input.input_button_states[#char "W"] & .DOWN {
+        camera.position += cam_forward(*camera) * dt_speed;
+    } 
+    if Input.input_button_states[#char "S"] & .DOWN {
+        camera.position -= cam_forward(*camera) * dt_speed;
+    } 
+    if Input.input_button_states[#char "D"] & .DOWN {
+        camera.position += cam_right(*camera) * dt_speed;
+    } 
+    if Input.input_button_states[#char "A"] & .DOWN {
+        camera.position -= cam_right(*camera) * dt_speed;
+    } 
+    if Input.input_button_states[#char "Z"] & .DOWN {
+        camera.position += cam_up(*camera) * dt_speed;
+    }
+    if Input.input_button_states[#char "X"] & .DOWN {
+        camera.position -= cam_up(*camera) * dt_speed;
+    }
+
+    if abs(Input.mouse_delta_x) > 0 {
+        angle := -dt_speed * 0.4 * Input.mouse_delta_x.(float) * (180.0 / PI);
+        rotate_cam(*camera, .{0,0,1}, angle);
+    }
+    if abs(Input.mouse_delta_y) > 0 {
+        angle := -dt_speed * 0.4 * Input.mouse_delta_y.(float) * (180.0 / PI);
+        rotate_cam(*camera, cam_right_xy(*camera), angle);
+    }
+
+    // point_at(*camera, .{});
 
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.
     for record: resizes {

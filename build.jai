@@ -1,5 +1,5 @@
 
-compile_shaders := false;
+compile_shaders := true;
 
 #run {
     if compile_shaders {
@@ -50,7 +50,7 @@ compile_shaders := false;
     build_options.output_type = .EXECUTABLE;
     build_options.output_executable_name = "game";
     build_options.output_path = "bin";
-    build_options.backend = .X64;
+    // build_options.backend = .X64;
 
     linker_args: [..]string;
     for build_options.additional_linker_arguments {

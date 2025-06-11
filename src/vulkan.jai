@@ -42,6 +42,7 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if init_success then create_allocator();
         if init_success then create_swapchain();
         if init_success then create_draw_image();
+        if init_success then create_depth_image();
         if init_success then create_frame_data();
         if init_success then create_experimental_data();
         if init_success then create_descriptors();
@@ -74,6 +75,14 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
             vkDestroyImageView(logical_device, draw_image.image_view, null);
             draw_image.image_view = null;
         }
+        if depth_image.vk_obj {
+            vmaDestroyImage(vk_allocator, depth_image.vk_obj, depth_image.allocation);
+            depth_image.vk_obj = null;
+        }
+        if depth_image.image_view {
+            vkDestroyImageView(logical_device, depth_image.image_view, null);
+            depth_image.image_view = null;
+        }
         reset(*swapchain);
 
         flush_deletion_queue(game_deletion_queue, true);
@@ -86,10 +95,6 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         vk_instance = null;
         return true;
     }
-}
-
-shutdown_vulkan :: () {
-
 }
 
 should_rebuild_swapchain :: () -> bool {
@@ -117,6 +122,7 @@ render_frame :: () {
         vkQueueWaitIdle(transfer_queue);
         create_swapchain();
         create_draw_image();
+        create_depth_image();
         update_draw_image_descriptor_set();
         if !vk_validate(init_success, "failed to recreate the swapchain.") {
             quit = true;
@@ -132,9 +138,14 @@ render_frame :: () {
     draw_extent.width = draw_image.extent.width;
     draw_extent.height = draw_image.extent.height;
 
-    cmd := begin_command_buffer(current_frame);
+    viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
+    vp_mat := view_projection_matrix(*camera, viewport);
+
+    prepare_lights();
 
     immediate_submit();
+
+    cmd := begin_command_buffer(current_frame);
 
     // -----------------------------------------------------------------------------------------------------------------
     // compute draw
@@ -150,8 +161,21 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    // draw_triangle(cmd, draw_image.vk_obj);
-    draw_mesh(cmd, draw_image.vk_obj);
+    model := Matrix4_Identity;
+    test_mesh.albedo.constant = .{0.8, 0.3, 0.2, 1};
+    // draw_mesh(cmd, *test_mesh, *model, *vp_mat);
+
+    half_blue_theta := seconds_since_init().(float) * 0.5 * 2.0;
+    cos_bt := cos(half_blue_theta);
+    sin_bt := sin(half_blue_theta);
+    angle_axis := sin_bt * Vector3.{0,1,0};
+    blue_quat := normalize(Quaternion.{xyz=angle_axis, w=cos_bt});
+    blue_rot_mat := rotation_matrix(Matrix4, blue_quat);
+    model *= blue_rot_mat;
+
+    // blue_quat: Quaternion;
+
+    draw_mesh(cmd, *test_mesh, *model, *blue_quat, *vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -217,7 +241,6 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         // sType:              VkStructureType = .RENDERING_ATTACHMENT_INFO;
         // pNext:              *void;
         imageView = draw_image.image_view,
-        // imageView:          VkImageView;
         imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
         // resolveMode:        VkResolveModeFlagBits;
         // resolveImageView:   VkImageView;
@@ -225,6 +248,14 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         loadOp = .LOAD,
         storeOp = .STORE,
         // clearValue:         VkClearValue;
+    };
+
+    depth_attachment := VkRenderingAttachmentInfo.{
+        imageView = depth_image.image_view,
+        imageLayout = .DEPTH_ATTACHMENT_OPTIMAL,
+        loadOp = .CLEAR,
+        storeOp = .DONT_CARE,
+        clearValue.depthStencil = .{1.0, 0}
     };
 
     rendering_info := VkRenderingInfo.{
@@ -238,7 +269,7 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         // viewMask:             u32;
         colorAttachmentCount = 1,
         pColorAttachments = *color_attachment,
-        // pDepthAttachment:     *VkRenderingAttachmentInfo;
+        pDepthAttachment = *depth_attachment,
         // pStencilAttachment:   *VkRenderingAttachmentInfo;
     };
     viewport := VkViewport.{
@@ -560,7 +591,7 @@ create_draw_image :: () {
     }
 
     auto_release_temp();
-    // TODO: maybe remove color attachment functionality from the swapchain
+    
     window_dims := get_window_dimensions();
     draw_image.extent = VkExtent3D.{
         xx window_dims.x,
@@ -591,12 +622,51 @@ create_draw_image :: () {
     vk_init_validate(vkCreateImageView(logical_device, *draw_image_view_info, null, *draw_image.image_view), "failed to create the view of the main image for drawing");
 }
 
+create_depth_image :: () {
+    if depth_image.vk_obj {
+        vmaDestroyImage(vk_allocator, depth_image.vk_obj, depth_image.allocation);
+    }
+    if depth_image.image_view {
+        vkDestroyImageView(logical_device, depth_image.image_view, null);
+    }
+
+    auto_release_temp();
+
+    window_dims := get_window_dimensions();
+    depth_image.extent = VkExtent3D.{
+        xx window_dims.x,
+        xx window_dims.y,
+        (1).(u32)
+    };
+
+    depth_image.format = .D24_UNORM_S8_UINT;
+    depth_image_usages: VkImageUsageFlags;
+    depth_image_usages |= .DEPTH_STENCIL_ATTACHMENT_BIT;
+
+    image_alloc_info := VmaAllocationCreateInfo.{
+        usage = .GPU_ONLY,
+        requiredFlags = .DEVICE_LOCAL_BIT
+    };
+
+    assert(depth_image.extent.width > 0 && depth_image.extent.height > 0);
+
+    info := image_create_info(depth_image.format, depth_image_usages, depth_image.extent);
+
+    vk_init_validate(vmaCreateImage(vk_allocator, *info, *image_alloc_info, *depth_image.vk_obj, *depth_image.allocation, null), "failed to create the main image for drawing");
+    
+    view_info := image_view_create_info(depth_image.format, depth_image.vk_obj, .STENCIL_BIT);
+    vk_init_validate(vkCreateImageView(logical_device, *view_info, null, *depth_image.image_view), "failed to create the view of the main image for drawing");
+}
+
 copy_to_staging_buffer :: (memory: []u8) -> VkBuffer, VmaAllocation {
+    assert(memory.count > 0);
+
     staging_buffer_alloc: VmaAllocation;
-    staging_buffer_alloc_info: VmaAllocationInfo;
+    staging_buffer_alloc_info := VmaAllocationInfo.{};
     staging_buffer_create_info := VmaAllocationCreateInfo.{
         usage = .CPU_TO_GPU,
-        flags = .HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+        flags = .HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+        // usage=.AUTO
     };
     buffer_create_info := VkBufferCreateInfo.{
         usage = .TRANSFER_SRC_BIT,
@@ -604,7 +674,7 @@ copy_to_staging_buffer :: (memory: []u8) -> VkBuffer, VmaAllocation {
     };
 
     staging_buffer: VkBuffer;
-    vk_validate(vmaCreateBuffer(vk_allocator, *buffer_create_info, *staging_buffer_create_info, *staging_buffer, *staging_buffer_alloc, *staging_buffer_alloc_info), "failed to create a staging buffer for a texture");
+    vk_validate(vmaCreateBuffer(vk_allocator, *buffer_create_info, *staging_buffer_create_info, *staging_buffer, *staging_buffer_alloc, *staging_buffer_alloc_info), "failed to create a staging buffer");
 
     buf_memory: *void;
     vmaMapMemory(vk_allocator, staging_buffer_alloc, *buf_memory);
@@ -648,24 +718,49 @@ copy_cpu_memory_to_texture :: (img: *Texture, memory: []u8) {
     immediate_submit_transfer_queue();
 }
 
-// TODO: figure out how to make this not just vertex input
-copy_cpu_memory_to_buffer :: (dst: VkBuffer, typed_memory: []$T, pipeline_stages: VkPipelineStageFlags) {
-    memory: []u8;
-    #if T == u8 {
-        memory = typed_memory;
-    } else {
-        memory.data = xx typed_memory.data;
-        memory.count = size_of(T) * typed_memory.count;
-    }
+copy_cpu_memory_to_buffer :: (buffer: VkBuffer, memory: string) {
+    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(as_array(memory, u8));
+    defer vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
 
-    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(memory);
+    cmd := immediate_command_buffer;
+    begin_command_buffer(cmd);
+
+    copy := VkBufferCopy.{0, 0, xx memory.count};
+    vkCmdCopyBuffer(cmd, staging_buffer, buffer, 1, *copy);   
+
+    immediate_submit_graphics_queue();
+}
+
+create_graphics_buffer :: (buffer: *VkBuffer, allocation: *VmaAllocation, memory: string, usage: VkBufferUsageFlags, access: VkAccessFlags, stages: VkPipelineStageFlags) {
+    assert(buffer.* == null && allocation.* == null); 
+
+    create_info := VkBufferCreateInfo.{
+        size = xx memory.count,
+        usage = .TRANSFER_DST_BIT | usage,
+        sharingMode = .EXCLUSIVE,
+        queueFamilyIndexCount = 1,
+        pQueueFamilyIndices = *physical_device.transfer_index
+    };
+    alloc_create_info := VmaAllocationCreateInfo.{
+        usage = .GPU_ONLY,
+        requiredFlags = .DEVICE_LOCAL_BIT,
+    };
+    alloc_info := VmaAllocationInfo.{};
+    vmaCreateBuffer(vk_allocator, *create_info, *alloc_create_info, buffer, allocation, *alloc_info);
+
+    // metaprogramming quirk
+    _buffer := buffer.*;
+    _allocation := allocation.*;
+    deletion_queue_add(*game_deletion_queue, vmaDestroyBuffer(vk_allocator, _buffer, _allocation), _buffer, _allocation);
+
+    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(as_array(memory, u8));
     defer vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
 
     cmd := transfer_command_buffer;
     begin_command_buffer(cmd);
 
     copy := VkBufferCopy.{0, 0, xx memory.count};
-    vkCmdCopyBuffer(cmd, staging_buffer, dst, 1, *copy);
+    vkCmdCopyBuffer(cmd, staging_buffer, buffer.*, 1, *copy);   
 
     transition_src_queue_index := VK_QUEUE_FAMILY_IGNORED;
     transition_dst_queue_index := VK_QUEUE_FAMILY_IGNORED;
@@ -678,7 +773,7 @@ copy_cpu_memory_to_buffer :: (dst: VkBuffer, typed_memory: []$T, pipeline_stages
         dstAccessMask = .NONE,
         srcQueueFamilyIndex = transition_src_queue_index,
         dstQueueFamilyIndex = transition_dst_queue_index,
-        buffer = dst,
+        buffer = buffer.*,
         size = VK_WHOLE_SIZE
     };
     vkCmdPipelineBarrier(cmd, .TRANSFER_BIT, .BOTTOM_OF_PIPE_BIT, 0, 0, null, 1, *buf_release_barrier, 0, null);
@@ -690,15 +785,46 @@ copy_cpu_memory_to_buffer :: (dst: VkBuffer, typed_memory: []$T, pipeline_stages
 
     buf_acquire_barrier := VkBufferMemoryBarrier.{
         srcAccessMask = .NONE,
-        dstAccessMask = .VERTEX_ATTRIBUTE_READ_BIT,
+        dstAccessMask = access,
         srcQueueFamilyIndex = transition_src_queue_index,
         srcQueueFamilyIndex = transition_dst_queue_index,
-        buffer = dst,
+        buffer = buffer.*,
         size = VK_WHOLE_SIZE
     };
-    vkCmdPipelineBarrier(cmd2, .TOP_OF_PIPE_BIT, .VERTEX_INPUT_BIT, 0, 0, null, 1, *buf_acquire_barrier, 0, null);
+    vkCmdPipelineBarrier(cmd2, .TOP_OF_PIPE_BIT, stages, 0, 0, null, 1, *buf_acquire_barrier, 0, null);
 
     immediate_submit_graphics_queue();
+}
+
+create_mesh_data_buffer :: (using out_buffer: *Mesh_Data_Buffer, data: []$T, $in_type: Mesh_Data_Buffer_Type) 
+#modify {
+    if in_type == .VERTEX {
+        return T == Mesh_Vertex;
+    } else if in_type == .INDEX {
+        return T == u16 || T == u32;
+    } else {
+        return false;
+    }
+} {
+    out_buffer.* = .{};
+
+    type = in_type;
+    count = xx data.count;
+
+    #if in_type == .VERTEX {
+        usage_flag := VkBufferUsageFlags.VERTEX_BUFFER_BIT;
+        access_flag := VkAccessFlags.VERTEX_ATTRIBUTE_READ_BIT;
+    } else {
+        usage_flag := VkBufferUsageFlags.INDEX_BUFFER_BIT;
+        access_flag := VkAccessFlags.INDEX_READ_BIT;
+        #if T == u16 {
+            index_type = .U16;
+        } else if T == u32 {
+            index_type = .U32;
+        }
+    }
+
+    create_graphics_buffer(*buffer, *allocation, as_string(data), usage_flag, access_flag, .VERTEX_INPUT_BIT);
 }
 
 create_experimental_data :: () {
@@ -726,32 +852,33 @@ create_experimental_data :: () {
         deletion_queue_add(*game_deletion_queue, vkDestroySampler(logical_device, test_tex_sampler, null));
     }
     {
-        vertices := Mesh_Vertex.[
-            .{.{-0.5, -0.5, 0}, .{0,0}},
-            .{.{0.5, 0.5, 0}, .{1,1}},
-            .{.{-0.5, 0.5, 0}, .{0,1}},
-            .{.{0.5, -0.5, 0}, .{1,0}},
-            .{.{0.5, 0.5, 0}, .{1,1}},
-            .{.{-0.5, -0.5, 0}, .{0,0}},
-        ];
-        
-        create_info := VkBufferCreateInfo.{
-            size = xx (size_of(Mesh_Vertex) * vertices.count),
-            usage = .TRANSFER_DST_BIT | .VERTEX_BUFFER_BIT,
-            sharingMode = .EXCLUSIVE,
-            queueFamilyIndexCount = 1,
-            pQueueFamilyIndices = *physical_device.transfer_index
-        };
-        alloc_create_info := VmaAllocationCreateInfo.{
-            usage = .GPU_ONLY,
-            requiredFlags = .DEVICE_LOCAL_BIT,
-        };
-        alloc_info := VmaAllocationInfo.{};
-        vmaCreateBuffer(vk_allocator, *create_info, *alloc_create_info, *mesh_vertex_buffer, *mesh_vertex_buffer_allocation, *alloc_info);
+        vertices, indices := load_obj_file("../content/experimental/FinalBaseMesh.obj", true);
 
-        deletion_queue_add(*game_deletion_queue, vmaDestroyBuffer(vk_allocator, mesh_vertex_buffer, mesh_vertex_buffer_allocation));
+        modified_vertices: [..]Mesh_Vertex;
+        defer array_reset(*modified_vertices);
 
-        copy_cpu_memory_to_buffer(mesh_vertex_buffer, vertices, .VERTEX_INPUT_BIT);
+        if indices.type == .U16 {
+            setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
+            create_mesh_data_buffer(*test_mesh.ibo, indices._u16, .INDEX);
+        } else {
+            setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
+            create_mesh_data_buffer(*test_mesh.ibo, indices._u32, .INDEX);
+        }
+
+        create_mesh_data_buffer(*test_mesh.vbo, modified_vertices, .VERTEX);
+
+        test_mesh.albedo.type = .CONSTANT;
+        test_mesh.albedo.constant = .{1, 0, 0, 0.1};
+
+        lights.sun_direction = normalize(Vector3.{0, 0, -1});
+        lights.sun_tint = .{1,1,1,1};
+        create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
+    }
+    {
+        camera = camera_make(.PERSPECTIVE);
+        camera.position.x = -2.0;
+        camera.perspective.vertical_fov = 90.0;
+        set_orientation(*camera, .{1, 0, 0}, .{0, 0, 1});
     }
 }
 
@@ -778,7 +905,7 @@ create_rect_pipeline :: () {
     vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *rect_pipeline_layout), "failed to create the bg rect pipeline layout");
     deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, rect_pipeline_layout, null));
 
-    compute_draw_shader := load_shader("cmp_draw_rect.spv");
+    compute_draw_shader := load_shader("cmp_draw_rect");
 
     shader_stage_info := VkPipelineShaderStageCreateInfo.{
         stage = .COMPUTE_BIT,
@@ -810,7 +937,7 @@ create_sphere_pipeline :: () {
     vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *sphere_pipeline_layout), "failed to create the sphere rect pipeline layout");
     deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, sphere_pipeline_layout, null));
 
-    compute_draw_shader := load_shader("compute_sphere.spv");
+    compute_draw_shader := load_shader("compute_sphere");
 
     shader_stage_info := VkPipelineShaderStageCreateInfo.{
         stage = .COMPUTE_BIT,
@@ -869,8 +996,8 @@ create_tex_pipeline :: () {
 create_graphics_pipeline :: () {
     auto_release_temp();
 
-    test_frag := load_shader("mesh_frag.spv");
-    test_vert := load_shader("mesh_vert.spv");
+    test_frag := load_shader("color_mesh_frag");
+    test_vert := load_shader("color_mesh_vert");
 
     shader_stages := VkPipelineShaderStageCreateInfo.[
      .{
@@ -918,7 +1045,9 @@ create_graphics_pipeline :: () {
         rasterizerDiscardEnable = VK_FALSE,
         polygonMode = .FILL,
         lineWidth = 1.0,
+        // cullMode = .FRONT_BIT,
         cullMode = .BACK_BIT,
+        // cullMode = .NONE,
         frontFace = .CLOCKWISE,
         depthBiasEnable = VK_FALSE,
         depthBiasConstantFactor = 0.0,
@@ -977,17 +1106,17 @@ create_graphics_pipeline :: () {
         mesh_descriptor_set_layout,
     ];
 
-    projection_matrix_pc := VkPushConstantRange.{
+    color_pc := VkPushConstantRange.{
         stageFlags = .VERTEX_BIT,
         offset = 0,
-        size = size_of(float32) * 16
+        size = size_of(float32) * 16 + size_of(float32) * 4 + size_of(float) * 4
     };
 
     pipeline_layout_info := VkPipelineLayoutCreateInfo.{
         setLayoutCount = xx layouts.count,
         pSetLayouts = layouts.data,
         pushConstantRangeCount = 1,
-        pPushConstantRanges = *projection_matrix_pc
+        pPushConstantRanges = *color_pc
     };
 
     vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *graphics_pipeline_layout), "failed to create the graphics pipeline layout");
@@ -997,6 +1126,19 @@ create_graphics_pipeline :: () {
     rendering_create_info := VkPipelineRenderingCreateInfo.{
         colorAttachmentCount=1,
         pColorAttachmentFormats = *color_attachment_format,
+        depthAttachmentFormat = .D24_UNORM_S8_UINT
+    };
+
+    depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
+        depthTestEnable = VK_TRUE,
+        depthWriteEnable = VK_TRUE,
+        depthCompareOp = .LESS,
+        depthBoundsTestEnable = VK_FALSE,
+        stencilTestEnable = VK_FALSE,
+        // front:                 VkStencilOpState;
+        // back:                  VkStencilOpState;
+        // minDepthBounds:        float;
+        // maxDepthBounds:        float;
     };
 
     pipeline_create := VkGraphicsPipelineCreateInfo.{
@@ -1009,7 +1151,7 @@ create_graphics_pipeline :: () {
         pViewportState = *viewport_create_info,
         pRasterizationState = *rasterizer_create_info,
         pMultisampleState = *multisample_create_info,
-        // pDepthStencilState:  *VkPipelineDepthStencilStateCreateInfo;
+        pDepthStencilState = *depth_stencil_info,
         pColorBlendState = *color_blend_create,
         pDynamicState = *dynamic_state,
         layout = graphics_pipeline_layout,
@@ -1130,24 +1272,26 @@ create_descriptors :: () {
 
     deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorSetLayout(logical_device, test_tex_descriptor_layout, null));
 
-    info := VkDescriptorImageInfo.{
-        sampler = test_tex_sampler,
-        imageLayout=.SHADER_READ_ONLY_OPTIMAL,
-        imageView=test_texture.image_view
-    };
-    write := VkWriteDescriptorSet.{
-        dstSet = test_tex_descriptors,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = *info
-    };
-    vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+    {
+        info := VkDescriptorImageInfo.{
+            sampler = test_tex_sampler,
+            imageLayout=.SHADER_READ_ONLY_OPTIMAL,
+            imageView=test_texture.image_view
+        };
+        write := VkWriteDescriptorSet.{
+            dstSet = test_tex_descriptors,
+            descriptorCount = 1,
+            descriptorType = .COMBINED_IMAGE_SAMPLER,
+            pImageInfo = *info
+        };
+        vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+    }
 
     // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     ubo_layout_bindings := VkDescriptorSetLayoutBinding.[
-        // .{binding=0, descriptorType = .UNIFORM_BUFFER, descriptorCount = 1, stageFlags = .VERTEX_BIT},
-        .{binding=0, descriptorCount=1, descriptorType=.COMBINED_IMAGE_SAMPLER, stageFlags = .FRAGMENT_BIT}
+        .{binding=0, descriptorType = .UNIFORM_BUFFER, descriptorCount = 1, stageFlags = .FRAGMENT_BIT},
+        // .{binding=0, descriptorCount=1, descriptorType=.COMBINED_IMAGE_SAMPLER, stageFlags = .FRAGMENT_BIT}
     ];
     mesh_descriptor_set_layout = build_descriptor_set_layout(ubo_layout_bindings, 0);
 
@@ -1155,9 +1299,20 @@ create_descriptors :: () {
 
     mesh_descriptors = allocate_descriptor_set(game_descriptor_pool, mesh_descriptor_set_layout);
 
-    write.dstSet = mesh_descriptors;
-
-    vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+    {
+        info := VkDescriptorBufferInfo.{
+            buffer=lights.buffer,
+            offset=0,
+            range=VK_WHOLE_SIZE
+        };
+        write := VkWriteDescriptorSet.{
+            dstSet = mesh_descriptors,
+            descriptorCount = 1,
+            descriptorType = .UNIFORM_BUFFER,
+            pBufferInfo = *info
+        };
+        vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+    }
 }
 
 update_draw_image_descriptor_set :: () {
@@ -1185,13 +1340,14 @@ load_shader :: (filename: string, add_to_deletion_queue := true) -> VkShaderModu
             return it.shader;
         }
     }
-    file_path := tprint("../shaders/%", filename);
+    file_path := tprint("../shaders/%.spv", filename);
     shader := create_shader_module_from_file(file_path);
     vk_validate(shader != null, "failed to load shader %", filename);
     array_add(*shader_hash_table, .{hash, shader});
     if add_to_deletion_queue {
         deletion_queue_add(*game_deletion_queue, vkDestroyShaderModule(logical_device, shader, null), shader);
     }
+
     return shader;
 }
 
@@ -1401,6 +1557,12 @@ device_extensions_are_supported :: (device: VkPhysicalDevice, extensions: []*u8)
     return true;
 }
 
+depth_buffer_supported :: (device: VkPhysicalDevice) -> bool {
+    props: VkFormatProperties;
+    vkGetPhysicalDeviceFormatProperties(device, .D24_UNORM_S8_UINT, *props);
+    return (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+}
+
 list_instance_extensions :: () {
     success, available_extensions := get_instance_extension_properties();
     if !success {
@@ -1432,6 +1594,9 @@ score_physical_device :: (device: VkPhysicalDevice) -> score: s32 {
     }
     dummy_device := Physical_Device.{vk_obj=device};
     if !set_physical_device_queue_family_capabilities(*dummy_device) {
+        return 0;
+    }
+    if !depth_buffer_supported(device) {
         return 0;
     }
     if dummy_device.graphics_index == -1 || dummy_device.present_index == -1 {
@@ -1882,24 +2047,28 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-draw_mesh :: (cmd: VkCommandBuffer, targe: VkImage) {
+draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
     vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
     offset : u64 = 0;
     vkCmdBindDescriptorSets(cmd, .GRAPHICS, graphics_pipeline_layout, 0, 1, *mesh_descriptors, 0, null);
-    vkCmdBindVertexBuffers(cmd, 0, 1, *mesh_vertex_buffer, *offset);
-    t := seconds_since_init().(float32);
-    cos_t := cos(t);
-    sin_t := sin(t);
-    view_projection := float.[
-        cos_t, 0, sin_t, 0,
-        0, 1, 0, 0,
-        -sin_t, 0, cos_t, 0,
-        0, 0, 0, 1,
-    ];
-    vkCmdPushConstants(cmd, graphics_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, view_projection.data);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
+
+    vkCmdBindVertexBuffers(cmd, 0, 1, *vbo.buffer, *offset);
+    vkCmdBindIndexBuffer(cmd, ibo.buffer, 0, xx ibo.index_type);
+
+    constants: [24]float32;
+    mvp := view_projection.* * model.*;
+    memcpy(constants.data, *mvp, size_of(Matrix4));
+    memcpy(constants.data + 16, *albedo.constant, size_of(Vector4));
+    memcpy(constants.data + 20, orientation, size_of(Quaternion));
+
+    vkCmdPushConstants(cmd, graphics_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 24, constants.data);
+    vkCmdDrawIndexed(cmd, ibo.count, 1, 0, 0, 0);
+}
+
+prepare_lights :: () {
+    copy_cpu_memory_to_buffer(lights.buffer, as_string(lights.data));
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1983,15 +2152,15 @@ Descriptor_Pool_Size_Ratio :: struct {
 }
 
 Graphics_Pipeline_Build_Info :: struct {
-    shader_stages: []VkPipelineShaderStageCreateInfo;
-    input_assembly: VkPipelineInputAssemblyStateCreateInfo;
-    rasterization: VkPipelineRasterizationStateCreateInfo;
-    color_blend_attachment: VkPipelineColorBlendAttachmentState;
-    multisampling: VkPipelineMultisampleStateCreateInfo;
-    pipeline_layout: VkPipelineLayout;
-    depth_stencil: VkPipelineDepthStencilStateCreateInfo;
-    render_info: VkPipelineRenderingCreateInfo;
-    color_attachment_format: VkFormat;
+    shader_stages:              []VkPipelineShaderStageCreateInfo;
+    input_assembly:             VkPipelineInputAssemblyStateCreateInfo;
+    rasterization:              VkPipelineRasterizationStateCreateInfo;
+    color_blend_attachment:     VkPipelineColorBlendAttachmentState;
+    multisampling:              VkPipelineMultisampleStateCreateInfo;
+    pipeline_layout:            VkPipelineLayout;
+    depth_stencil:              VkPipelineDepthStencilStateCreateInfo;
+    render_info:                VkPipelineRenderingCreateInfo;
+    color_attachment_format:    VkFormat;
 }
 
 Shader_Hash_Item :: struct {
@@ -2002,6 +2171,65 @@ Shader_Hash_Item :: struct {
 Mesh_Vertex :: struct {
     position: Vector3;
     uv: Vector2;
+    normal: Vector3;
+}
+
+Mesh_Data_Buffer_Type :: enum u8 {
+    VERTEX; 
+    INDEX;
+}
+
+Mesh_Albedo_Type :: enum u8 {
+    TEXTURE;
+    CONSTANT;
+}
+
+Mesh_Albedo :: struct {
+    type: Mesh_Albedo_Type;
+    union {
+        constant: Vector4;
+        texture: *void; // todo: ?
+    }
+}
+
+Mesh :: struct {
+    vbo: Mesh_Data_Buffer;
+    ibo: Mesh_Data_Buffer;
+    albedo: Mesh_Albedo;
+}
+
+Render_Buffer :: struct {
+    buffer: VkBuffer;
+    allocation: VmaAllocation;
+}
+
+Mesh_Index_Type :: enum u8 {
+    U16 :: VkIndexType.UINT16; 
+    U32 :: VkIndexType.UINT32;
+}
+
+Index_Buffer :: struct {
+    type: Mesh_Index_Type;
+    union {
+        _u16: []u16;
+        _u32: []u32;
+    }
+}
+
+Mesh_Data_Buffer :: struct {
+    using #as rb: Render_Buffer;
+    count: u32;
+    type: Mesh_Data_Buffer_Type;
+    index_type: Mesh_Index_Type;
+}
+
+Lights :: struct {
+    using #as rb: Render_Buffer;
+    using data: struct {
+        sun_direction: Vector3;
+        padding: float;
+        sun_tint: Vector4;
+    }
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2202,6 +2430,57 @@ allocate_descriptor_set :: (pool: VkDescriptorPool, layout: VkDescriptorSetLayou
     return descriptor_set;
 }
 
+setup_mesh_data_for_flat_shading :: (in_vertices: []Mesh_Vertex, indices: []$T, out_vertices: *[..]Mesh_Vertex) {
+    auto_release_temp();
+
+    vertex_has_led_tri: Bit_Array(1);
+    vertex_has_led_tri.items.allocator = temp;
+    set_capacity(*vertex_has_led_tri, indices.count);
+
+    assert(out_vertices.count == 0);
+    array_resize(out_vertices, in_vertices.count);
+    copy_array(out_vertices.*, in_vertices);
+
+    for *(out_vertices.*) {
+        it.normal = .{0,0,-1};
+    }
+
+    i := 0;
+    while i < indices.count {
+        index_offset := -1;
+        for 0..2 {
+            index := indices[i + it];
+            if !bit_is_set(*vertex_has_led_tri, index) {
+                index_offset = it;
+                break;
+            }
+        }
+        if index_offset == -1 {
+            new_vertex := array_add(out_vertices);
+            new_vertex.* = out_vertices.*[indices[i]];
+            indices[i] = xx (out_vertices.count - 1);
+            index_offset = 0;
+        }
+
+        // in GL and Vulkan both, the 'provoking vertex' is the last vertex of a triangle. this is the vertex
+        // that passes data through to the fragment shader when the vertex output is marked 'flat'.
+        // in this case, this fact is being leveraged to pass face normals through via specific vertices
+        if index_offset == 1 {
+            indices[i], indices[i+1], indices[i+2] = indices[i+1], indices[i+2], indices[i+0];
+        } else if index_offset == 2 {
+            indices[i], indices[i+1], indices[i+2] = indices[i+2], indices[i+0], indices[i+1];
+        }
+
+        face_vec1 := out_vertices.*[indices[i+1]].position - out_vertices.*[indices[i+2]].position;
+        face_vec2 := out_vertices.*[indices[i+0]].position - out_vertices.*[indices[i+1]].position;
+        out_vertices.*[indices[i]].normal = normalize(cross(face_vec1, face_vec2));
+
+        set_bit(*vertex_has_led_tri, indices[i]);
+
+        i += 3;
+    }
+}
+
 // immediate_submit :: ()
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2224,6 +2503,7 @@ command_frames: []Frame_Data;
 frame: u64;
 
 draw_image: Texture;
+depth_image: Texture;
 
 draw_extent: VkExtent2D;
 draw_image_descriptors: VkDescriptorSet;
@@ -2266,8 +2546,10 @@ transfer_command_pool: VkCommandPool;
 
 shader_hash_table: [..]Shader_Hash_Item;
 
-mesh_vertex_buffer: VkBuffer;
-mesh_vertex_buffer_allocation: VmaAllocation;
+camera: Camera;
+
+test_mesh: Mesh;
+lights: Lights;
 
 test_texture: Texture;
 
@@ -2304,3 +2586,29 @@ ONE_MILLISECOND_IN_NANSOSECONDS :: 1_000_000;
 ONE_SECOND_IN_NANOSECONDS :: 1_000_000_000;
 VK_API_VERSION :: VK_API_VERSION_1_3;
 VK_MSAA_SAMPLES :: VkSampleCountFlagBits._1_BIT;
+
+test_vertices := Mesh_Vertex.[
+    .{.{-0.5,  -0.5,  -0.5}, .{0,0}, .{0,0,-1}}, // ul 0
+    .{.{ 0.5,   0.5,  -0.5}, .{1,1}, .{0,0,-1}}, // lr 1
+    .{.{-0.5,   0.5,  -0.5}, .{0,1}, .{0,0,-1}}, // ll 2
+    .{.{ 0.5,  -0.5,  -0.5}, .{1,0}, .{0,0,-1}}, // ur 3
+
+    .{.{-0.5,  -0.5,   0.5}, .{0,0}, .{0,0,-1}}, // ul 4
+    .{.{ 0.5,   0.5,   0.5}, .{1,1}, .{0,0,-1}}, // lr 5
+    .{.{-0.5,   0.5,   0.5}, .{0,1}, .{0,0,-1}}, // ll 6
+    .{.{ 0.5,  -0.5,   0.5}, .{1,0}, .{0,0,-1}}, // ur 7
+];
+test_indices := u16.[
+    0, 1, 2, // rear 
+    3, 1, 0,
+    6, 5, 4, // front 
+    4, 5, 7,
+    2, 4, 0, // left
+    6, 4, 2,
+    1, 3, 7, // right
+    5, 1, 7,
+    3, 0, 4, // top
+    7, 3, 4,
+    2, 1, 6, // bottom
+    1, 5, 6
+];

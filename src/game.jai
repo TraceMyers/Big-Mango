@@ -106,3 +106,6 @@ Input :: #import "Input";
 #load "input.jai";
 #load "vulkan.jai";
 #load "imgui_impl.jai";
+#load "entity.jai";
+#load "camera.jai";
+#load "load_assets.jai";
