@@ -1,0 +1,10 @@
+WORLD_UP    :: MANGO_UP;
+WORLD_DOWN  :: #run -WORLD_UP;
+WORLD_FORE  :: MANGO_FORE;
+WORLD_BACK  :: #run -WORLD_FORE;
+WORLD_RIGHT :: MANGO_RIGHT;
+WORLD_LEFT  :: #run -WORLD_RIGHT;
+
+WORLD_X :: Vector3.{1,0,0};
+WORLD_Y :: Vector3.{0,1,0};
+WORLD_Z :: Vector3.{0,0,1};

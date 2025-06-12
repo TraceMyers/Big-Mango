@@ -23,39 +23,43 @@ update_window_events :: (delta_time: float) {
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
-
+                if it.key_code == #char "M" {
+                    do_mouse_move = !do_mouse_move;
+                }
             }
         }
     }
 
-    speed := 2.0;
+    speed := 4.0;
     dt_speed := speed * delta_time;
     if Input.input_button_states[#char "W"] & .DOWN {
-        camera.position += cam_forward(*camera) * dt_speed;
+        camera.position += fore_direction(*camera) * dt_speed;
     } 
     if Input.input_button_states[#char "S"] & .DOWN {
-        camera.position -= cam_forward(*camera) * dt_speed;
+        camera.position -= fore_direction(*camera) * dt_speed;
     } 
     if Input.input_button_states[#char "D"] & .DOWN {
-        camera.position += cam_right(*camera) * dt_speed;
+        camera.position += right_direction(*camera) * dt_speed;
     } 
     if Input.input_button_states[#char "A"] & .DOWN {
-        camera.position -= cam_right(*camera) * dt_speed;
+        camera.position -= right_direction(*camera) * dt_speed;
     } 
     if Input.input_button_states[#char "Z"] & .DOWN {
-        camera.position += cam_up(*camera) * dt_speed;
+        camera.position += up_direction(*camera) * dt_speed;
     }
     if Input.input_button_states[#char "X"] & .DOWN {
-        camera.position -= cam_up(*camera) * dt_speed;
+        camera.position -= up_direction(*camera) * dt_speed;
     }
 
-    if abs(Input.mouse_delta_x) > 0 {
-        angle := -dt_speed * 0.4 * Input.mouse_delta_x.(float) * (180.0 / PI);
-        rotate_cam(*camera, .{0,0,1}, angle);
-    }
-    if abs(Input.mouse_delta_y) > 0 {
-        angle := -dt_speed * 0.4 * Input.mouse_delta_y.(float) * (180.0 / PI);
-        rotate_cam(*camera, cam_right_xy(*camera), angle);
+    if do_mouse_move {
+        if abs(Input.mouse_delta_x) > 0 {
+            angle := -dt_speed * 0.4 * Input.mouse_delta_x.(float) * (180.0 / PI);
+            rotate(*camera, WORLD_UP, angle);
+        }
+        if abs(Input.mouse_delta_y) > 0 {
+            angle := -dt_speed * 0.4 * Input.mouse_delta_y.(float) * (180.0 / PI);
+            rotate(*camera, right_direction_xy(*camera), angle);
+        }
     }
 
     // point_at(*camera, .{});
@@ -78,3 +82,5 @@ get_window_dimensions :: () -> Int_Vector2 {
 
 window_width: s32;
 window_height: s32;
+
+do_mouse_move := true;

@@ -109,3 +109,4 @@ Input :: #import "Input";
 #load "entity.jai";
 #load "camera.jai";
 #load "load_assets.jai";
+#load "world.jai";

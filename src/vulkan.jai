@@ -165,15 +165,17 @@ render_frame :: () {
     test_mesh.albedo.constant = .{0.8, 0.3, 0.2, 1};
     // draw_mesh(cmd, *test_mesh, *model, *vp_mat);
 
-    half_blue_theta := seconds_since_init().(float) * 0.5 * 2.0;
-    cos_bt := cos(half_blue_theta);
-    sin_bt := sin(half_blue_theta);
-    angle_axis := sin_bt * Vector3.{0,1,0};
-    blue_quat := normalize(Quaternion.{xyz=angle_axis, w=cos_bt});
+    blue_quat: Quaternion;
+    set_orientation(*blue_quat, .{0, 0, -1}, .{1,0,0});
+    // rotate(*blue_quat, .{0,1,0}, seconds_since_init().(float) * 20.0);
+    // half_blue_theta := seconds_since_init().(float) * 0.5 * 2.0;
+    // cos_bt := cos(half_blue_theta);
+    // sin_bt := sin(half_blue_theta);
+    // angle_axis := sin_bt * Vector3.{0,1,0};
+    // blue_quat := normalize(Quaternion.{xyz=angle_axis, w=cos_bt});
     blue_rot_mat := rotation_matrix(Matrix4, blue_quat);
     model *= blue_rot_mat;
 
-    // blue_quat: Quaternion;
 
     draw_mesh(cmd, *test_mesh, *model, *blue_quat, *vp_mat);
 
