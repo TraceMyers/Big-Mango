@@ -1,13 +1,13 @@
 
 Entity :: struct {
-    scale: float;
+    scale := 1.0;
     position: Vector3;
     orientation: Quaternion;
 }
 
 Static_Mesh_Entity :: struct {
     using #as entity: Entity;
-    mesh: *Mesh;
+    mesh: s32;
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -38,3 +38,13 @@ up_direction :: inline (e: *Entity) -> Vector3 {
 fore_direction :: inline (e: *Entity) -> Vector3 {
     return fore_direction(*e.orientation);
 }
+
+interp_rotate :: inline (e: *Entity, target: Quaternion, norm: float32) {
+    e.orientation = interp_rotate(e.orientation, target, norm);
+}
+
+interp_rotate :: inline (e: *Entity, target: Quaternion, speed: float32, delta_time: float32) {
+    e.orientation = interp_rotate(e.orientation, target, speed, delta_time);
+}
+
+static_mesh_entities: Pool(Static_Mesh_Entity);

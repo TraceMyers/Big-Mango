@@ -1,6 +1,6 @@
 
 // OBJ doesn't guarantee a winding order. just have to know.
-load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index_Buffer {
+load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
     data := read_entire_file(file_path);
     defer free(data);
 
@@ -24,7 +24,7 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
 
         if c0 == #char "v" && c1 == #char " " { // vertex
             counts.vertex_count += 1;
-        } else if c0 == #char "f" && c1 == #char " " { // face/triangle
+        } else if c0 == #char "f" && c1 == #char " " { // face
             scope_set_allocator(temp);
             auto_release_temp();
 
@@ -35,6 +35,7 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
                 indices := tokenize_and_trim(it, cast(u8)(#char "/"));
                 for indices {
                     val, success := parse_int(*it);
+                    assert(val >= 1);
                     val -= 1;
                     if !success {
                         continue;
@@ -45,6 +46,7 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
                 }
             }
             if face_component_count == 3 {
+                assert(!counts.quads, "obj loading doesn't currently support a mix of tris and quads");
                 counts.triangle_count += 1;
             } else if face_component_count == 4 {
                 counts.triangle_count += 2;
@@ -75,13 +77,13 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
 
     {
         using temp_mesh_data;
-        vertices = alloc_array(Mesh_Vertex, xx counts.vertex_count);
+        vertices = alloc_array(Mesh_Vertex, xx counts.vertex_count, allocator);
         if counts.max_index > U16_MAX {
             indices.type = .U32;
-            indices._u32 = alloc_array(u32, xx (counts.triangle_count * 3));
+            indices._u32 = alloc_array(u32, xx (counts.triangle_count * 3), allocator);
         } else {
             indices.type = .U16;
-            indices._u16 = alloc_array(u16, xx (counts.triangle_count * 3));
+            indices._u16 = alloc_array(u16, xx (counts.triangle_count * 3), allocator);
         }
     }
 
@@ -108,19 +110,19 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
                     cmp_idx += 1;
                 }
             }
-        } else if c0 == #char "f" && c1 == #char " " { // face/triangle
+        } else if c0 == #char "f" && c1 == #char " " { // face
             face := tokenize_and_trim(line.*, #char " ");
             face_i := 0;
             for face {
                 indices := tokenize_and_trim(it, cast(u8)(#char "/"));
                 index := -1;
                 for indices {
-                    val, success := parse_int(*it, s64); // obj is 1-indexed
-                    val -= 1;
+                    val, success := parse_int(*it, s64); 
                     if !success {
                         continue;
                     }
-                    assert(val >= 0);
+                    assert(val >= 1);
+                    val -= 1; // obj is 1-indexed
                     index = val;
                     break;
                 }
@@ -138,7 +140,7 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
                     }
                     mesh_data.index_count += 1;
                 } else {
-                    // triangulizing the quad
+                    // triangulizing the quad = use the final vertex + 2 of the previous verts
                     assert(mesh_data.quads);
                     assert(face_i == 3);
                     assert(mesh_data.index_count % 3 == 0);
@@ -182,6 +184,16 @@ load_obj_file :: (file_path: string, flip_winding: bool) -> []Mesh_Vertex, Index
                     i += 3;
                 }
             }
+        }
+
+        if reorientation != QUATERNION_IDENTITY {
+            greatest_len_sq := 0.0;
+            for *vertices {
+                it.position = rotate(it.position, reorientation);
+                len_sq := length_squared(it.position);
+                greatest_len_sq = max(len_sq, greatest_len_sq);
+            }
+            rm_log("greatest len: %", sqrt(greatest_len_sq));
         }
     }
 

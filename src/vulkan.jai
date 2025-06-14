@@ -53,6 +53,8 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if !init_success then return false;
         vkDeviceWaitIdle(logical_device);
 
+        reset(*mesh_pool);
+
         for command_frames {
             vkDestroyCommandPool(logical_device, it.command_pool, null);
             vkDestroyFence(logical_device, it.fence, null);
@@ -152,32 +154,50 @@ render_frame :: () {
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
 
-    // test_draw_textured_image(cmd, draw_image.vk_obj);
-    draw_sphere(cmd, draw_image.vk_obj);
-
     // -----------------------------------------------------------------------------------------------------------------
     // graphics pipeline draw
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    model := Matrix4_Identity;
-    test_mesh.albedo.constant = .{0.8, 0.3, 0.2, 1};
-    // draw_mesh(cmd, *test_mesh, *model, *vp_mat);
+    for e : static_mesh_entities.items {
+        if !is_item_in_use(*static_mesh_entities, it_index) {
+            continue;
+        }
+        model := make_translation_matrix4(e.position);
+        rot := rotation_matrix(Matrix4, e.orientation);
+        model *= rot;
+        scale := make_scale_matrix4(.{e.scale, e.scale, e.scale});
+        model *= scale;
+        mesh := mesh_pool[e.mesh];
+        draw_mesh(cmd, *mesh, *model, *e.orientation, *vp_mat, 1);
+    }
+    for 0..5 {
+        orientation: Quaternion;
+        offset := ifx it & 1 == 0 then 0.0 else 10.0;
+        model := make_translation_matrix4(.{offset,10.0*it,-4});
+        rot := Matrix4_Identity;
+        model *= rot;
+        scale := make_scale_matrix4(.{10,10,1});
+        model *= scale;
+        m := *mesh_pool[cube_mesh];
+        m.albedo.tint = test_color_1;
+        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+    }
+    for 0..5
+    {
+        offset := ifx it & 1 != 0 then 0.0 else 10.0;
+        orientation: Quaternion;
+        model := make_translation_matrix4(.{offset,10.0*it,-4});
+        rot := Matrix4_Identity;
+        model *= rot;
+        scale := make_scale_matrix4(.{10,10,1});
+        model *= scale;
+        m := *mesh_pool[cube_mesh];
+        m.albedo.tint = test_color_2;
+        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+    }
 
-    blue_quat: Quaternion;
-    set_orientation(*blue_quat, .{0, 0, -1}, .{1,0,0});
-    // rotate(*blue_quat, .{0,1,0}, seconds_since_init().(float) * 20.0);
-    // half_blue_theta := seconds_since_init().(float) * 0.5 * 2.0;
-    // cos_bt := cos(half_blue_theta);
-    // sin_bt := sin(half_blue_theta);
-    // angle_axis := sin_bt * Vector3.{0,1,0};
-    // blue_quat := normalize(Quaternion.{xyz=angle_axis, w=cos_bt});
-    blue_rot_mat := rotation_matrix(Matrix4, blue_quat);
-    model *= blue_rot_mat;
-
-
-    draw_mesh(cmd, *test_mesh, *model, *blue_quat, *vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -854,34 +874,11 @@ create_experimental_data :: () {
         deletion_queue_add(*game_deletion_queue, vkDestroySampler(logical_device, test_tex_sampler, null));
     }
     {
-        vertices, indices := load_obj_file("../content/experimental/FinalBaseMesh.obj", true);
-
-        modified_vertices: [..]Mesh_Vertex;
-        defer array_reset(*modified_vertices);
-
-        if indices.type == .U16 {
-            setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
-            create_mesh_data_buffer(*test_mesh.ibo, indices._u16, .INDEX);
-        } else {
-            setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
-            create_mesh_data_buffer(*test_mesh.ibo, indices._u32, .INDEX);
-        }
-
-        create_mesh_data_buffer(*test_mesh.vbo, modified_vertices, .VERTEX);
-
-        test_mesh.albedo.type = .CONSTANT;
-        test_mesh.albedo.constant = .{1, 0, 0, 0.1};
-
         lights.sun_direction = normalize(Vector3.{0, 0, -1});
         lights.sun_tint = .{1,1,1,1};
         create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
     }
-    {
-        camera = camera_make(.PERSPECTIVE);
-        camera.position.x = -2.0;
-        camera.perspective.vertical_fov = 90.0;
-        set_orientation(*camera, .{1, 0, 0}, .{0, 0, 1});
-    }
+
 }
 
 create_pipelines :: () {
@@ -2049,7 +2046,7 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4) {
+draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4, instance_count: u32 = 1) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
     vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
@@ -2062,14 +2059,17 @@ draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientat
     constants: [24]float32;
     mvp := view_projection.* * model.*;
     memcpy(constants.data, *mvp, size_of(Matrix4));
-    memcpy(constants.data + 16, *albedo.constant, size_of(Vector4));
+    memcpy(constants.data + 16, *albedo.tint, size_of(Vector4));
     memcpy(constants.data + 20, orientation, size_of(Quaternion));
 
     vkCmdPushConstants(cmd, graphics_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 24, constants.data);
-    vkCmdDrawIndexed(cmd, ibo.count, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, ibo.count, instance_count, 0, 0, 0);
 }
 
 prepare_lights :: () {
+    sun_t := asin(respace(sin(seconds_since_init().(float)), .{-1, 1}, .{-0.5, 0.5}));
+    down_vec := WORLD_DOWN;
+    lights.sun_direction = rotate(down_vec, WORLD_FORE, sun_t);
     copy_cpu_memory_to_buffer(lights.buffer, as_string(lights.data));
 }
 
@@ -2132,8 +2132,8 @@ Deletion_Queue_Item :: struct {
     arg2: *void;
     union {
         proc: ();
-        proc_1arg: (*void);
-        proc_2arg: (*void, *void);
+        proc_1arg: (*void) = ---;
+        proc_2arg: (*void, *void) = ---;
     }
 // #place proc_1arg;
 };
@@ -2188,10 +2188,8 @@ Mesh_Albedo_Type :: enum u8 {
 
 Mesh_Albedo :: struct {
     type: Mesh_Albedo_Type;
-    union {
-        constant: Vector4;
-        texture: *void; // todo: ?
-    }
+    tint := Vector4.{1,1,1,1};
+    texture: *void;
 }
 
 Mesh :: struct {
@@ -2214,7 +2212,7 @@ Index_Buffer :: struct {
     type: Mesh_Index_Type;
     union {
         _u16: []u16;
-        _u32: []u32;
+        _u32: []u32 = ---;
     }
 }
 
@@ -2550,7 +2548,6 @@ shader_hash_table: [..]Shader_Hash_Item;
 
 camera: Camera;
 
-test_mesh: Mesh;
 lights: Lights;
 
 test_texture: Texture;
@@ -2558,6 +2555,12 @@ test_texture: Texture;
 init_success := true;
 
 clear_color := Vector4.{0,0,0,1};
+
+mesh_pool: Pool(Mesh);
+
+cube_mesh: s32 = -1;
+test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
+test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
 
 // jai compiler will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 
@@ -2589,7 +2592,7 @@ ONE_SECOND_IN_NANOSECONDS :: 1_000_000_000;
 VK_API_VERSION :: VK_API_VERSION_1_3;
 VK_MSAA_SAMPLES :: VkSampleCountFlagBits._1_BIT;
 
-test_vertices := Mesh_Vertex.[
+cube_vertices := Mesh_Vertex.[
     .{.{-0.5,  -0.5,  -0.5}, .{0,0}, .{0,0,-1}}, // ul 0
     .{.{ 0.5,   0.5,  -0.5}, .{1,1}, .{0,0,-1}}, // lr 1
     .{.{-0.5,   0.5,  -0.5}, .{0,1}, .{0,0,-1}}, // ll 2
@@ -2600,7 +2603,7 @@ test_vertices := Mesh_Vertex.[
     .{.{-0.5,   0.5,   0.5}, .{0,1}, .{0,0,-1}}, // ll 6
     .{.{ 0.5,  -0.5,   0.5}, .{1,0}, .{0,0,-1}}, // ur 7
 ];
-test_indices := u16.[
+cube_indices := u16.[
     0, 1, 2, // rear 
     3, 1, 0,
     6, 5, 4, // front 

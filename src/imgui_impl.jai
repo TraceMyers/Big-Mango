@@ -145,6 +145,14 @@ show_perf_readout :: () {
     Text("% % % %", _ffmt(mvp._31), _ffmt(mvp._32), _ffmt(mvp._33), _ffmt(mvp._34));
     Text("% % % %", _ffmt(mvp._41), _ffmt(mvp._42), _ffmt(mvp._43), _ffmt(mvp._44));
 
+    e := *static_mesh_entities[0];
+
+    {
+        using e.orientation;
+        Text("guy orientation");
+        Text("% % % %", _ffmt(x), _ffmt(y), _ffmt(z), _ffmt(w));
+    }
+
     // Text("face normals");
     // {
     //     i := 0;

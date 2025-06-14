@@ -4,7 +4,7 @@
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
 main :: () {
-    defer rm_log("good exit");
+    defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
     #if OS == .WINDOWS {
         Win32.SetProcessDPIAware();
@@ -17,6 +17,8 @@ main :: () {
     scope_system_init(boot_vulkan,   *startup_success);
     scope_system_init(boot_imgui,    *startup_success);
     if !startup_success then return;
+
+    scratch_init_game();
 
     per_frame_time = seconds_since_init();
 
@@ -110,3 +112,4 @@ Input :: #import "Input";
 #load "camera.jai";
 #load "load_assets.jai";
 #load "world.jai";
+#load "scratch.jai";
