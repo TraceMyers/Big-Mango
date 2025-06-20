@@ -13,9 +13,11 @@ main :: () {
     }
 
     startup_success := true;
-    scope_system_init(boot_input,    *startup_success);
-    scope_system_init(boot_vulkan,   *startup_success);
-    scope_system_init(boot_imgui,    *startup_success);
+    scope_system_init(boot_allocators,  *startup_success);
+    scope_system_init(boot_input,       *startup_success);
+    scope_system_init(boot_vulkan,      *startup_success);
+    scope_system_init(boot_imgui,       *startup_success);
+    scope_system_init(boot_entities,    *startup_success);
     if !startup_success then return;
 
     scratch_init_game();
@@ -98,12 +100,14 @@ dt_index: s32;
 #import "Random";
 #import "stb_image";
 #import "xxHash";
+#import "Flat_Pool";
 ImGui :: #import "ImGui_VulkanWin32";
 Input :: #import "Input";
 
 #if OS == .WINDOWS {
     Win32 :: #import "Windows";
 }
+Zlib :: #import "zlib";
 
 #load "input.jai";
 #load "vulkan.jai";
@@ -113,3 +117,4 @@ Input :: #import "Input";
 #load "load_assets.jai";
 #load "world.jai";
 #load "scratch.jai";
+#load "allocators.jai";

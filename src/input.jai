@@ -81,34 +81,47 @@ update_window_events :: (delta_time: float) {
     } else {
         e := *static_mesh_entities[0];
         target := e.orientation;
+        camera_xy_orientation: Quaternion;
+        set_orientation(*camera_xy_orientation, fore_direction_xy(*camera.orientation), .{0,0,1});
 
         speed := 24.0;
         dt_speed := speed * delta_time;
+        move_dir: Vector3;
 
         if Input.input_button_states[#char "W"] & .DOWN {
-            target = make_quat(.{1,0,0}, .{0,0,1});
-            e.position.y += dt_speed;
+            target = camera_xy_orientation;
+            rotate(*target, .{0,0,1}, -PI/2);
+            move_dir.xy += -right_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "S"] & .DOWN {
-            target = make_quat(.{-1,0,0}, .{0,0,1});
-            e.position.y -= dt_speed;
+            target = camera_xy_orientation;
+            rotate(*target, .{0,0,1}, PI/2);
+            move_dir.xy += -right_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "D"] & .DOWN {
-            target = make_quat(.{0,-1,0}, .{0,0,1});
-            e.position.x += dt_speed;
+            target = camera_xy_orientation;
+            rotate(*target, .{0,0,1}, PI);
+            move_dir.xy += -right_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "A"] & .DOWN {
-            target = make_quat(.{0,1,0}, .{0,0,1});
-            e.position.x -= dt_speed;
+            target = camera_xy_orientation;
+            move_dir.xy += -right_direction_xy(*target).xy;
         }
-        rot_speed := 4.5 * PI;
+
+        if move_dir.xy != .{0,0} {
+            move_dir.xy = normalize(move_dir.xy);
+            target = make_quat(.{move_dir.y, -move_dir.x, 0}, .{0,0,1});
+            e.position.xy += move_dir.xy * dt_speed;
+        }
+
+        rot_speed := 6.5 * PI;
         interp_rotate(e, target, rot_speed, delta_time);
 
         target_camera_pos: Vector3 = ---;
         target_camera_pos.xy = e.position.xy;
-        target_camera_pos.y -= 30.0;
+        target_camera_pos.xy -= fore_direction(*camera).xy * 30.0;
         target_camera_pos.z = e.position.z + 60.0;
-        camera.position = exponential_interp(camera.position, target_camera_pos, 8.0, delta_time);
+        camera.position = exponential_interp(camera.position, target_camera_pos, 6.0, delta_time);
     }
 
     // point_at(*camera, .{});

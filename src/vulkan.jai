@@ -53,7 +53,7 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if !init_success then return false;
         vkDeviceWaitIdle(logical_device);
 
-        reset(*mesh_pool);
+        // reset(*mesh_pool);
 
         for command_frames {
             vkDestroyCommandPool(logical_device, it.command_pool, null);
@@ -143,6 +143,8 @@ render_frame :: () {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat := view_projection_matrix(*camera, viewport);
 
+    rotate(*camera, .{0,0,1}, delta_time*0.3);
+
     prepare_lights();
 
     immediate_submit();
@@ -197,6 +199,7 @@ render_frame :: () {
         m.albedo.tint = test_color_2;
         draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
+
 
 
     vkCmdEndRendering(cmd);
@@ -661,7 +664,7 @@ create_depth_image :: () {
         (1).(u32)
     };
 
-    depth_image.format = .D24_UNORM_S8_UINT;
+    depth_image.format = depth_buffer_format(physical_device.vk_obj);
     depth_image_usages: VkImageUsageFlags;
     depth_image_usages |= .DEPTH_STENCIL_ATTACHMENT_BIT;
 
@@ -1552,14 +1555,20 @@ device_extensions_are_supported :: (device: VkPhysicalDevice, extensions: []*u8)
             return false;
         }
     }
-
     return true;
 }
 
-depth_buffer_supported :: (device: VkPhysicalDevice) -> bool {
+depth_buffer_format :: (device: VkPhysicalDevice) -> VkFormat {
     props: VkFormatProperties;
     vkGetPhysicalDeviceFormatProperties(device, .D24_UNORM_S8_UINT, *props);
-    return (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+    if (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0 {
+        return .D24_UNORM_S8_UINT;
+    }
+    vkGetPhysicalDeviceFormatProperties(device, .D32_SFLOAT_S8_UINT, *props);
+    if (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0 {
+        return .D32_SFLOAT_S8_UINT;
+    }
+    return .UNDEFINED;
 }
 
 list_instance_extensions :: () {
@@ -1595,7 +1604,7 @@ score_physical_device :: (device: VkPhysicalDevice) -> score: s32 {
     if !set_physical_device_queue_family_capabilities(*dummy_device) {
         return 0;
     }
-    if !depth_buffer_supported(device) {
+    if depth_buffer_format(device) == .UNDEFINED {
         return 0;
     }
     if dummy_device.graphics_index == -1 || dummy_device.present_index == -1 {

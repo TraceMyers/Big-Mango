@@ -29,6 +29,12 @@ compile_shaders := true;
         run_command("git", "clone", "https://github.com/TraceMyers/ImGui_VulkanWin32");
     }
 
+    clone_zlib := !is_directory("modules/zlib");
+    if clone_zlib {
+        scope_set_working_directory("modules");
+        run_command("git", "clone", "https://github.com/TraceMyers/zlib");
+    }
+
     set_build_options_dc(.{do_output=false});
     w := compiler_create_workspace();
     build_options := get_build_options(w);
@@ -50,7 +56,7 @@ compile_shaders := true;
     build_options.output_type = .EXECUTABLE;
     build_options.output_executable_name = "game";
     build_options.output_path = "bin";
-    // build_options.backend = .X64;
+    build_options.backend = .X64;
 
     linker_args: [..]string;
     for build_options.additional_linker_arguments {

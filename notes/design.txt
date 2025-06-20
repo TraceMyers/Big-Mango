@@ -1,0 +1,29 @@
+gameplay: like Super Mario Maker (make + share + play), but with the mechanical sensibilities of a 2d zelda (like A Link To The Past) combined with terraria(system-building).
+graphics: traditional graphics pipeline. physically-based 3d rendering including refraction/subsurface scattering.
+visuals: visual language = Nintendo-adjacent + ?. rounded corners. saturated colors. beautiful palettes (?).  
+sound: snappy, playful. physics-based environmental reverb (the soundscape is authored by the players).
+music: jazz. chill, small sectionals and solos for menus. all songs have an alternative for each of a set of moods. dynamically cross-fade between them.
+control: fixed camera, single stick, camera-relative movement. responsive to a degree that is arbitrarily unrealistic, but feels great.
+camera: default = orthographic, third person smooth follow cam, centering player character, fairly large frame, with ~60 degree tilt from horizontal. players can optionally create worlds that use a side-on-orthographic camera, and a close-up perspective camera, with blending between these modes. 
+
+definitions:
+- 'zoom' : either perspective zoom or ortho scale.
+- 'player' : person playing a level.
+- 'maker' : person who made a level.
+
+more on camera:
+- cameras can have varying levels zoom.
+- world players can set their zoom (stepped or not? not sure)
+- world makers can enforce a maximum zoom level
+- patchwork entity system allows for cameras to be controlled just like any other entity. maker mode benefits?
+
+more on visuals:
+- weather options:
+    - noon on a sunny day. colors at their most vibrant.
+    - golden hour. soft edge highlights, gold and magenta hues.
+    - cloudy and rainy. dreary compared to noon on a sunny day. still retains some saturation, and soft shadows + highlights to retain dimensionality.
+    - moon noon: big bright moon shining down on everything. cool tones, stark shadows, very little ambient light. 
+- 
+
+more on music:
+- aim for 10 tracks on release. absolute minimum is 6.

@@ -1,0 +1,67 @@
+
+scratch_init_game :: () {
+    set_capacity(*static_mesh_entities, 1024);
+
+    // character / character mesh
+    {
+        auto_release_temp();
+
+        e_id := request_item(*static_mesh_entities);
+        e := static_mesh_entities[e_id];
+        e.mesh = xx request_item(*mesh_pool);
+        mesh := *mesh_pool[e.mesh];
+
+        mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
+
+        reorient_mesh_quat: Quaternion;
+        set_orientation(*reorient_mesh_quat, .{-1,0,0}, .{0,1,0});
+        vertices, indices := load_obj_file("../content/experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, temp);
+
+        modified_vertices: [..]Mesh_Vertex;
+        modified_vertices.allocator = temp;
+
+        if indices.type == .U16 {
+            setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
+            create_mesh_data_buffer(*mesh.ibo, indices._u16, .INDEX);
+        } else {
+            setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
+            create_mesh_data_buffer(*mesh.ibo, indices._u32, .INDEX);
+        }
+
+        create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
+
+        mesh.albedo.type = .CONSTANT;
+    }
+    // camera init
+    {
+        camera = camera_make(.ORTHOGRAPHIC);
+        camera.orthographic.scale = 10.0;
+
+        // camera = camera_make(.PERSPECTIVE);
+        // camera.perspective.vertical_fov = 90.0;
+
+        camera.position.y = -30.0;
+        camera.position.z = 60.0;
+
+        cos_t := cos(PI/6);
+        sin_t := sin(PI/6);
+
+        set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
+        rotate(*camera, .{0,0,1}, PI/6);
+    }
+    {
+        auto_release_temp();
+
+        cube_mesh = xx request_item(*mesh_pool);
+
+        m1 := *mesh_pool[cube_mesh];
+        m1.albedo.tint = .{1,1,1,1};
+
+        modified_vertices: [..]Mesh_Vertex;
+        defer array_reset(*modified_vertices);
+
+        setup_mesh_data_for_flat_shading(cube_vertices, cube_indices, *modified_vertices);
+        create_mesh_data_buffer(*m1.ibo, cube_indices, .INDEX);
+        create_mesh_data_buffer(*m1.vbo, modified_vertices, .VERTEX);
+    }
+}

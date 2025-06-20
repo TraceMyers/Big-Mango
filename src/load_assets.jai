@@ -68,15 +68,19 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
     Temp_Mesh_Data :: struct {
         vertices: []Mesh_Vertex;
         indices: Index_Buffer;
+        reorientation_quat: Quaternion;
         vertex_count: s64;
         index_count: s64;
         quads: bool;
+        reorient: bool;
     }
-    temp_mesh_data: Temp_Mesh_Data;
-    temp_mesh_data.quads = counts.quads;
 
+    temp_mesh_data: Temp_Mesh_Data;
     {
         using temp_mesh_data;
+        quads = counts.quads;
+        reorient = reorientation != QUATERNION_IDENTITY;
+        reorientation_quat = reorientation;
         vertices = alloc_array(Mesh_Vertex, xx counts.vertex_count, allocator);
         if counts.max_index > U16_MAX {
             indices.type = .U32;
@@ -101,7 +105,6 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
         if c0 == #char "v" && c1 == #char " " { // vertex
             components := tokenize_and_trim(line.*, xx #char " ");
             vertex := *mesh_data.vertices[mesh_data.vertex_count];
-            mesh_data.vertex_count += 1;
             cmp_idx := 0;
             for components {
                 val, success := parse_float(*it);
@@ -110,6 +113,10 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
                     cmp_idx += 1;
                 }
             }
+            if mesh_data.reorient {
+                vertex.position = rotate(vertex.position, mesh_data.reorientation_quat);
+            }
+            mesh_data.vertex_count += 1;
         } else if c0 == #char "f" && c1 == #char " " { // face
             face := tokenize_and_trim(line.*, #char " ");
             face_i := 0;
@@ -185,17 +192,310 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
                 }
             }
         }
-
-        if reorientation != QUATERNION_IDENTITY {
-            greatest_len_sq := 0.0;
-            for *vertices {
-                it.position = rotate(it.position, reorientation);
-                len_sq := length_squared(it.position);
-                greatest_len_sq = max(len_sq, greatest_len_sq);
-            }
-            rm_log("greatest len: %", sqrt(greatest_len_sq));
-        }
     }
 
     return temp_mesh_data.vertices, temp_mesh_data.indices;
+}
+
+// https://code.blender.org/2013/08/fbx-binary-file-format-specification/
+// https://gist.github.com/iscle/0dbcee58be8582978d15ea3629ce3e8b
+// todo: text-based file specification
+load_fbx_file :: (file_path: string, allocator := context.allocator) {
+    reader: Binary_Reader;
+    reader.memory = read_entire_file(file_path);
+    reader.position = 0;
+    defer free(reader.memory);
+
+    if reader.memory.count < 26 {
+        rm_warning("file length too short.");
+        return;
+    }
+
+    BINARY_HEADER_MAGIC :: "Kaydara FBX Binary  "; // null-terminated
+    binary_header_magic_with_null := BINARY_HEADER_MAGIC;
+    binary_header_magic_with_null.count += 1;
+
+    if read_string(*reader, binary_header_magic_with_null.count) != binary_header_magic_with_null {
+        head_str := string.{BINARY_HEADER_MAGIC.count, reader.memory.data};
+        rm_warning("the first bytes of the file, '%' do not match '%'", head_str, BINARY_HEADER_MAGIC);
+        return;
+    }
+
+    if read_number(*reader, u8) != 0x1a {
+        rm_warning("header bytes maybe not correct for unknown spec");
+    }
+
+    e : Endianness = ifx read_number(*reader, u8) == 0 then .LITTLE else .BIG;
+    // todo: maybe support? probably not, right?
+    assert(e == .LITTLE);
+    
+    version := read_number(*reader, u32, e);
+
+    FBX_Property_Type :: enum u8 {
+        BOOL::1;
+        U8;
+        S16;
+        S32;
+        S64;
+        F32;
+        F64;
+        BOOL_ARRAY;
+        U8_ARRAY;
+        S16_ARRAY;
+        S32_ARRAY;
+        S64_ARRAY;
+        F32_ARRAY;
+        F64_ARRAY;
+    }
+
+    FBX_Property :: struct {
+        type: FBX_Property_Type;
+        value: union {
+            _bool: bool;
+            _u8: u8;
+            _s16: s16;
+            _s32: s32;
+            _s64: s64;
+            _f32: float32;
+            _f64: float64;
+            _bool_array:[]bool;
+            _u8_array:  []u8;
+            _s16_array: []s16;
+            _s32_array: []s32;
+            _s64_array: []s64;
+            _f32_array: []float32;
+            _f64_array: []float64;
+        }
+    }
+
+    set_fbx_property_value :: (prop: *FBX_Property, type: FBX_Property_Type, value: *void, array_count: s64=0) {
+        assert(prop.type == 0);
+        prop.type = type;
+        if type == {
+        case .BOOL;
+            prop.value._bool = value.(*bool).*;
+        case .U8;
+            prop.value._u8 = value.(*u8).*;
+        case .S16;
+            prop.value._s16 = value.(*s16).*;
+        case .S32;
+            prop.value._s32 = value.(*s32).*;
+        case .S64;
+            prop.value._s64 = value.(*s64).*;
+        case .F32;
+            prop.value._f32 = value.(*float32).*;
+        case .F64;
+            prop.value._f64 = value.(*float64).*;
+        case .BOOL_ARRAY;
+            prop.value._bool_array.data = value.(*[]bool).data;
+            prop.value._bool_array.count = array_count;
+        case .U8_ARRAY;
+            prop.value._u8_array.data = value.(*[]u8).data;
+            prop.value._u8_array.count = array_count;
+        case .S16_ARRAY;
+            prop.value._s16_array.data = value.(*[]s16).data;
+            prop.value._s16_array.count = array_count;
+        case .S32_ARRAY;
+            prop.value._s32_array.data = value.(*[]s32).data;
+            prop.value._s32_array.count = array_count;
+        case .S64_ARRAY;
+            prop.value._s64_array.data = value.(*[]s64).data;
+            prop.value._s64_array.count = array_count;
+        case .F32_ARRAY;
+            prop.value._f32_array.data = value.(*[]float32).data;
+            prop.value._f32_array.count = array_count;
+        case .F64_ARRAY;
+            prop.value._f64_array.data = value.(*[]float64).data;
+            prop.value._f64_array.count = array_count;
+        case;
+            assert(false, "invalid fbx property value type");
+        }
+    }
+
+    FBX_Node :: struct {
+        children: []FBX_Node;
+        properties: []FBX_Property;
+        name: string;
+    }
+
+    is_null :: (using node: *FBX_Node) -> bool {
+        return children.count == 0 && properties.count == 0 && name.count == 0;
+    }
+
+    prop_array_element_type :: inline (type: u8) -> u8 {
+        assert(type >= #char "Z");
+        return type - (#char "a" - #char "A");
+    }
+
+    prop_enum_type :: (type: u8) -> FBX_Property_Type {
+        if type < #char "Z" {
+            if type == {
+            case #char "Y";
+                return .S16;
+            case #char "C"; #through;
+            case #char "B";
+                return .U8;
+            case #char "I";
+                return .S32;
+            case #char "L";
+                return .S64;
+            case #char "F";
+                return .F32;
+            case #char "D";
+                return .F64;
+            case #char "S"; #through;
+            case #char "R";
+                return .U8_ARRAY;
+            case;
+                assert(false, "invalid property value type");
+            }
+            return 0;
+        } 
+        array_element_type := min(prop_array_element_type(type), #char "Y");
+        if array_element_type == {
+        case #char "Y";
+            return .S16_ARRAY;
+        case #char "C"; #through;
+        case #char "B";
+            return .U8_ARRAY;
+        case #char "I";
+            return .S32_ARRAY;
+        case #char "L";
+            return .S64_ARRAY;
+        case #char "F";
+            return .F32_ARRAY;
+        case #char "D";
+            return .F64_ARRAY;
+        case;
+            assert(false, "invalid property value type");
+        }
+        return 0;
+    }
+
+    prop_element_size :: inline (type: u8) -> u8 {
+        if type == {
+        case #char "Y";
+            return 2;
+        case #char "C"; #through;
+        case #char "B";
+            return 1;
+        case #char "I";
+            return 4;
+        case #char "L";
+            return 8;
+        case #char "F";
+            return 4;
+        case #char "D";
+            return 8;
+        case;
+            assert(false, "invalid property value type");
+        }
+        return 0;
+    }
+
+    read_fbx_property :: (reader: *Binary_Reader, prop: *FBX_Property, e: Endianness) -> bool {
+        type := read_number(reader, u8, e);
+        if type == #char "S" || type == #char "R" {
+            // string / raw bytes
+            byte_count := read_number(reader, u32, e);
+            assert(byte_count > 0);
+            array := alloc_array(u8, byte_count, temp);
+            read_bytes(reader, *array, array.count);
+            set_fbx_property_value(prop, .U8_ARRAY, *array);
+        } else if type < #char "Z" {
+            // primitive value
+            if type == {
+            case #char "Y";
+                val := read_number(reader, s16, e);
+                set_fbx_property_value(prop, .S16, *val);
+            case #char "C";
+                val := read_number(reader, u8, e);
+                set_fbx_property_value(prop, .U8, *val);
+            case #char "B";
+                val := read_number(reader, u8, e) != 0;
+                set_fbx_property_value(prop, .BOOL, *val);
+            case #char "I";
+                val := read_number(reader, s32, e);
+                set_fbx_property_value(prop, .S32, *val);
+            case #char "L";
+                val := read_number(reader, s64, e);
+                set_fbx_property_value(prop, .S64, *val);
+            case #char "F";
+                val := read_number(reader, float32, e);
+                set_fbx_property_value(prop, .F32, *val);
+            case #char "D";
+                val := read_number(reader, float64, e);
+                set_fbx_property_value(prop, .F64, *val);
+            case;
+                assert(false, "invalid property value type");
+            }
+        } else {
+            // array
+            array_count := read_number(reader, u32, e);
+            // 0 = uncompressed, 1 = zlib compressed
+            encoding := read_number(reader, u32, e) != 0;
+            compressed_size := read_number(reader, u32, e);
+
+            element_size := prop_element_size(prop_array_element_type(type));
+            decompressed_size := element_size * array_count;
+            
+            // note that this needs to be aligned to 8 bytes, and I believe every allocation using the default & temp allocators is aligned to 8.
+            decompressed_buffer := alloc_array(u8, decompressed_size, temp);
+
+            if encoding {
+                auto_release_temp();
+                compressed_buffer := alloc_array(u8, compressed_size, temp);
+
+                read_bytes(reader, *compressed_buffer, compressed_size);
+                actual_size : u32 = decompressed_size;
+                result := Zlib.uncompress(decompressed_buffer.data, *actual_size, compressed_buffer.data, compressed_size);
+
+                if result != Zlib.Z_OK {
+                    rm_error("failed to decompress, array type %", prop_array_element_type(type));
+                    return false;
+                }
+                if actual_size != decompressed_size {
+                    rm_warning("expected property size %, got size %", decompressed_size, actual_size);
+                }
+
+                set_fbx_property_value(prop, prop_enum_type(type), *decompressed_buffer, xx array_count);
+            } else {
+                read_bytes(reader, *decompressed_buffer, decompressed_size);
+                set_fbx_property_value(pop, prop_enum_type(type), *decompessed_buffer, xx array_count);
+            }
+        }
+        return true;
+    }
+
+    nodes: [..]FBX_Node;
+    nodes.allocator = temp;
+    array_reserve(*nodes, 128);
+
+    failure: bool;
+    finished_load : bool;
+    while !finished_load {
+        node: FBX_Node;
+
+        end_offset          := read_number(*reader, u32, e);
+        property_count      := read_number(*reader, u32, e);
+        property_list_count := read_number(*reader, u32, e);
+        name_length         := read_number(*reader, u8, e);
+        bytes : u32 = name_length;
+
+        if property_count > 0 {
+            node.properties = alloc_array(FBX_Property, xx property_count, temp);
+            for *node.properties {
+                if !read_fbx_property(*reader, it, e) {
+                    failure = true;
+                    finished_load = true;
+                    break;
+                }
+            }
+        }
+
+        if is_null(*node) {
+            break;
+        }
+        array_add(*nodes, node);
+    }
 }

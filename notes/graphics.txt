@@ -1,0 +1,2 @@
+Techniques I need to try:
+- if, in a vertex shader, you respace the geo normal / light normal dot product so that light can wrap around an object more, what kind of look can be achieved?

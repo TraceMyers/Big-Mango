@@ -8,15 +8,6 @@ Camera_Projection :: enum {
     PERSPECTIVE;
 }
 
-Camera :: struct {
-    using #as entity: Entity;
-    projection := Camera_Projection.NONE;
-    using settings: union {
-        orthographic: Camera_Settings_Orthographic = ---;
-        perspective: Camera_Settings_Perspective = ---;
-    }
-}
-
 Camera_Settings_Orthographic :: struct {
     scale := 1.0;
 }
