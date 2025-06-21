@@ -1,15 +1,34 @@
 
 scratch_init_game :: () {
-    set_capacity(*static_mesh_entities, 1024);
+    // set_capacity(*static_mesh_entities, 1024);
 
+    // camera init
+    {
+        // temp camera stuff;
+        camera_ref := spawn_entity(.CAMERA);
+        get_entity(*camera, camera_ref);
+        camera.camera.* = camera_make(.ORTHOGRAPHIC);
+        camera.orthographic.scale = 10.0;
+
+        camera.position.y = -30.0;
+        camera.position.z = 60.0;
+
+        cos_t := cos(PI/6);
+        sin_t := sin(PI/6);
+
+        set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
+        rotate(*camera, .{0,0,1}, PI/6);
+    }
     // character / character mesh
     {
         auto_release_temp();
 
-        e_id := request_item(*static_mesh_entities);
-        e := static_mesh_entities[e_id];
-        e.mesh = xx request_item(*mesh_pool);
-        mesh := *mesh_pool[e.mesh];
+        entity_ref := spawn_entity(.STATIC_MESH);
+        mesh_index := request_item(*mesh_pool);
+        mesh := *mesh_pool[mesh_index];
+
+        set_entity_meshes(entity_ref, mesh);
+        get_entity(*player_character, entity_ref);
 
         mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
 
@@ -31,23 +50,6 @@ scratch_init_game :: () {
         create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
 
         mesh.albedo.type = .CONSTANT;
-    }
-    // camera init
-    {
-        camera = camera_make(.ORTHOGRAPHIC);
-        camera.orthographic.scale = 10.0;
-
-        // camera = camera_make(.PERSPECTIVE);
-        // camera.perspective.vertical_fov = 90.0;
-
-        camera.position.y = -30.0;
-        camera.position.z = 60.0;
-
-        cos_t := cos(PI/6);
-        sin_t := sin(PI/6);
-
-        set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
-        rotate(*camera, .{0,0,1}, PI/6);
     }
     {
         auto_release_temp();

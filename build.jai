@@ -69,8 +69,52 @@ compile_shaders := true;
     set_build_options(build_options, w);
 
     log("\ncompiling game...\n ");
+
     // build
+
+    // build metaprogrammed constants. sometimes the compiler has a hard time with order of compilation wrt generated code.
+    // add_build_file("src/constants.jai", w);
+    compiler_begin_intercept(w);
+    // add_build_file("src/physics_properties.jai", w);
+    // build game
+
+    // while true {
+    //     m := compiler_wait_for_message();
+    //     if m.kind == .PHASE {
+    //         m_phase := m.(*Message_Phase);
+    //         if m_phase.phase == .TYPECHECKED_ALL_WE_CAN {
+    //             break;
+    //         }
+    //     }
+    // }
+
     add_build_file("src/game.jai", w);
+
+    // while true {
+    //     m := compiler_wait_for_message();
+    //     if m.kind == .PHASE {
+    //         m_phase := m.(*Message_Phase);
+    //         if m_phase.phase == .TYPECHECKED_ALL_WE_CAN {
+    //             break;
+    //         }
+    //     }
+    // }
+
+    // add_build_string("PLACEHOLDER_PHYSICS_PROPERTIES_DYNAMIC :: Physics_Properties_Dynamic;", w);
+
+    while true {
+        m := compiler_wait_for_message();
+        if m.kind == .COMPLETE {
+            m_complete := cast(*Message_Complete)m;
+            if m_complete.error_code != .NONE {
+                log("compile error: %. exiting", m_complete.error_code);
+            }
+            break;
+        }
+    }
+
+    compiler_end_intercept(w);
+
 }
 
 // pull this repository when the argument to do so is passed.

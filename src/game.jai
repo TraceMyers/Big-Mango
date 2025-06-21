@@ -23,11 +23,16 @@ main :: () {
     scratch_init_game();
 
     per_frame_time = seconds_since_init();
+    non_render_time = seconds_since_init();
 
     while !quit {
         update_window_events(delta_time);
         imgui_draw();
+
+        new_non_render_time := seconds_since_init();
+        non_render_dt = xx (new_non_render_time - non_render_time);
         render_frame();
+        non_render_time = new_non_render_time;
 
         new_time := seconds_since_init();
         delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
@@ -82,7 +87,13 @@ window: Window_Type;
 delta_time := 0.01;
 game_frame_count: s64;
 per_frame_time: float64;
+non_render_time: float64;
 quit := false;
+
+camera: Entity;
+player_character: Entity;
+
+non_render_dt: float;
 
 DELTA_TIME_COUNT :: 64;
 delta_times: [DELTA_TIME_COUNT]float32;
@@ -109,6 +120,8 @@ Input :: #import "Input";
 }
 Zlib :: #import "zlib";
 
+#load "constants.jai";
+#load "physics_properties.jai";
 #load "input.jai";
 #load "vulkan.jai";
 #load "imgui_impl.jai";

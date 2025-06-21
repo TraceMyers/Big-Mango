@@ -201,10 +201,12 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
 // https://gist.github.com/iscle/0dbcee58be8582978d15ea3629ce3e8b
 // todo: text-based file specification
 load_fbx_file :: (file_path: string, allocator := context.allocator) {
-    reader: Binary_Reader;
+    auto_release_temp();
+    reader: Serializer(.STATIC, .BYTE);
     reader.memory = read_entire_file(file_path);
-    reader.position = 0;
-    defer free(reader.memory);
+    defer reset(*reader.memory);
+    reader.read_array_allocator = temp;
+    set_rw_mode(*reader, .READ);
 
     if reader.memory.count < 26 {
         rm_warning("file length too short.");
@@ -215,21 +217,23 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
     binary_header_magic_with_null := BINARY_HEADER_MAGIC;
     binary_header_magic_with_null.count += 1;
 
-    if read_string(*reader, binary_header_magic_with_null.count) != binary_header_magic_with_null {
+    file_header_magic: string;
+    read_string(*reader, *file_header_magic);
+    if file_header_magic != binary_header_magic_with_null {
         head_str := string.{BINARY_HEADER_MAGIC.count, reader.memory.data};
         rm_warning("the first bytes of the file, '%' do not match '%'", head_str, BINARY_HEADER_MAGIC);
         return;
     }
 
-    if read_number(*reader, u8) != 0x1a {
+    if read_out(*reader, u8) != 0x1a {
         rm_warning("header bytes maybe not correct for unknown spec");
     }
 
-    e : Endianness = ifx read_number(*reader, u8) == 0 then .LITTLE else .BIG;
+    e : Endianness = ifx read_out(*reader, u8) == 0 then .LITTLE else .BIG;
     // todo: maybe support? probably not, right?
     assert(e == .LITTLE);
     
-    version := read_number(*reader, u32, e);
+    version := read_out(*reader, u32);
 
     FBX_Property_Type :: enum u8 {
         BOOL::1;
@@ -393,60 +397,61 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
         return 0;
     }
 
-    read_fbx_property :: (reader: *Binary_Reader, prop: *FBX_Property, e: Endianness) -> bool {
-        type := read_number(reader, u8, e);
+    read_fbx_property :: (reader: *Serializer(.STATIC, .BYTE), prop: *FBX_Property, e: Endianness) -> bool {
+        type := read_out(reader, u8);
         if type == #char "S" || type == #char "R" {
             // string / raw bytes
-            byte_count := read_number(reader, u32, e);
+            byte_count := read_out(reader, u32);
             assert(byte_count > 0);
             array := alloc_array(u8, byte_count, temp);
-            read_bytes(reader, *array, array.count);
+            read_array_data(reader, *array, xx array.count);
             set_fbx_property_value(prop, .U8_ARRAY, *array);
         } else if type < #char "Z" {
             // primitive value
             if type == {
             case #char "Y";
-                val := read_number(reader, s16, e);
+                val := read_out(reader, s16);
                 set_fbx_property_value(prop, .S16, *val);
             case #char "C";
-                val := read_number(reader, u8, e);
+                val := read_out(reader, u8);
                 set_fbx_property_value(prop, .U8, *val);
             case #char "B";
-                val := read_number(reader, u8, e) != 0;
+                val := read_out(reader, u8) != 0;
                 set_fbx_property_value(prop, .BOOL, *val);
             case #char "I";
-                val := read_number(reader, s32, e);
+                val := read_out(reader, s32);
                 set_fbx_property_value(prop, .S32, *val);
             case #char "L";
-                val := read_number(reader, s64, e);
+                val := read_out(reader, s64);
                 set_fbx_property_value(prop, .S64, *val);
             case #char "F";
-                val := read_number(reader, float32, e);
+                val := read_out(reader, float32);
                 set_fbx_property_value(prop, .F32, *val);
             case #char "D";
-                val := read_number(reader, float64, e);
+                val := read_out(reader, float64);
                 set_fbx_property_value(prop, .F64, *val);
             case;
                 assert(false, "invalid property value type");
             }
         } else {
             // array
-            array_count := read_number(reader, u32, e);
+            array_count := read_out(reader, u32);
             // 0 = uncompressed, 1 = zlib compressed
-            encoding := read_number(reader, u32, e) != 0;
-            compressed_size := read_number(reader, u32, e);
+            encoding := read_out(reader, u32) != 0;
+            compressed_size := read_out(reader, u32);
 
             element_size := prop_element_size(prop_array_element_type(type));
             decompressed_size := element_size * array_count;
             
             // note that this needs to be aligned to 8 bytes, and I believe every allocation using the default & temp allocators is aligned to 8.
-            decompressed_buffer := alloc_array(u8, decompressed_size, temp);
+            decompressed_buffer: []u8;
 
             if encoding {
                 auto_release_temp();
-                compressed_buffer := alloc_array(u8, compressed_size, temp);
+                
+                compressed_buffer: []u8;
+                read_array_data(reader, *compressed_buffer, xx compressed_size);
 
-                read_bytes(reader, *compressed_buffer, compressed_size);
                 actual_size : u32 = decompressed_size;
                 result := Zlib.uncompress(decompressed_buffer.data, *actual_size, compressed_buffer.data, compressed_size);
 
@@ -460,8 +465,8 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
 
                 set_fbx_property_value(prop, prop_enum_type(type), *decompressed_buffer, xx array_count);
             } else {
-                read_bytes(reader, *decompressed_buffer, decompressed_size);
-                set_fbx_property_value(pop, prop_enum_type(type), *decompessed_buffer, xx array_count);
+                read_array_data(reader, *decompressed_buffer, xx decompressed_size);
+                set_fbx_property_value(prop, prop_enum_type(type), *decompressed_buffer, xx array_count);
             }
         }
         return true;
@@ -476,10 +481,10 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
     while !finished_load {
         node: FBX_Node;
 
-        end_offset          := read_number(*reader, u32, e);
-        property_count      := read_number(*reader, u32, e);
-        property_list_count := read_number(*reader, u32, e);
-        name_length         := read_number(*reader, u8, e);
+        end_offset          := read_out(*reader, u32);
+        property_count      := read_out(*reader, u32);
+        property_list_count := read_out(*reader, u32);
+        name_length         := read_out(*reader, u8);
         bytes : u32 = name_length;
 
         if property_count > 0 {

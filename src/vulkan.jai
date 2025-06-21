@@ -143,8 +143,6 @@ render_frame :: () {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat := view_projection_matrix(*camera, viewport);
 
-    rotate(*camera, .{0,0,1}, delta_time*0.3);
-
     prepare_lights();
 
     immediate_submit();
@@ -162,18 +160,15 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    for e : static_mesh_entities.items {
-        if !is_item_in_use(*static_mesh_entities, it_index) {
-            continue;
-        }
-        model := make_translation_matrix4(e.position);
-        rot := rotation_matrix(Matrix4, e.orientation);
+    for mesh : player_character.meshes {
+        model := make_translation_matrix4(player_character.position);
+        rot := rotation_matrix(Matrix4, player_character.orientation);
         model *= rot;
-        scale := make_scale_matrix4(.{e.scale, e.scale, e.scale});
+        scale := make_scale_matrix4(.{1, 1, 1});
         model *= scale;
-        mesh := mesh_pool[e.mesh];
-        draw_mesh(cmd, *mesh, *model, *e.orientation, *vp_mat, 1);
+        draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
     }
+
     for 0..5 {
         orientation: Quaternion;
         offset := ifx it & 1 == 0 then 0.0 else 10.0;
@@ -199,8 +194,6 @@ render_frame :: () {
         m.albedo.tint = test_color_2;
         draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
-
-
 
     vkCmdEndRendering(cmd);
 
@@ -2554,8 +2547,6 @@ transfer_command_buffer: VkCommandBuffer;
 transfer_command_pool: VkCommandPool;
 
 shader_hash_table: [..]Shader_Hash_Item;
-
-camera: Camera;
 
 lights: Lights;
 

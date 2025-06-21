@@ -115,6 +115,7 @@ show_perf_readout :: () {
 
     Text(tprint("FPS: %", FormatFloat.{value=calc_avg_fps(), trailing_width=2}));
     Text(tprint("Frame Time: % ms", FormatFloat.{value=calc_avg_delta_time() * 1000.0, trailing_width=2}));
+    Text("Non-Render Time: % ms", FormatFloat.{value=non_render_dt * 1000.0, trailing_width=2});
 
     InputFloat3("sun direction", *lights.sun_direction.component);
     ColorPicker3("sun tint", xx *lights.sun_tint.component);
@@ -145,13 +146,13 @@ show_perf_readout :: () {
     Text("% % % %", _ffmt(mvp._31), _ffmt(mvp._32), _ffmt(mvp._33), _ffmt(mvp._34));
     Text("% % % %", _ffmt(mvp._41), _ffmt(mvp._42), _ffmt(mvp._43), _ffmt(mvp._44));
 
-    e := *static_mesh_entities[0];
+    // e := *static_mesh_entities[0];
 
-    {
-        using e.orientation;
-        Text("guy orientation");
-        Text("% % % %", _ffmt(x), _ffmt(y), _ffmt(z), _ffmt(w));
-    }
+    // {
+    //     using e.orientation;
+    //     Text("guy orientation");
+    //     Text("% % % %", _ffmt(x), _ffmt(y), _ffmt(z), _ffmt(w));
+    // }
 
     // Text("face normals");
     // {

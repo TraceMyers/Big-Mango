@@ -45,6 +45,8 @@ update_window_events :: (delta_time: float) {
     }
 
     if control_mode == .FREE_FLY {
+        camera.projection = .PERSPECTIVE;
+        camera.perspective.vertical_fov = 90;
         speed := 100.0;
         dt_speed := speed * delta_time;
         if Input.input_button_states[#char "W"] & .DOWN {
@@ -67,20 +69,25 @@ update_window_events :: (delta_time: float) {
         }
 
         if do_mouse_move {
-            rot_speed := 4.0;
-            rot_dt_speed := speed * delta_time;
+            rot_speed := 0.2;
+            rot_dt_speed := rot_speed * delta_time;
             if abs(Input.mouse_delta_x) > 0 {
-                angle := -rot_dt_speed * 0.4 * Input.mouse_delta_x.(float);
+                angle := -rot_dt_speed * Input.mouse_delta_x.(float);
                 rotate(*camera, WORLD_UP, angle);
+                // rm_log("delta x: %", Input.mouse_delta_x);
+                // rm_log("speed: %, dt: %, rot_dt_speed: %, angle: %", rot_speed, delta_time, rot_dt_speed, angle);
             }
             if abs(Input.mouse_delta_y) > 0 {
-                angle := -rot_dt_speed * 0.4 * Input.mouse_delta_y.(float);
+                angle := -rot_dt_speed * Input.mouse_delta_y.(float);
                 rotate(*camera, right_direction_xy(*camera), angle);
+                // rm_log("delta y: %", Input.mouse_delta_y);
             }
         }
     } else {
-        e := *static_mesh_entities[0];
-        target := e.orientation;
+
+        camera.projection = .ORTHOGRAPHIC;
+        camera.orthographic.scale = 10;
+        target := player_character.orientation;
         camera_xy_orientation: Quaternion;
         set_orientation(*camera_xy_orientation, fore_direction_xy(*camera.orientation), .{0,0,1});
 
@@ -111,16 +118,16 @@ update_window_events :: (delta_time: float) {
         if move_dir.xy != .{0,0} {
             move_dir.xy = normalize(move_dir.xy);
             target = make_quat(.{move_dir.y, -move_dir.x, 0}, .{0,0,1});
-            e.position.xy += move_dir.xy * dt_speed;
+            player_character.position.xy += move_dir.xy * dt_speed;
         }
 
         rot_speed := 6.5 * PI;
-        interp_rotate(e, target, rot_speed, delta_time);
+        interp_rotate(*player_character, target, rot_speed, delta_time);
 
         target_camera_pos: Vector3 = ---;
-        target_camera_pos.xy = e.position.xy;
+        target_camera_pos.xy = player_character.position.xy;
         target_camera_pos.xy -= fore_direction(*camera).xy * 30.0;
-        target_camera_pos.z = e.position.z + 60.0;
+        target_camera_pos.z = player_character.position.z + 60.0;
         camera.position = exponential_interp(camera.position, target_camera_pos, 6.0, delta_time);
     }
 
