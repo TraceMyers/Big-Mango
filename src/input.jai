@@ -74,13 +74,10 @@ update_window_events :: (delta_time: float) {
             if abs(Input.mouse_delta_x) > 0 {
                 angle := -rot_dt_speed * Input.mouse_delta_x.(float);
                 rotate(*camera, WORLD_UP, angle);
-                // rm_log("delta x: %", Input.mouse_delta_x);
-                // rm_log("speed: %, dt: %, rot_dt_speed: %, angle: %", rot_speed, delta_time, rot_dt_speed, angle);
             }
             if abs(Input.mouse_delta_y) > 0 {
                 angle := -rot_dt_speed * Input.mouse_delta_y.(float);
                 rotate(*camera, right_direction_xy(*camera), angle);
-                // rm_log("delta y: %", Input.mouse_delta_y);
             }
         }
     } else {
@@ -97,27 +94,28 @@ update_window_events :: (delta_time: float) {
 
         if Input.input_button_states[#char "W"] & .DOWN {
             target = camera_xy_orientation;
-            rotate(*target, .{0,0,1}, -PI/2);
-            move_dir.xy += -right_direction_xy(*target).xy;
+            // rotate(*target, .{0,0,1}, -PI/2);
+            move_dir.xy += fore_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "S"] & .DOWN {
             target = camera_xy_orientation;
-            rotate(*target, .{0,0,1}, PI/2);
-            move_dir.xy += -right_direction_xy(*target).xy;
+            rotate(*target, .{0,0,1}, PI);
+            move_dir.xy += fore_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "D"] & .DOWN {
             target = camera_xy_orientation;
-            rotate(*target, .{0,0,1}, PI);
-            move_dir.xy += -right_direction_xy(*target).xy;
+            rotate(*target, .{0,0,1}, -PI/2);
+            move_dir.xy += fore_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "A"] & .DOWN {
             target = camera_xy_orientation;
-            move_dir.xy += -right_direction_xy(*target).xy;
+            rotate(*target, .{0,0,1}, PI/2);
+            move_dir.xy += fore_direction_xy(*target).xy;
         }
 
         if move_dir.xy != .{0,0} {
             move_dir.xy = normalize(move_dir.xy);
-            target = make_quat(.{move_dir.y, -move_dir.x, 0}, .{0,0,1});
+            target = make_quat(.{move_dir.x, move_dir.y, 0}, .{0,0,1});
             player_character.position.xy += move_dir.xy * dt_speed;
         }
 

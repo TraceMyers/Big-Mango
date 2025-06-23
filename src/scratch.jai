@@ -7,15 +7,19 @@ scratch_init_game :: () {
         // temp camera stuff;
         camera_ref := spawn_entity(.CAMERA);
         get_entity(*camera, camera_ref);
+
         camera.camera.* = camera_make(.ORTHOGRAPHIC);
         camera.orthographic.scale = 10.0;
 
-        camera.position.y = -30.0;
+        // camera.camera.* = camera_make(.PERSPECTIVE);
+
+        // camera.position.y = -30.0;
         camera.position.z = 60.0;
 
         cos_t := cos(PI/4);
         sin_t := sin(PI/4);
 
+        // set_orientation(*camera, .{0,0,-1}, .{0,1,0});
         set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
         // rotate(*camera, .{0,0,1}, PI/4);
     }
@@ -33,7 +37,7 @@ scratch_init_game :: () {
         mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
 
         reorient_mesh_quat: Quaternion;
-        set_orientation(*reorient_mesh_quat, .{-1,0,0}, .{0,1,0});
+        set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
         vertices, indices := load_obj_file("../content/experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, temp);
 
         modified_vertices: [..]Mesh_Vertex;

@@ -30,7 +30,7 @@ main :: () {
         imgui_draw();
 
         pc_hips_maybe := player_character.position + WORLD_UP * 20.0;
-        draw_line(pc_hips_maybe, pc_hips_maybe - right_direction(*player_character) * 50.0, .{1,0,0,1}, .{0,0,1,1});
+        draw_line(pc_hips_maybe, pc_hips_maybe + fore_direction(*player_character) * 50.0, .{1,0,0,1}, .{0,0,1,1});
 
         new_non_render_time := seconds_since_init();
         non_render_dt = xx (new_non_render_time - non_render_time);

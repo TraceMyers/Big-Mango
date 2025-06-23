@@ -133,6 +133,11 @@ render_frame :: () {
         }
     }
 
+    draw_line(.{}, WORLD_X * 10.0, .{1,0,0,1});
+    draw_line(.{}, WORLD_Y * 10.0, .{0,1,0,1});
+    draw_line(.{0,-10,0}, Vector3.{0,-10,0} + WORLD_FORE * 3.0, .{0,0,1,1});
+    draw_line(.{0,-10,0}, Vector3.{0,-10,0} + WORLD_RIGHT * 3.0, .{0,1,1,1});
+    // draw_line(.{}, WORLD_Z * 10.0, .{0,0,1,1});
     copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
     defer array_reset_keeping_memory(*lines);
 
