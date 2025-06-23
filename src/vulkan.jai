@@ -47,6 +47,7 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if init_success then create_experimental_data();
         if init_success then create_descriptors();
         if init_success then create_pipelines();
+        if init_success then create_buffers();
         return init_success;
     } else {
         // ---------------------------------------------------------------------------------------------------- shutdown
@@ -120,8 +121,8 @@ render_frame :: () {
 
     if should_rebuild_swapchain() {
         immediate_submit();
-        vkQueueWaitIdle(graphics_queue);
         vkQueueWaitIdle(transfer_queue);
+        vkQueueWaitIdle(graphics_queue);
         create_swapchain();
         create_draw_image();
         create_depth_image();
@@ -131,6 +132,9 @@ render_frame :: () {
             return;
         }
     }
+
+    copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
+    defer array_reset_keeping_memory(*lines);
 
     image_index := acquire_next_swapchain_image(current_frame);
     flush_deletion_queue(current_frame.deletion_queue);
@@ -160,15 +164,6 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    for mesh : player_character.meshes {
-        model := make_translation_matrix4(player_character.position);
-        rot := rotation_matrix(Matrix4, player_character.orientation);
-        model *= rot;
-        scale := make_scale_matrix4(.{1, 1, 1});
-        model *= scale;
-        draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
-    }
-
     for 0..5 {
         orientation: Quaternion;
         offset := ifx it & 1 == 0 then 0.0 else 10.0;
@@ -181,8 +176,7 @@ render_frame :: () {
         m.albedo.tint = test_color_1;
         draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
-    for 0..5
-    {
+    for 0..5 {
         offset := ifx it & 1 != 0 then 0.0 else 10.0;
         orientation: Quaternion;
         model := make_translation_matrix4(.{offset,10.0*it,-4});
@@ -194,6 +188,18 @@ render_frame :: () {
         m.albedo.tint = test_color_2;
         draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
+    for mesh : player_character.meshes {
+        mesh.albedo.tint.w = 1.0;
+        model := make_translation_matrix4(player_character.position);
+        rot := rotation_matrix(Matrix4, player_character.orientation);
+        model *= rot;
+        scale := make_scale_matrix4(.{1, 1, 1});
+        model *= scale;
+        draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
+
+    }
+
+    draw_lines(cmd, *vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -487,6 +493,11 @@ create_logical_device :: () {
     }
 
     enable_device_features: VkPhysicalDeviceFeatures;
+    {
+        using enable_device_features;
+        fillModeNonSolid = VK_TRUE;
+        wideLines = VK_TRUE;
+    }
 
     dynamic_rendering_enable := VkPhysicalDeviceDynamicRenderingFeatures.{
         dynamicRendering = VK_TRUE,
@@ -766,19 +777,23 @@ create_graphics_buffer :: (buffer: *VkBuffer, allocation: *VmaAllocation, memory
     alloc_info := VmaAllocationInfo.{};
     vmaCreateBuffer(vk_allocator, *create_info, *alloc_create_info, buffer, allocation, *alloc_info);
 
-    // metaprogramming quirk
+    // metaprogramming quirk. must directly pass the data that is going into the deferred call. VkBuffer is a ptr type.
+    // *VkBuffer is a ptr to that ptr. we need to pass the VkBuffer, not the *VkBuffer.
     _buffer := buffer.*;
     _allocation := allocation.*;
     deletion_queue_add(*game_deletion_queue, vmaDestroyBuffer(vk_allocator, _buffer, _allocation), _buffer, _allocation);
 
-    staging_buffer, staging_buffer_alloc := copy_to_staging_buffer(as_array(memory, u8));
-    defer vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
-
     cmd := transfer_command_buffer;
     begin_command_buffer(cmd);
 
-    copy := VkBufferCopy.{0, 0, xx memory.count};
-    vkCmdCopyBuffer(cmd, staging_buffer, buffer.*, 1, *copy);   
+    staging_buffer: VkBuffer;
+    staging_buffer_alloc: VmaAllocation;
+    if memory.data != null {
+        staging_buffer, staging_buffer_alloc = copy_to_staging_buffer(as_array(memory, u8));
+        copy := VkBufferCopy.{0, 0, xx memory.count};
+        vkCmdCopyBuffer(cmd, staging_buffer, buffer.*, 1, *copy);   
+    }
+    defer if memory.data != null then vmaDestroyBuffer(vk_allocator, staging_buffer, staging_buffer_alloc);
 
     transition_src_queue_index := VK_QUEUE_FAMILY_IGNORED;
     transition_dst_queue_index := VK_QUEUE_FAMILY_IGNORED;
@@ -814,10 +829,11 @@ create_graphics_buffer :: (buffer: *VkBuffer, allocation: *VmaAllocation, memory
     immediate_submit_graphics_queue();
 }
 
-create_mesh_data_buffer :: (using out_buffer: *Mesh_Data_Buffer, data: []$T, $in_type: Mesh_Data_Buffer_Type) 
+// null is valid for copy_memory
+create_mesh_data_buffer :: (using out_buffer: *Mesh_Data_Buffer, $T: Type, copy_memory: *void, copy_and_allocate_count: s64, $in_type: Mesh_Data_Buffer_Type) 
 #modify {
     if in_type == .VERTEX {
-        return T == Mesh_Vertex;
+        return T == Mesh_Vertex || T == Line_Vertex;
     } else if in_type == .INDEX {
         return T == u16 || T == u32;
     } else {
@@ -827,7 +843,7 @@ create_mesh_data_buffer :: (using out_buffer: *Mesh_Data_Buffer, data: []$T, $in
     out_buffer.* = .{};
 
     type = in_type;
-    count = xx data.count;
+    count = xx copy_and_allocate_count;
 
     #if in_type == .VERTEX {
         usage_flag := VkBufferUsageFlags.VERTEX_BUFFER_BIT;
@@ -842,7 +858,11 @@ create_mesh_data_buffer :: (using out_buffer: *Mesh_Data_Buffer, data: []$T, $in
         }
     }
 
-    create_graphics_buffer(*buffer, *allocation, as_string(data), usage_flag, access_flag, .VERTEX_INPUT_BIT);
+    create_graphics_buffer(*buffer, *allocation, string.{copy_and_allocate_count * size_of(T), copy_memory}, usage_flag, access_flag, .VERTEX_INPUT_BIT);   
+}
+
+create_mesh_data_buffer :: inline (using out_buffer: *Mesh_Data_Buffer, memory: []$T, $in_type: Mesh_Data_Buffer_Type) {
+    create_mesh_data_buffer(out_buffer, T, memory.data, memory.count, in_type);
 }
 
 create_experimental_data :: () {
@@ -874,7 +894,9 @@ create_experimental_data :: () {
         lights.sun_tint = .{1,1,1,1};
         create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
     }
-
+    {
+        array_reserve(*lines, 32_768);
+    }
 }
 
 create_pipelines :: () {
@@ -882,7 +904,15 @@ create_pipelines :: () {
     create_sphere_pipeline();
     create_tex_pipeline();
     create_graphics_pipeline();
+    create_line_pipeline();
     if !init_success then return;
+}
+
+create_buffers :: () {
+    {
+        assert(lines.allocated > 0);
+        create_mesh_data_buffer(*line_vbo, Line_Vertex, null, lines.allocated * 2, .VERTEX);
+    }
 }
 
 create_rect_pipeline :: () {
@@ -1061,7 +1091,7 @@ create_graphics_pipeline :: () {
 
     color_blend_attachment := VkPipelineColorBlendAttachmentState.{
         colorWriteMask = .R_BIT | .G_BIT | .B_BIT | .A_BIT,
-        blendEnable = VK_FALSE,
+        blendEnable = VK_TRUE,
         srcColorBlendFactor = .SRC_ALPHA,
         dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
         colorBlendOp = .ADD,
@@ -1160,6 +1190,178 @@ create_graphics_pipeline :: () {
     deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, graphics_pipeline, null));
 }
 
+create_line_pipeline :: () {
+    auto_release_temp();
+
+    frag := load_shader("line_frag");
+    vert := load_shader("line_vert");
+
+    shader_stages := VkPipelineShaderStageCreateInfo.[
+     .{
+        stage = .VERTEX_BIT,
+        module = vert,
+        pName = "main"
+    }, 
+    .{
+        stage = .FRAGMENT_BIT,
+        module = frag,
+        pName = "main"
+    }];
+
+    vertex_bindings, vertex_attributes := vertex_descriptors(Line_Vertex);
+
+    vertex_input_info := VkPipelineVertexInputStateCreateInfo.{
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = *vertex_bindings,
+        vertexAttributeDescriptionCount = xx vertex_attributes.count,
+        pVertexAttributeDescriptions = vertex_attributes.data
+    };
+
+    input_assembly_info := VkPipelineInputAssemblyStateCreateInfo.{
+        topology = .LINE_LIST,
+    };
+
+    viewport := VkViewport.{
+        width = xx swapchain.extent.width,
+        height = xx swapchain.extent.height,
+        minDepth = 0.0,
+        maxDepth = 1.0
+    };
+
+    scissor := VkRect2D.{
+        extent = swapchain.extent
+    };
+
+    viewport_create_info := VkPipelineViewportStateCreateInfo.{
+        viewportCount = 1,
+        scissorCount = 1
+    };
+
+    rasterizer_create_info := VkPipelineRasterizationStateCreateInfo.{
+        depthClampEnable = VK_FALSE,
+        rasterizerDiscardEnable = VK_FALSE,
+        polygonMode = .LINE,
+        lineWidth = 1.0,
+        // cullMode = .FRONT_BIT,
+        // cullMode = .BACK_BIT,
+        cullMode = .NONE,
+        frontFace = .CLOCKWISE,
+        depthBiasEnable = VK_FALSE,
+        depthBiasConstantFactor = 0.0,
+        depthBiasClamp = 0.0,
+        depthBiasSlopeFactor = 0.0
+    };
+
+    multisample_create_info := VkPipelineMultisampleStateCreateInfo.{
+        sampleShadingEnable = VK_FALSE,
+        rasterizationSamples = ._1_BIT,
+        minSampleShading = 1.0,
+        pSampleMask = null,
+        alphaToCoverageEnable = VK_FALSE,
+        alphaToOneEnable = VK_FALSE
+    };
+
+    color_blend_attachment := VkPipelineColorBlendAttachmentState.{
+        colorWriteMask = .R_BIT | .G_BIT | .B_BIT | .A_BIT,
+        blendEnable = VK_TRUE,
+        srcColorBlendFactor = .SRC_ALPHA,
+        dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+        colorBlendOp = .ADD,
+        srcAlphaBlendFactor = .ONE,
+        dstAlphaBlendFactor = .ZERO,
+        alphaBlendOp = .ADD
+    };
+
+    color_blend_create := VkPipelineColorBlendStateCreateInfo.{
+        logicOpEnable = VK_FALSE,
+        logicOp = .COPY,
+        attachmentCount = 1,
+        pAttachments = *color_blend_attachment
+    };
+
+    dynamic_states := VkDynamicState.[
+        .VIEWPORT,
+        .SCISSOR,
+        .LINE_WIDTH,
+        // .DEPTH_BIAS,
+        // .BLEND_CONSTANTS,
+        // .DEPTH_BOUNDS,
+        // .STENCIL_COMPARE_MASK             :: 6;
+        // .STENCIL_WRITE_MASK               :: 7;
+        // .STENCIL_REFERENCE                :: 8;
+        // .VIEWPORT_W_SCALING_NV            :: 1000087000;
+        // .DISCARD_RECTANGLE_EXT            :: 1000099000;
+        // SAMPLE_LOCATIONS_EXT             :: 1000143000;
+    ];
+
+    dynamic_state := VkPipelineDynamicStateCreateInfo.{
+        dynamicStateCount = xx dynamic_states.count,
+        pDynamicStates = dynamic_states.data
+    };
+
+    layouts := VkDescriptorSetLayout.[
+        // mesh_descriptor_set_layout,
+    ];
+
+    color_pc := VkPushConstantRange.{
+        stageFlags = .VERTEX_BIT,
+        offset = 0,
+        size = size_of(float32) * 16,
+    };
+
+    pipeline_layout_info := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = xx layouts.count,
+        pSetLayouts = layouts.data,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *color_pc
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *line_pipeline_layout), "failed to create the line pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, line_pipeline_layout, null));
+
+    color_attachment_format := VkFormat.R16G16B16A16_SFLOAT;
+    rendering_create_info := VkPipelineRenderingCreateInfo.{
+        colorAttachmentCount=1,
+        pColorAttachmentFormats = *color_attachment_format,
+        depthAttachmentFormat = .D24_UNORM_S8_UINT
+    };
+
+    depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
+        depthTestEnable = VK_TRUE,
+        depthWriteEnable = VK_TRUE,
+        depthCompareOp = .LESS,
+        depthBoundsTestEnable = VK_FALSE,
+        stencilTestEnable = VK_FALSE,
+        // front:                 VkStencilOpState;
+        // back:                  VkStencilOpState;
+        // minDepthBounds:        float;
+        // maxDepthBounds:        float;
+    };
+
+    pipeline_create := VkGraphicsPipelineCreateInfo.{
+        pNext = *rendering_create_info,
+        stageCount = xx shader_stages.count,
+        pStages = shader_stages.data,
+        pVertexInputState = *vertex_input_info,
+        pInputAssemblyState = *input_assembly_info,
+        // pTessellationState:  *VkPipelineTessellationStateCreateInfo;
+        pViewportState = *viewport_create_info,
+        pRasterizationState = *rasterizer_create_info,
+        pMultisampleState = *multisample_create_info,
+        pDepthStencilState = *depth_stencil_info,
+        pColorBlendState = *color_blend_create,
+        pDynamicState = *dynamic_state,
+        layout = line_pipeline_layout,
+        // renderPass:          VkRenderPass;
+        // subpass:             u32;
+        // basePipelineHandle:  VkPipeline;
+        // basePipelineIndex:   s32;
+    };
+
+    vk_init_validate(vkCreateGraphicsPipelines(logical_device, VK_NULL_HANDLE, 1, *pipeline_create, null, *line_pipeline), "failed to create the the line pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, line_pipeline, null));
+}
+
 create_frame_data :: () {
     auto_release_temp();
 
@@ -1222,7 +1424,7 @@ create_frame_data :: () {
         vk_init_validate(vkAllocateCommandBuffers(logical_device, *buffer_alloc_info, *transfer_command_buffer), "failed to create the transfer command pool");
         deletion_queue_add(*game_deletion_queue, vkDestroyCommandPool(logical_device, transfer_command_pool, null));
 
-        vk_init_validate(vkCreateFence(logical_device, *fence_info, null, *transfer_fence), "failed to creat ethe transfer fence");
+        vk_init_validate(vkCreateFence(logical_device, *fence_info, null, *transfer_fence), "failed to create the transfer fence");
         deletion_queue_add(*game_deletion_queue, vkDestroyFence(logical_device, transfer_fence, null));
     }
 }
@@ -1591,6 +1793,9 @@ score_physical_device :: (device: VkPhysicalDevice) -> score: s32 {
     vkGetPhysicalDeviceFeatures(device, *features);
 
     if !features.geometryShader {
+        return 0;
+    }
+    if !features.fillModeNonSolid {
         return 0;
     }
     dummy_device := Physical_Device.{vk_obj=device};
@@ -2068,6 +2273,23 @@ draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientat
     vkCmdDrawIndexed(cmd, ibo.count, instance_count, 0, 0, 0);
 }
 
+draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+    if lines.count == 0 then return;
+
+    vkCmdBindPipeline(cmd, .GRAPHICS, line_pipeline);
+    vkCmdSetLineWidth(cmd, 2.0);
+
+    offset : u64 = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, *line_vbo.buffer, *offset);
+
+    constants: [16]float32;
+    memcpy(constants.data, view_projection, 16 * size_of(float));
+
+    vkCmdPushConstants(cmd, line_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, constants.data);
+    vkCmdDraw(cmd, xx (lines.count * 2), 1, 0, 0);
+}
+
 prepare_lights :: () {
     sun_t := asin(respace(sin(seconds_since_init().(float)), .{-1, 1}, .{-0.5, 0.5}));
     down_vec := WORLD_DOWN;
@@ -2172,6 +2394,12 @@ Shader_Hash_Item :: struct {
     shader: VkShaderModule;
 }
 
+Line_Vertex :: struct {
+    position: Vector4;
+    // _padding := 0.0;
+    color: Vector4;
+}
+
 Mesh_Vertex :: struct {
     position: Vector3;
     uv: Vector2;
@@ -2233,6 +2461,13 @@ Lights :: struct {
         sun_tint: Vector4;
     }
 }
+
+Line_Data :: struct {
+    a: Line_Vertex;
+    b: Line_Vertex;
+}
+
+lines: [..]Line_Data;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods
@@ -2433,8 +2668,6 @@ allocate_descriptor_set :: (pool: VkDescriptorPool, layout: VkDescriptorSetLayou
 }
 
 setup_mesh_data_for_flat_shading :: (in_vertices: []Mesh_Vertex, indices: []$T, out_vertices: *[..]Mesh_Vertex) {
-    auto_release_temp();
-
     vertex_has_led_tri: Bit_Array(1);
     vertex_has_led_tri.items.allocator = temp;
     set_capacity(*vertex_has_led_tri, indices.count);
@@ -2527,6 +2760,10 @@ game_descriptor_pool: VkDescriptorPool;
 // eh
 graphics_pipeline: VkPipeline;
 graphics_pipeline_layout: VkPipelineLayout;
+
+line_pipeline: VkPipeline;
+line_pipeline_layout: VkPipelineLayout;
+line_vbo: Mesh_Data_Buffer;
 
 rect_pipeline: VkPipeline;
 rect_pipeline_layout: VkPipelineLayout;

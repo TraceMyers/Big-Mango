@@ -1,5 +1,7 @@
 
-// TODO: 
+// NOTE: no need for a patch layer on data that is parallel to entities. setting indexes on the patch infos would
+// be the same exact process, just on a second layer for no reason. well, except for references to entities...
+// but, maybe that could be sorted out with the id? not sure of the cost there.
 
 INVALID_ENTITY_ID : u32 : 0;
 INVALID_ENTITY_INDEX : u32 : 0;
@@ -14,8 +16,6 @@ ENTITY_MESHES_MAX_COUNT :: 8;
 
 boot_entities :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        init(*spawn_entity_mutex);
-
         {
             scope_set_allocator(program_runtime_allocator);
 
@@ -28,11 +28,13 @@ boot_entities :: (stage: Boot_Stage) -> bool {
             set_capacity(*creatures, CREATURE_MAX_COUNT);
             set_capacity(*cameras, CAMERA_MAX_COUNT);
             set_capacity(*dynamic_entity_physics_properties, ENTITY_MAX_COUNT);
+            set_capacity(*colliders, ENTITY_MAX_COUNT);
         }
         lock_allocation(*entities);
         lock_allocation(*cameras);
         lock_allocation(*creatures);
         lock_allocation(*dynamic_entity_physics_properties);
+        lock_allocation(*colliders);
 
         all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(*Mesh);
 
@@ -108,6 +110,7 @@ Entity_Patch_Info :: struct {
     camera: u8 = INVALID_CAMERA_INDEX;
     using ref: Entity_Ref;
     physics_properties: u16;
+    body_collider: u16;
     meshes: u16;
     creature: u16 = INVALID_CREATURE_INDEX;
     flags: Entity_Patch_Flags;
@@ -120,6 +123,7 @@ Entity :: struct {
     using ref: Entity_Ref;
     using physics_core: *Entity_Physics_Core;
     physics_properties: *Physics_Properties;
+    body_collider: *Entity_Collider;
     meshes: []*Mesh;
     creature: *Entity_Creature;
 }
@@ -134,14 +138,11 @@ Entity_Creature :: struct {
 }
 
 get_entity :: inline (e: *Entity, ref: Entity_Ref) {
-    // patch_info := entity_patch_layer[ref.index];
-    patch_info := *entities[ref.index];
-    assert(patch_info.id == ref.id);
+    _ := get_entity_patch_info(ref);
     get_entity_at(e, ref.index);
-
 }
+
 get_entity_at :: (using e: *Entity, i: s64) {
-    // patch_info := entity_patch_layer[i];
     patch_info := *entities[i];
     entity_index := i;
     assert(is_item_in_use(*entities, entity_index));
@@ -213,7 +214,7 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
 
     if (e.type_flags & .CAMERA) != 0 {
         index := request_item(*cameras);
-        assert(index < CAMERA_MAX_COUNT);
+        assert(index >= 0 && index < CAMERA_MAX_COUNT);
         e.camera = xx index;
     }
 
@@ -221,12 +222,11 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
 }
 
 set_entity_meshes :: (ref: Entity_Ref, meshes: ..*Mesh) {
-    assert(meshes.count > 0 && meshes.count < ENTITY_MESHES_MAX_COUNT);
-    patch_info := *entities[ref.index];
-    assert(ref.id == patch_info.id);
+    assert(meshes.count > 0 && meshes.count <= ENTITY_MESHES_MAX_COUNT);
+    patch_info := get_entity_patch_info(ref);
 
     mesh_collection := *entity_mesh_collections[ref.index];
-    if mesh_collection.mesh_count != meshes.count {
+    if mesh_collection.mesh_count < meshes.count {
         if basic_validity_check(*mesh_collection.allocation_ref) {
             na_free(*entity_mesh_array_allocator, *mesh_collection.allocation_ref);
         } else {
@@ -234,9 +234,9 @@ set_entity_meshes :: (ref: Entity_Ref, meshes: ..*Mesh) {
         }
         mesh_collection.allocation_ref = na_alloc(*entity_mesh_array_allocator, meshes.count * size_of(*Mesh));
         assert(basic_validity_check(*mesh_collection.allocation_ref));
-        mesh_collection.mesh_count = xx meshes.count;
     }
 
+    mesh_collection.mesh_count = xx meshes.count;
     new_meshes := get_entity_meshes(patch_info);
     assert(new_meshes.count == meshes.count);    
     for meshes {
@@ -266,6 +266,7 @@ entity_mesh_array_allocator: Nesting_Allocator;
 creature_interface: []*Entity_Creature;
 creatures: Pool(Entity_Creature);
 cameras: Pool(Entity_Camera);
+colliders: Pool(Entity_Collider);
 dynamic_entity_physics_properties: Pool(Physics_Properties_Dynamic);
 
 spawn_entity_mutex: Mutex;
@@ -319,4 +320,12 @@ interp_rotate :: inline (e: *Entity, target: Quaternion, norm: float32) {
 
 interp_rotate :: inline (e: *Entity, target: Quaternion, speed: float32, delta_time: float32) {
     e.orientation = interp_rotate(e.orientation, target, speed, delta_time);
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+get_entity_patch_info :: inline (ref: Entity_Ref) -> *Entity_Patch_Info {
+    patch_info := *entities[ref.index];
+    assert(ref.id == patch_info.id);
+    return patch_info;
 }

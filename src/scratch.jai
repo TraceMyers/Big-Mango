@@ -13,11 +13,11 @@ scratch_init_game :: () {
         camera.position.y = -30.0;
         camera.position.z = 60.0;
 
-        cos_t := cos(PI/6);
-        sin_t := sin(PI/6);
+        cos_t := cos(PI/4);
+        sin_t := sin(PI/4);
 
         set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
-        rotate(*camera, .{0,0,1}, PI/6);
+        // rotate(*camera, .{0,0,1}, PI/4);
     }
     // character / character mesh
     {

@@ -1,2 +1,3 @@
 Techniques I need to try:
 - if, in a vertex shader, you respace the geo normal / light normal dot product so that light can wrap around an object more, what kind of look can be achieved?
+- references something called "deep compositing", using pixel depth for something I'm not quite understanding: (back up a little bit) https://youtu.be/8H73qv1gMNA?si=ML2GvnipK5-7f7J0&t=570
