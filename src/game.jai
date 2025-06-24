@@ -12,6 +12,8 @@ main :: () {
         Win32.timeBeginPeriod(1);
     }
 
+    command_line_procedures = COMMAND_LINE_PROCEDURES;
+
     startup_success := true;
     scope_system_init(boot_allocators,  *startup_success);
     scope_system_init(boot_input,       *startup_success);
@@ -35,7 +37,7 @@ main :: () {
         new_non_render_time := seconds_since_init();
         non_render_dt = xx (new_non_render_time - non_render_time);
         render_frame();
-        non_render_time = new_non_render_time;
+        non_render_time = seconds_since_init();
 
         new_time := seconds_since_init();
         delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);

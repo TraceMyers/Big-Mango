@@ -52,6 +52,8 @@ boot_imgui :: (stage: Boot_Stage) -> bool {
         assert(ImplVulkan_Init(*init_info), "failed to initialize imgui vulkan implementation");
         assert(ImplVulkan_CreateFontsTexture(), "failed to create the fonts texture for imgui-vulkan");
 
+        memset(command_line_text_buffer.data, 0, command_line_text_buffer.count);
+
         deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorPool(logical_device, imgui_pool, null));
     } else {
         // ---------------------------------------------------------------------------------------------------- shutdown
@@ -69,9 +71,11 @@ imgui_draw :: () {
     ImplWin32_NewFrame();
     NewFrame();
 
-    // _v: bool;
-    // ShowDemoWindow(*_v);
-    show_perf_readout();
+    {
+        scope_set_allocator(temp);
+        perf_readout_width := add_basic_perf_readout();
+        command_line_height := add_command_line(perf_readout_width);
+    }
 
     Render();
 }
@@ -109,64 +113,185 @@ imgui_process_event :: (event: Input.Event) {
 #scope_file // -------------------------s--------------------------------------------------------------------- { FILE }
 using ImGui;
 
-show_perf_readout :: () {
-    Begin("Performance");
+text_size :: (text: string) -> Vector2 {
+    size: Vector2;
+    size.x = CalcTextSize(temp_c_string(text)).x + 2. * GetStyle().ItemSpacing.x;
+    size.y = GetFrameHeight();
+    return size;
+}
+
+Text_align_right :: (left_x: float, box_width: float, text: string) -> Vector2 {
+    size := text_size(text);
+    pos_x := left_x + box_width - size.x - GetCursorScreenPos().x;
+    SetCursorPosX(pos_x);
+    Text(text);
+    return size;
+}
+
+Text_align_right_for_auto_resize :: (cumulative_text_size: *Vector2, text: string, text_left_offset: float) {
+    print_size := Text_align_right(GetWindowPos().x + text_left_offset, GetWindowWidth(), text);
+    cumulative_text_size.x = max(cumulative_text_size.x, print_size.x);
+    cumulative_text_size.y += print_size.y;
+}
+
+add_basic_perf_readout :: () -> float32 {
+    window_open := Begin("Performance", flags=.NoTitleBar | .NoMove | .NoResize /*| .NoBackground*/ );
+    defer End();
+    if !window_open then return 0.0;
+
+    text_size: Vector2;
+    left_offset := 10.0;
+
+    Text_align_right_for_auto_resize(*text_size, tprint("Frames Per Second: %   ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=8}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("Frame Time: % ms", FormatFloat.{value=calc_avg_delta_time() * 1000.0, trailing_width=2, width=8}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("Non-Render Time: % ms", FormatFloat.{value=non_render_dt * 1000.0, trailing_width=2, width=8}), left_offset);
+
+    text_size.y += 6;
+    window_size := GetWindowSize();
+    SetWindowSize(.{text_size.x + 10, text_size.y});
+
+    app_window_dims := get_window_dimensions();
+    fixed_window_pos := Vector2.{xx app_window_dims.x - text_size.x, 4};
+    SetWindowPos(*fixed_window_pos);
+
+    return text_size.x;
+}
+
+command_line_autocomplete_callback :: (data: *InputTextCallbackData) -> s32 #c_call {
+    push_context {
+        // NOTE: imgui has its own doppel-buffer, so that has to used. then, imgui will copy from that buffer
+        // back into ours. it has a lot of validation to make sure that's how things are handled.
+        copy_best_suggestion_to_command_line_input(data.Buf, data.BufSize);
+        data.BufTextLen = xx c_style_strlen(data.Buf);
+        data.BufDirty = true;
+        data.CursorPos = data.BufTextLen;
+    }
+    return 0;
+}
+
+add_command_line_input_bar :: (perf_readout_width: float32) -> input_begin_x: float32, bar_height: float32 {
+    Begin("CommandLine_InputBar", flags=.NoTitleBar | /*.NoMove |*/ .NoResize | .NoBackground);
     defer End();
 
-    Text(tprint("FPS: %", FormatFloat.{value=calc_avg_fps(), trailing_width=2}));
-    Text(tprint("Frame Time: % ms", FormatFloat.{value=calc_avg_delta_time() * 1000.0, trailing_width=2}));
-    Text("Non-Render Time: % ms", FormatFloat.{value=non_render_dt * 1000.0, trailing_width=2});
+    is_cli_focused := IsWindowFocused();
+    SetWindowPos(.{});
 
-    InputFloat3("sun direction", *lights.sun_direction.component);
-    ColorPicker3("sun tint", xx *lights.sun_tint.component);
+    line_height := GetFrameHeight() * 2 - 2;
+    SetCursorPos(.{0,line_height*0.1});
+    PushStyleColor(.Text, 0xff_8f_a2_8a);
+    cmd_header_text := " cmd: ";
+    cmd_header_text_size := text_size(cmd_header_text);
+    Text(cmd_header_text);
+    PopStyleColor();
 
-    _ffmt :: (val: float) -> FormatFloat #expand {
-        return FormatFloat.{value=val, width=8, trailing_width=4};
+    input_text_x_offset := cmd_header_text_size.x * 0.5 + 6;
+    SetCursorPos(.{input_text_x_offset, 0});
+
+    // setting the label width to zero. doing custom label
+    PushItemWidth(-1);
+    PushStyleVar(.WindowPadding, .{});
+
+    if InputText("##CommandLine_InputText", command_line_text_buffer.data, command_line_text_buffer.count, .EnterReturnsTrue | .CallbackCompletion, command_line_autocomplete_callback) {
+        ARGS_MAX_COUNT :: 128;
+        input_str := string.{c_style_strlen(command_line_text_buffer.data), command_line_text_buffer.data};
+        tokens := tokenize_and_trim(input_str, #char " ");
+        if tokens.count > 0 {
+            assert(tokens.count-1 <= ARGS_MAX_COUNT);
+            args: [ARGS_MAX_COUNT]Command_Line_Argument;
+            args_bound := bound_array(args);
+
+            if tokens.count > 1 then for 1..tokens.count-1 {
+                // todo: get types of params from the procedure struct
+                arg := bound_array_add(*args_bound);
+                og_str := tokens[it];
+                arg._int, arg.parse_int_success = parse_int(*og_str);
+                og_str = tokens[it];
+                arg._float, arg.parse_float_success = parse_float(*og_str);
+                arg._string = tokens[1];
+            }
+
+            rm_log("calling % from the command line", tokens[0]);
+            if !try_call_command_line_procedure(tokens[0], args_bound.array) {
+                rm_warning("call failure");
+            }
+            memset(command_line_text_buffer.data, 0, command_line_text_buffer.count);
+        }
+    }
+    PopStyleVar();
+    PopItemWidth();
+
+    window_size: Vector2;
+    app_window_dims := get_window_dimensions();
+    window_size.x = xx app_window_dims.x - perf_readout_width;
+    window_size.y = line_height;
+
+    suggestion_count := add_command_line_input_suggestions(input_text_x_offset, window_size.y);
+
+    window_size.y += suggestion_count * GetFrameHeight();
+    SetWindowSize(window_size);
+
+    if is_cli_focused {
+        SetKeyboardFocusHere(0);
     }
 
-    InputFloat3("camera position", *camera.position.component);
-    cam_f := fore_direction(*camera);
-    Text("camera forward: <% % %>", _ffmt(cam_f.x), _ffmt(cam_f.y), _ffmt(cam_f.z));
-    cam_u := up_direction(*camera);
-    Text("camera up     : <% % %>", _ffmt(cam_u.x), _ffmt(cam_u.y), _ffmt(cam_u.z));
-    cam_r := right_direction(*camera);
-    Text("camera right  : <% % %>", _ffmt(cam_r.x), _ffmt(cam_r.y), _ffmt(cam_r.z));
+    return input_text_x_offset, window_size.y;
+}
 
+add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height: float32) -> suggestion_count: s32 {
+    input_mem := string.{c_style_strlen(command_line_text_buffer.data), command_line_text_buffer.data};
+    input_tokens := tokenize_and_trim(input_mem, #char " ");
+    if input_tokens.count == 0 || input_tokens[0].count == 0 {
+        return 0;
+    }
+    is_open := BeginChild("##CommandLine_InputSuggestions"/*, flags=.NoTitleBar | .NoResize | .NoInputs | .NoNav*/);
+    defer EndChild();
+    if !is_open then return 0;
 
-    viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
-    vp_mat := view_projection_matrix(*camera, viewport);
-    model := Matrix4_Identity;
-    // mvp := vp_mat * model;
-    mvp := vp_mat;
+    SetCursorPos(.{input_begin_x-4, 0});
 
-    Text("mvp");
+    out_count: s32;
+    best_suggestion_index: s64 = -1;
+    best_suggestion_matched_at: s64 = S64_MAX;
+    for command_line_procedures {
+        i := find_index_from_left(it.name, input_tokens[0], true);
+        if i != -1 {
+            Text(it.name);
+            out_count += 1;
+        }
+    }
 
-    Text("% % % %", _ffmt(mvp._11), _ffmt(mvp._12), _ffmt(mvp._13), _ffmt(mvp._14));
-    Text("% % % %", _ffmt(mvp._21), _ffmt(mvp._22), _ffmt(mvp._23), _ffmt(mvp._24));
-    Text("% % % %", _ffmt(mvp._31), _ffmt(mvp._32), _ffmt(mvp._33), _ffmt(mvp._34));
-    Text("% % % %", _ffmt(mvp._41), _ffmt(mvp._42), _ffmt(mvp._43), _ffmt(mvp._44));
+    return out_count;
+}
 
-    // e := *static_mesh_entities[0];
+copy_best_suggestion_to_command_line_input :: (buf: *u8, size: s64) {
+    input_mem := string.{c_style_strlen(buf), buf};
+    input_tokens := tokenize_and_trim(input_mem, #char " ");
+    defer array_reset(*input_tokens);
+    if input_tokens.count == 0 || input_tokens[0].count == 0 {
+        memset(buf, 0, size);
+        return;
+    }
+    best_suggestion_index: s64 = -1;
+    best_suggestion_matched_at: s64 = S64_MAX;
+    for command_line_procedures {
+        i := find_index_from_left(it.name, input_tokens[0], true);
+        if i != -1 && i < best_suggestion_matched_at {
+            best_suggestion_matched_at = i;
+            best_suggestion_index = it_index;
+        }
+    }
 
-    // {
-    //     using e.orientation;
-    //     Text("guy orientation");
-    //     Text("% % % %", _ffmt(x), _ffmt(y), _ffmt(z), _ffmt(w));
-    // }
+    if best_suggestion_index != -1 {
+        proc_name := command_line_procedures[best_suggestion_index].name;
+        assert(proc_name.count < size);
+        memset(buf, 0, size);
+        memcpy(buf, proc_name.data, proc_name.count);
+    }
+}
 
-    // Text("face normals");
-    // {
-    //     i := 0;
-    //     while i < test_indices.count {
-    //         provoking_vertex := test_vertices[test_indices[i]];
-    //         Text("<% % %>", _ffmt(provoking_vertex.normal.x), _ffmt(provoking_vertex.normal.y), _ffmt(provoking_vertex.normal.z));
-    //         i += 3;
-    //     }
-    // }
-
-    mouse_x, mouse_y, success := get_mouse_pointer_position(window, false);
-    Text("mouse x: %", mouse_x);
-    Text("mouse y: %", mouse_y);
+add_command_line :: (perf_readout_width: float32) -> float32 {
+    input_begin_x, input_bar_height := add_command_line_input_bar(perf_readout_width);
+    return input_bar_height;
 }
 
 imgui_update_key_modifiers :: (using io: *IO, event: *Input.Event) {
@@ -291,6 +416,7 @@ input_key_to_imgui_key :: (using io: *IO, key_code: Input.Key_Code) -> Key {
 
 imgui_pool: VkDescriptorPool;
 imgui_context: *ImGuiContext;
+command_line_text_buffer: [4096]u8;
 
 // DestroyCursor :: (hCursor: Win32.HCURSOR) -> Win32.BOOL #foreign user32;
 // win32_DestroyCursor :: DestroyCursor;

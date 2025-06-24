@@ -1,13 +1,13 @@
 
-CONTROL_MODE :: enum {
+Control_Mode :: enum {
     FREE_FLY;
     CHARACTER;
 }
-control_mode := CONTROL_MODE.CHARACTER;
+control_mode := Control_Mode.CHARACTER;
 
 boot_input :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        window = create_window(1024, 1024, "a butt");
+        window = create_window(1024, 1024, "a butt", 27, -1200);
         // get initial dimensions because we won't update this until the first resize
         if window != null {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
@@ -94,7 +94,6 @@ update_window_events :: (delta_time: float) {
 
         if Input.input_button_states[#char "W"] & .DOWN {
             target = camera_xy_orientation;
-            // rotate(*target, .{0,0,1}, -PI/2);
             move_dir.xy += fore_direction_xy(*target).xy;
         }
         if Input.input_button_states[#char "S"] & .DOWN {
@@ -144,6 +143,13 @@ get_window_dimensions :: () -> Int_Vector2 {
     return .{window_width, window_height};
 }
 
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// command line procs
+
+set_control_mode :: (args: []Command_Line_Argument) {
+    init_command_line_proc_or_return(args, Control_Mode);
+    control_mode = arg0;
+} @command_line
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 

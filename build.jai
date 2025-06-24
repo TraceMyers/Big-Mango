@@ -102,6 +102,10 @@ compile_shaders := true;
 
     // add_build_string("PLACEHOLDER_PHYSICS_PROPERTIES_DYNAMIC :: Physics_Properties_Dynamic;", w);
 
+    // zero argument procs only for now
+    command_line_proc_names: [..]string;
+    added_command_line_procedures: bool;
+
     while true {
         m := compiler_wait_for_message();
         if m.kind == .COMPLETE {
@@ -110,6 +114,34 @@ compile_shaders := true;
                 log("compile error: %. exiting", m_complete.error_code);
             }
             break;
+        }
+        // collect command line procedures
+        if m.kind == .TYPECHECKED {
+            m_typechecked := cast(*Message_Typechecked)m;
+            for m_typechecked.declarations {
+                for note : it.expression.notes {
+                    if note.text == "command_line" {
+                        log("found command line proc: %", it.expression.name);
+                        array_add(*command_line_proc_names, it.expression.name);
+                    }
+                }
+            }
+        }
+        if m.kind == .PHASE {
+            m_phase := cast(*Message_Phase)m;
+            if m_phase.phase == .TYPECHECKED_ALL_WE_CAN && !added_command_line_procedures {
+                builder: String_Builder;
+                print_to_builder(*builder, "COMMAND_LINE_PROCEDURES :: Command_Line_Procedure.[\n");
+                log("proc names: %", command_line_proc_names);
+                for command_line_proc_names {
+                    print_to_builder(*builder, ".{name=\"%\", proc=%},\n", it, it);
+                }
+                print_to_builder(*builder, "];\n");
+
+                // add command line proc stuff to the build
+                add_build_string(builder_to_string(*builder), w);
+                added_command_line_procedures = true;
+            }
         }
     }
 
