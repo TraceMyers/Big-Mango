@@ -12,7 +12,15 @@ main :: () {
         Win32.timeBeginPeriod(1);
     }
 
+    // pre-boot config
     command_line_procedures = COMMAND_LINE_PROCEDURES;
+    rm_log_passthrough_callback = rm_log_callback;
+    call_rm_log_passthrough_only = true;
+    rm_log_messages = alloc_array(RM_Log_Message, 256, program_runtime_allocator);
+    initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
+
+    rm_warning("it's a warning");
+    rm_error("it's an error");
 
     startup_success := true;
     scope_system_init(boot_allocators,  *startup_success);
@@ -31,11 +39,16 @@ main :: () {
         update_window_events(delta_time);
         imgui_draw();
 
+        rm_log("spam! spimmedy spammedy spimmy spoo. spotty spilled a pile of you.");
+        if dt_index % 3 == 0 {
+            rm_error("more spam!");
+        }
+
         pc_hips_maybe := player_character.position + WORLD_UP * 20.0;
         draw_line(pc_hips_maybe, pc_hips_maybe + fore_direction(*player_character) * 50.0, .{1,0,0,1}, .{0,0,1,1});
 
         new_non_render_time := seconds_since_init();
-        non_render_dt = xx (new_non_render_time - non_render_time);
+        simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
         render_frame();
         non_render_time = seconds_since_init();
 
@@ -45,6 +58,8 @@ main :: () {
         game_frame_count += 1;
 
         delta_times[dt_index] = delta_time;
+        simulation_times[dt_index] = simulation_dt;
+        render_times[dt_index] = render_dt;
         dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
 
         reset_temporary_storage();
@@ -56,15 +71,15 @@ calc_fps :: () -> float32 {
 }
 
 calc_avg_fps :: () -> float32 {
-    return 1.0 / calc_avg_delta_time();
+    return 1.0 / calc_avg(delta_times);
 }
 
-calc_avg_delta_time :: () -> float32 {
+calc_avg :: (times: []float) -> float {
     sum := 0.0;
-    for delta_times {
+    for times {
         sum += it;
     }
-    return sum / xx DELTA_TIME_COUNT;
+    return sum / xx times.count;
 }
 
 scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
@@ -98,10 +113,13 @@ quit := false;
 camera: Entity;
 player_character: Entity;
 
-non_render_dt: float;
+simulation_dt: float;
+render_dt: float;
 
-DELTA_TIME_COUNT :: 64;
+DELTA_TIME_COUNT :: 120;
 delta_times: [DELTA_TIME_COUNT]float32;
+simulation_times: [DELTA_TIME_COUNT]float32;
+render_times: [DELTA_TIME_COUNT]float32;
 dt_index: s32;
 
 #import "Basic";
@@ -129,7 +147,7 @@ Zlib :: #import "zlib";
 #load "physics_properties.jai";
 #load "input.jai";
 #load "vulkan.jai";
-#load "imgui_impl.jai";
+#load "imgui/imgui_impl.jai";
 #load "entity.jai";
 #load "camera.jai";
 #load "load_assets.jai";

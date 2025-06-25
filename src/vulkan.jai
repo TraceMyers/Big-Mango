@@ -156,6 +156,8 @@ render_frame :: () {
 
     immediate_submit();
 
+    render_begin_time := seconds_since_init();
+
     cmd := begin_command_buffer(current_frame);
 
     // -----------------------------------------------------------------------------------------------------------------
@@ -257,6 +259,10 @@ render_frame :: () {
 
     vk_validate(vkQueuePresentKHR(graphics_queue, *present_info), "failed to present the render target");
     frame += 1;
+
+    render_end_time := seconds_since_init();
+    target_dt : float = xx (render_end_time - render_begin_time);
+    render_dt = exponential_interp(render_dt, target_dt, 2.0, delta_time);
 }
 
 

@@ -1,0 +1,543 @@
+
+imgui_pool: VkDescriptorPool;
+imgui_context: *ImGuiContext;
+command_line_text_buffer: [1024]u8;
+log_filter_buffer: [256]u8;
+log_height := 200.0;
+log_paused: bool;
+
+DEEP_DARK_BLUE :: Vector4.{0.07, 0.07, 0.25, 1.0};
+
+// todo: metaprogram or whatever
+dev_ui_opacities := float.[
+    0.4,
+    0.4,
+    0.4
+];
+
+Dev_UI_Module :: enum {
+    PERF;
+    LOG;
+    CMD;
+}
+
+set_dev_ui_opacity :: (args: []Command_Line_Argument) {
+    init_command_line_proc_or_return(args, 2);
+    module, success := try_parse_command_line_arg(*args[0], Dev_UI_Module);
+    if !success then return;
+    value:, success = try_parse_command_line_arg(*args[1], float64);
+    if !success then return;
+    value = clamp(value, 0, 1);
+    dev_ui_opacities[module] = xx value;
+} @command_line
+
+boot_imgui :: (stage: Boot_Stage) -> bool {
+    if stage == .STARTUP {
+        // ----------------------------------------------------------------------------------------------------- startup
+        pool_sizes := VkDescriptorPoolSize.[
+            .{.SAMPLER,                   1000},
+            .{.COMBINED_IMAGE_SAMPLER,    1000},
+            .{.SAMPLED_IMAGE,             1000},
+            .{.STORAGE_IMAGE,             1000},
+            .{.UNIFORM_TEXEL_BUFFER,      1000},
+            .{.STORAGE_TEXEL_BUFFER,      1000},
+            .{.UNIFORM_BUFFER,            1000},
+            .{.STORAGE_BUFFER,            1000},
+            .{.UNIFORM_BUFFER_DYNAMIC,    1000},
+            .{.STORAGE_BUFFER_DYNAMIC,    1000},
+            .{.INPUT_ATTACHMENT,          1000}
+        ];
+
+        pool_info := VkDescriptorPoolCreateInfo.{
+            flags = .FREE_DESCRIPTOR_SET_BIT,
+            maxSets = 1000,
+            poolSizeCount = xx pool_sizes.count,
+            pPoolSizes = pool_sizes.data
+        };
+
+        assert(vkCreateDescriptorPool(logical_device, *pool_info, null, *imgui_pool) == .SUCCESS, "failed to create the descriptor pool for imgui");
+
+        imgui_context = CreateContext();
+
+        // StyleColorsDark();
+        StyleColorsClassic();
+
+        assert(ImplWin32_Init(window), "failed to initialize imgui win32 implementation");
+
+        init_info := ImplVulkan_InitInfo.{
+            ApiVersion = VK_API_VERSION,
+            Instance = vk_instance,  
+            PhysicalDevice = physical_device.vk_obj,
+            Device = logical_device,
+            Queue = graphics_queue,
+            DescriptorPool = imgui_pool,
+            MinImageCount = 3,
+            ImageCount = 3,
+            UseDynamicRendering = true,
+            PipelineRenderingCreateInfo = .{
+                colorAttachmentCount=1,
+                pColorAttachmentFormats = *swapchain.format.format
+            },
+            MSAASamples=VK_MSAA_SAMPLES
+        };
+
+        assert(ImplVulkan_Init(*init_info), "failed to initialize imgui vulkan implementation");
+        assert(ImplVulkan_CreateFontsTexture(), "failed to create the fonts texture for imgui-vulkan");
+
+        memset(command_line_text_buffer.data, 0, command_line_text_buffer.count);
+
+        deletion_queue_add(*game_deletion_queue, vkDestroyDescriptorPool(logical_device, imgui_pool, null));
+    } else {
+        // ---------------------------------------------------------------------------------------------------- shutdown
+        vkDeviceWaitIdle(logical_device);
+        ImplVulkan_Shutdown();
+        ImplWin32_Shutdown();
+        DestroyContext(imgui_context);
+    }
+    return true;
+
+}
+
+imgui_draw :: () {
+    if quit then return;
+    ImplVulkan_NewFrame();
+    ImplWin32_NewFrame();
+    NewFrame();
+
+    {
+        scope_set_allocator(temp);
+        left_sidebar_width := add_left_sidebar();
+        perf_readout_width := add_basic_perf_readout(left_sidebar_width);
+        right_sidebar_width := add_right_sidebar();
+        command_line_text_x, command_line_input_height := add_command_line(left_sidebar_width, right_sidebar_width);
+    }
+
+    Render();
+}
+
+imgui_process_event :: (event: Input.Event) {
+    using io := ImGui.GetIO();
+
+    mouse_button: s32 = -1;
+    if event.key_code == {
+    case .MOUSE_BUTTON_LEFT;
+        mouse_button = 0;
+    case .MOUSE_BUTTON_RIGHT;
+        mouse_button = 1;
+    case .MOUSE_BUTTON_MIDDLE;
+        mouse_button = 2;
+    }
+    if mouse_button != -1 {
+        AddMouseButtonEvent(io, 0, event.key_pressed != 0);
+        return;
+    }
+
+    if event.type == {
+    case .KEYBOARD;
+        imgui_update_key_modifiers(io, *event);
+        imgui_key := input_key_to_imgui_key(io, event.key_code);
+        AddKeyEvent(io, imgui_key, event.key_pressed != 0);
+    case .TEXT_INPUT;
+        AddInputCharacter(io, event.utf32);
+    case .MOUSE_WHEEL;
+        wheel_val := event.wheel_delta.(float) / event.typical_wheel_delta.(float);
+        AddMouseWheelEvent(io, 0, wheel_val);
+    }
+}
+
+text_size :: (text: string) -> Vector2 {
+    size: Vector2;
+    size.x = CalcTextSize(temp_c_string(text)).x + 2. * GetStyle().ItemSpacing.x;
+    size.y = GetFrameHeight();
+    return size;
+}
+
+Text_align_right :: (left_x: float, box_width: float, text: string) -> Vector2 {
+    size := text_size(text);
+    pos_x := left_x + box_width - size.x - GetCursorScreenPos().x;
+    SetCursorPosX(pos_x);
+    Text(text);
+    return size;
+}
+
+Text_align_right_for_auto_resize :: (cumulative_text_size: *Vector2, text: string, text_left_offset: float) {
+    print_size := Text_align_right(GetWindowPos().x + text_left_offset, GetWindowWidth(), text);
+    cumulative_text_size.x = max(cumulative_text_size.x, print_size.x);
+    cumulative_text_size.y += print_size.y;
+}
+
+add_basic_perf_readout :: (parent_width: float) -> float32 {
+    window_open := Begin("PerformanceReadout", flags=.NoResize | .NoTitleBar | .NoBackground);
+    defer End();
+    if !window_open then return 0.0;
+    SetCursorPos(.{});
+
+    text_size: Vector2;
+    left_offset := 10.0;
+
+    perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
+    alpha := min(perf_opacity * 1.3, 1);
+
+    PushStyleColor(.Text, .{0.79, 0.79, 0.89, alpha});
+    defer PopStyleColor();
+
+    // Text_align_right_for_auto_resize(*text_size, tprint("% | % ", input_focus, control_mode), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("frames per second: %    ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("frame time: % ms", FormatFloat.{value=calc_avg(delta_times) * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("simulation time: % ms", FormatFloat.{value=simulation_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("render time: % ms", FormatFloat.{value=render_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+
+    text_size.y += 6;
+    window_size := GetWindowSize();
+    SetWindowSize(.{text_size.x + 10, text_size.y});
+    SetWindowPos(.{parent_width - (text_size.x + 2), 12});
+
+    return text_size.x;
+}
+
+add_perf_graph :: (parent_width: float) {
+    HEIGHT :: 220.0;
+    window_open := BeginChild("PerformanceGraph", .{parent_width, HEIGHT + 4.0});
+    defer EndChild();
+    if !window_open then return;
+    SetCursorPos(.{});
+
+    draw_list := GetWindowDrawList();
+    screen_pos := GetCursorScreenPos();
+
+    graph_width := parent_width;
+    graph_height := HEIGHT;
+    time_scale := graph_width / xx DELTA_TIME_COUNT;
+    max_frame_time := 0.001666;
+    height_scale := graph_height / max_frame_time;
+
+    perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
+
+    ul := screen_pos;
+    lr := screen_pos + .{graph_width, graph_height};
+    bg_color := (alter_cast(perf_opacity, u8, true).(u32) << 24) 
+        | (alter_cast(DEEP_DARK_BLUE.x, u8, true).(u32) << 0)
+        | (alter_cast(DEEP_DARK_BLUE.y, u8, true).(u32) << 8)
+        | (alter_cast(DEEP_DARK_BLUE.z, u8, true).(u32) << 16);
+    draw_list.AddRectFilled(draw_list, *ul, *lr, bg_color);
+
+    whole_bar_width := graph_width / xx DELTA_TIME_COUNT;
+    part_bar_width := graph_width / xx DELTA_TIME_COUNT * 0.9;
+    x_offset := whole_bar_width * 0.5;
+
+    red_frame_time := 0.016666;
+    yellow_frame_time := red_frame_time * 0.5;
+    green_frame_time := red_frame_time * 0.25;
+
+    all_under_green_mark := true;
+    all_under_yellow_mark := true;
+
+    simu_color := ((200.0 * perf_opacity).(u32) << 24) | ((0xa4).(u32) << 16) | ((0xcc).(u32) << 8) | (0x44).(u32);
+    rndr_color := ((200.0 * perf_opacity).(u32) << 24) | ((0xd5).(u32) << 16) | ((0x88).(u32) << 8) | (0x3f).(u32);
+    sync_color := ((70.0 * perf_opacity).(u32) << 24) | ((0x4c).(u32) << 16) | ((0x72).(u32) << 8) | (0xe9).(u32);
+
+    for 0..DELTA_TIME_COUNT-1 {
+        sync_dt := delta_times[it];
+        simu_dt := simulation_times[it];
+        rndr_dt := render_times[it];
+        sum_dt := simu_dt + rndr_dt;
+
+        x_pos := x_offset + whole_bar_width * xx it;
+        simu_height := HEIGHT * (simu_dt / red_frame_time);
+        simu_top_y := lr.y - simu_height;
+        rndr_height := HEIGHT * (rndr_dt / red_frame_time);
+        rndr_top_y := simu_top_y - rndr_height;
+        sync_height := HEIGHT * (sync_dt / red_frame_time);
+        sync_top_y := sync_height;
+
+        draw_list.AddLine(draw_list, .{x_pos, lr.y}, .{x_pos, simu_top_y}, simu_color, part_bar_width);
+        draw_list.AddLine(draw_list, .{x_pos, simu_top_y}, .{x_pos, rndr_top_y}, rndr_color, part_bar_width);
+        draw_list.AddLine(draw_list, .{x_pos, rndr_top_y}, .{x_pos, sync_top_y}, sync_color, part_bar_width);
+
+        all_under_green_mark &= sum_dt <= green_frame_time;
+        all_under_yellow_mark &= sum_dt <= yellow_frame_time;
+    }
+
+    red : u32 = ((150 * perf_opacity).(u32) << 24) | ((100).(u32) << 16) | ((100).(u32) << 8) | (200).(u32);
+    yellow : u32 = ((140 * perf_opacity).(u32) << 24) | ((25).(u32) << 16) | ((120).(u32) << 8) | (140).(u32);
+    green : u32 = ((140 * perf_opacity).(u32) << 24) | ((82).(u32) << 16) | ((140).(u32) << 8) | (80).(u32);
+    green_line_thickness := 1.0;
+    yellow_line_thickness := 1.0;
+    red_line_thickness := 1.0;
+
+    if all_under_green_mark {
+        green = (green & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        green_line_thickness = 1.8;
+    } else if all_under_yellow_mark {
+        yellow = (yellow & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        yellow_line_thickness = 1.8;
+    } else {
+        red = (red & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        red_line_thickness = 1.8;
+    }
+
+    // 60 fps
+    draw_list.AddLine(draw_list, .{ul.x, ul.y}, .{lr.x, ul.y}, red, red_line_thickness);
+    // 120 fps
+    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.5}, .{lr.x, (ul.y + lr.y)*0.5}, yellow, yellow_line_thickness);
+    // 240 fps
+    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.75}, .{lr.x, (ul.y + lr.y)*0.75}, green, green_line_thickness);
+}
+
+add_left_sidebar :: () -> float {
+    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,0.3});
+    defer PopStyleColor();
+    window_open := Begin("##LeftSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
+    defer End();
+
+    SetWindowPos(.{});
+    SetCursorPos(.{6, 6});
+    app_window_dims := get_window_dimensions();
+    fixed_window_size := Vector2.{600, xx app_window_dims.y};
+    SetWindowSize(*fixed_window_size);
+
+    if window_open {
+        add_perf_graph(fixed_window_size.x);
+        add_debug_window_spawner();
+    }
+
+    window_width := GetWindowSize().x;
+    return window_width;
+}
+
+add_right_sidebar :: () -> float {
+    alpha := dev_ui_opacities[Dev_UI_Module.LOG];
+    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.xyz, w=alpha});
+    defer PopStyleColor();
+
+    window_open := Begin("##RightSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
+    defer End();
+
+    WIDTH :: 600.0;
+    app_window_dims := get_window_dimensions();
+
+    SetWindowPos(.{xx app_window_dims.x - WIDTH, 0});
+    SetWindowSize(.{WIDTH, xx app_window_dims.y});
+    SetCursorPos(.{6, 6});
+    window_width := GetWindowSize().x;
+
+    if window_open {
+        add_log_filter(window_width);
+        add_log(window_width);
+    }
+
+    return window_width;
+}
+
+// NOTE: this function is quite expensive. should be easy to cull the text, then it won't be expensive.
+add_log :: (parent_width: float) {
+    app_window_dims := get_window_dimensions();
+    child_size := Vector2.{parent_width, xx app_window_dims.y - GetCursorPosY()};
+    window_open := BeginChild("##Log", *child_size, window_flags=.NoScrollbar); 
+    defer /*if window_open then*/ EndChild();
+
+    alpha := dev_ui_opacities[Dev_UI_Module.LOG];
+    PushStyleColor(.ChildBg, .{0.07, 0.07, 0.25, alpha});
+    defer PopStyleColor();
+
+    filter := string.{c_style_strlen(log_filter_buffer.data), log_filter_buffer.data};
+
+    PushStyleColor(.Text, .{0.6, 0.6, 0.6, alpha});
+    defer PopStyleColor();
+
+    i := decrement_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
+    while i != rm_log_message_top {
+        log_message := get_rm_log_message(i);
+        i = decrement_wrap(i, 0, xx (rm_log_messages.count-1));
+        if filter.count > 0 {
+            if find_index_from_left(log_message, filter, true, true) == -1 {
+                continue;
+            }
+        }
+        STARTUP_HEADER :: "[STARTUP]";
+        WARNING_HEADER :: "[WARNING]";
+        ERROR_HEADER :: "[ERROR]";
+        LOG_HEADER :: "[LOG]";
+        pushed_style := false;
+        if begins_with(log_message, STARTUP_HEADER) {
+            PushStyleColor(.Text, .{0.4, 0.85, 0.72, alpha});
+            pushed_style = true;
+        } else if begins_with(log_message, WARNING_HEADER) {
+            PushStyleColor(.Text, .{0.82, 0.85, 0.4, alpha});
+            pushed_style = true;
+        } else if begins_with(log_message, ERROR_HEADER) {
+            PushStyleColor(.Text, .{0.92, 0.65, 0.59, alpha});
+            pushed_style = true;
+        } else if begins_with(log_message, LOG_HEADER) {
+            PushStyleColor(.Text, .{0.6, 0.84, 0.88, alpha});
+            pushed_style = true;
+        }
+        TextWrapped(log_message);
+        if pushed_style {
+            PopStyleColor();
+        }
+    }
+}
+
+log_filter_callback :: (data: *InputTextCallbackData) -> s32 #c_call {
+    push_context {
+        // reject char/key that brings up command line
+        if data.EventChar == #char "`" {
+            return 1;
+        }
+
+    }
+    return 0;
+}
+
+add_log_filter :: (parent_width: float) {
+    log_alpha := dev_ui_opacities[Dev_UI_Module.LOG];
+    PushStyleColor(.Text, Vector4.{0.8, 0.8, 0.8, 1.0} * log_alpha);
+    defer PopStyleColor();
+    InputText("filter##log_filter", log_filter_buffer.data, xx log_filter_buffer.count, .CallbackCharFilter, log_filter_callback);
+    if IsItemClicked() {
+        set_input_focus(.LOG_FILTER);
+    }
+    SameLine();
+    Checkbox("pause", *log_paused);
+}
+
+add_debug_window_spawner :: () {
+    if CollapsingHeader("debug windows##debug_windows") {
+        Text("hey");
+    }
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// command line procs
+
+set_log_height :: (args: []Command_Line_Argument) {
+    init_command_line_proc_or_return(args, 1);
+    height, success := try_parse_command_line_arg(*args[0], float64);
+    if success then log_height = xx height;
+} @command_line
+
+#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+using ImGui;
+
+imgui_update_key_modifiers :: (using io: *IO, event: *Input.Event) {
+    AddKeyEvent(io, .Mod_Ctrl,  event.ctrl_pressed);
+    AddKeyEvent(io, .Mod_Shift, event.shift_pressed);
+    AddKeyEvent(io, .Mod_Alt,   event.alt_pressed);
+    AddKeyEvent(io, .Mod_Super, event.cmd_meta_pressed);
+}
+
+input_key_to_imgui_key :: (using io: *IO, key_code: Input.Key_Code) -> Key {
+    if key_code >= #char "A" && key_code <= #char "Z" {
+        letter_diff := key_code.(s32) - #char "A";
+        return xx (Key.A.(s32) + letter_diff);
+    }
+    if key_code >= #char "0" && key_code <= #char "9" {
+        number_diff := key_code.(s32) - #char "0";
+        return xx (Key._0.(s32) + number_diff);
+    }
+    if key_code >= .F1 && key_code <= .F24 {
+        fkey_diff := key_code.(s32) - Input.Key_Code.F1.(s32);
+        return xx (Key.F1.(s32) + fkey_diff);
+    }
+    if key_code == {
+    case .UNKNOWN; 
+        return .None;
+    case .BACKSPACE;
+        return .Backspace;
+    case .TAB;
+        return .Tab;
+    case .LINEFEED;
+        return .None;
+    case .ENTER;
+        return .Enter;
+    case .ESCAPE;
+        return .Escape;
+    case .SPACEBAR;
+        return .Space;
+    // The letters A-Z live in here as well and may be returned
+    // by keyboard events.
+    case .DELETE;
+        return .Delete;
+    case .ARROW_UP;
+        return .UpArrow;
+    case .ARROW_DOWN;
+        return .DownArrow;
+    case .ARROW_LEFT;
+        return .LeftArrow;
+    case .ARROW_RIGHT;
+        return .RightArrow;
+    case .PAGE_UP;
+        return .PageUp;
+    case .PAGE_DOWN;
+        return .PageDown;
+    case .HOME;
+        return .Home;
+    case .END;
+        return .End;
+    case .INSERT;
+        return .Insert;
+    case .PAUSE;
+        return .Pause;
+    case .SCROLL_LOCK;
+        return .ScrollLock;
+    case .ALT;
+        return .LeftAlt; 
+    case .CTRL;
+        return .LeftCtrl;
+    case .SHIFT;
+        return .LeftShift;
+    case .CMD; // case .META;
+        return .LeftSuper;
+    case .PRINT_SCREEN;
+        return .PrintScreen;
+    case .MOUSE_BUTTON_LEFT;
+        return .MouseLeft;
+    case .MOUSE_BUTTON_MIDDLE;
+        return .MouseMiddle;
+    case .MOUSE_BUTTON_RIGHT;
+        return .MouseRight;
+    // case .MOUSE_WHEEL_UP;
+    //     return .MouseWheelY;
+    // case .MOUSE_WHEEL_DOWN;
+    //     return .MouseWheelX;
+    }
+    // TODO:
+    // from:
+    // case .GAMEPAD_0_BEGIN;
+    // case .GAMEPAD_0_END :: GAMEPAD_0_BEGIN + xx GAMEPAD_BUTTON_COUNT;
+    // case .GAMEPAD_1_BEGIN;
+    // case .GAMEPAD_1_END :: GAMEPAD_1_BEGIN + xx GAMEPAD_BUTTON_COUNT;
+    // case .GAMEPAD_2_BEGIN;
+    // case .GAMEPAD_2_END :: GAMEPAD_2_BEGIN + xx GAMEPAD_BUTTON_COUNT;
+    // case .GAMEPAD_3_BEGIN;
+    // case .GAMEPAD_3_END :: GAMEPAD_3_BEGIN + xx GAMEPAD_BUTTON_COUNT;
+    // to:
+    // GamepadStart        :: 632;
+    // GamepadBack         :: 633;
+    // GamepadFaceLeft     :: 634;
+    // GamepadFaceRight    :: 635;
+    // GamepadFaceUp       :: 636;
+    // GamepadFaceDown     :: 637;
+    // GamepadDpadLeft     :: 638;
+    // GamepadDpadRight    :: 639;
+    // GamepadDpadUp       :: 640;
+    // GamepadDpadDown     :: 641;
+    // GamepadL1           :: 642;
+    // GamepadR1           :: 643;
+    // GamepadL2           :: 644;
+    // GamepadR2           :: 645;
+    // GamepadL3           :: 646;
+    // GamepadR3           :: 647;
+    // GamepadLStickLeft   :: 648;
+    // GamepadLStickRight  :: 649;
+    // GamepadLStickUp     :: 650;
+    // GamepadLStickDown   :: 651;
+    // GamepadRStickLeft   :: 652;
+    // GamepadRStickRight  :: 653;
+    // GamepadRStickUp     :: 654;
+    // GamepadRStickDown   :: 655;
+    return .None;
+}
+
+#load "command_line.jai";

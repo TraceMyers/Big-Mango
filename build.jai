@@ -41,10 +41,13 @@ compile_shaders := true;
 
     // react to arguments
     args : []string = build_options.compile_time_command_line;
+    build_release: bool;
     updating := false;
     for args {
         k := it_index;
-        if it == "update" {
+        if it == "release" {
+            build_release = true;
+        } else if it == "update" {
             updating = true;
         } else if updating {
             if !update_module(it) {
@@ -57,6 +60,11 @@ compile_shaders := true;
     build_options.output_executable_name = "game";
     build_options.output_path = "bin";
     build_options.backend = .X64;
+
+    if build_release {
+        build_options.backend = .LLVM;
+        set_optimization(*build_options, .VERY_OPTIMIZED);
+    }
 
     linker_args: [..]string;
     for build_options.additional_linker_arguments {
@@ -72,37 +80,11 @@ compile_shaders := true;
 
     // build
 
-    // build metaprogrammed constants. sometimes the compiler has a hard time with order of compilation wrt generated code.
-    // add_build_file("src/constants.jai", w);
+    // force the compiler to wait for compiler_wait_for_message() calls so that the compilation process can be customized during compilation
     compiler_begin_intercept(w);
-    // add_build_file("src/physics_properties.jai", w);
-    // build game
-
-    // while true {
-    //     m := compiler_wait_for_message();
-    //     if m.kind == .PHASE {
-    //         m_phase := m.(*Message_Phase);
-    //         if m_phase.phase == .TYPECHECKED_ALL_WE_CAN {
-    //             break;
-    //         }
-    //     }
-    // }
 
     add_build_file("src/game.jai", w);
 
-    // while true {
-    //     m := compiler_wait_for_message();
-    //     if m.kind == .PHASE {
-    //         m_phase := m.(*Message_Phase);
-    //         if m_phase.phase == .TYPECHECKED_ALL_WE_CAN {
-    //             break;
-    //         }
-    //     }
-    // }
-
-    // add_build_string("PLACEHOLDER_PHYSICS_PROPERTIES_DYNAMIC :: Physics_Properties_Dynamic;", w);
-
-    // zero argument procs only for now
     command_line_proc_names: [..]string;
     added_command_line_procedures: bool;
 
@@ -119,6 +101,8 @@ compile_shaders := true;
         if m.kind == .TYPECHECKED {
             m_typechecked := cast(*Message_Typechecked)m;
             for m_typechecked.declarations {
+                if it.expression.kind != .DECLARATION then continue;
+                if it.expression.type.type != .PROCEDURE then continue;
                 for note : it.expression.notes {
                     if note.text == "command_line" {
                         log("found command line proc: %", it.expression.name);
@@ -132,9 +116,8 @@ compile_shaders := true;
             if m_phase.phase == .TYPECHECKED_ALL_WE_CAN && !added_command_line_procedures {
                 builder: String_Builder;
                 print_to_builder(*builder, "COMMAND_LINE_PROCEDURES :: Command_Line_Procedure.[\n");
-                log("proc names: %", command_line_proc_names);
                 for command_line_proc_names {
-                    print_to_builder(*builder, ".{name=\"%\", proc=%},\n", it, it);
+                    print_to_builder(*builder, "\t.{name=\"%\", proc=%},\n", it, it);
                 }
                 print_to_builder(*builder, "];\n");
 
@@ -146,7 +129,6 @@ compile_shaders := true;
     }
 
     compiler_end_intercept(w);
-
 }
 
 // pull this repository when the argument to do so is passed.
