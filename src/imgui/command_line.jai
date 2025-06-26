@@ -1,5 +1,5 @@
 
-add_command_line :: (sidebar_width: float32, perf_readout_width: float32) -> input_begin_x: float32, bar_height: float32 {
+add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_readout_width: float32) -> input_begin_x: float32, bar_height: float32 {
     if input_focus != .COMMAND_LINE then return 0,0;
 
     PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=0.9});
@@ -10,7 +10,7 @@ add_command_line :: (sidebar_width: float32, perf_readout_width: float32) -> inp
 
     line_height := GetFrameHeight() * 2 - 2;
     is_cli_focused := IsWindowFocused();
-    SetWindowPos(.{sidebar_width, 0});
+    SetWindowPos(.{sidebar_width, main_menu_height});
 
     // SetCursorPos(.{sidebar_width, line_height*0.1});
     PushStyleColor(.Text, 0xff_8f_a2_8a);
@@ -25,7 +25,6 @@ add_command_line :: (sidebar_width: float32, perf_readout_width: float32) -> inp
     // setting the label width to zero. doing custom label
     PushItemWidth(-1);
     PushStyleVar(.WindowPadding, .{});
-
 
     reclaim_focus: bool;
     if InputText("##CommandLine_InputText", command_line_text_buffer.data, command_line_text_buffer.count, .EnterReturnsTrue | .CallbackCompletion, command_line_autocomplete_callback) {
@@ -91,19 +90,29 @@ add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height:
     defer EndChild();
     if !is_open then return 0;
 
-
-    SetCursorPos(.{input_begin_x-4, 0});
-
     out_count: s32;
     best_suggestion_index: s64 = -1;
     best_suggestion_matched_at: s64 = S64_MAX;
+
+    Matching_Procedure :: struct {
+        proc: s32;
+        index_of_matched_pattern: s32; // the lower the matched index of the pattern, the better
+    }
+    matching_procedures := alloc_array(Matching_Procedure, command_line_procedures.count, temp);
+    
     for command_line_procedures {
         i := find_index_from_left(it.name, input_tokens[0], true);
         if i != -1 {
-            SetCursorPosX(input_begin_x-4);
-            Text(it.name);
+            matching_procedures[out_count] = .{xx it_index, xx i};
             out_count += 1;
         }
+    }
+
+    matching_procedures.count = out_count;
+    quick_sort(matching_procedures, (a, b) => a.index_of_matched_pattern - b.index_of_matched_pattern);
+    for matching_procedures {
+        SetCursorPosX(input_begin_x-4);
+        Text(command_line_procedures[it.proc].name);
     }
 
     return out_count;

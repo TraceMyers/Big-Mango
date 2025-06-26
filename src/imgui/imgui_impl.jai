@@ -111,7 +111,7 @@ imgui_draw :: () {
         menu_bar_height := add_main_menu_bar();
         left_sidebar_width := add_left_sidebar(menu_bar_height);
         right_sidebar_width := add_right_sidebar(menu_bar_height);
-        command_line_text_x, command_line_input_height := add_command_line(left_sidebar_width, right_sidebar_width);
+        command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
     }
 
     Render();

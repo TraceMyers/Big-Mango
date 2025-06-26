@@ -57,7 +57,7 @@ compile_shaders := true;
     }
 
     build_options.output_type = .EXECUTABLE;
-    build_options.entry_point_name = "whatever";
+    build_options.entry_point_name = "main";
     build_options.output_executable_name = "game";
     build_options.output_path = "bin";
     build_options.backend = .X64;

@@ -23,13 +23,14 @@ scratch_init_game :: () {
         set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
         // rotate(*camera, .{0,0,1}, PI/4);
     }
+    man_mesh_index: s64;
     // character / character mesh
     {
         auto_release_temp();
 
         entity_ref := spawn_entity(.STATIC_MESH);
-        mesh_index := request_item(*mesh_pool);
-        mesh := *mesh_pool[mesh_index];
+        man_mesh_index := request_item(*mesh_pool);
+        mesh := *mesh_pool[man_mesh_index];
 
         set_entity_meshes(entity_ref, mesh);
         get_entity(*player_character, entity_ref);
@@ -55,6 +56,39 @@ scratch_init_game :: () {
 
         mesh.albedo.type = .CONSTANT;
     }
+    // npc 
+    {
+        auto_release_temp();
+
+        entity_ref := spawn_entity(.STATIC_MESH);
+        mesh := *mesh_pool[man_mesh_index];
+
+        set_entity_meshes(entity_ref, mesh);
+        npc := array_add(*npcs);
+        get_entity(npc, entity_ref);
+
+        mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
+
+        reorient_mesh_quat: Quaternion;
+        set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
+        vertices, indices := load_obj_file("../content/experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, temp);
+
+        modified_vertices: [..]Mesh_Vertex;
+        modified_vertices.allocator = temp;
+
+        if indices.type == .U16 {
+            setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
+            create_mesh_data_buffer(*mesh.ibo, indices._u16, .INDEX);
+        } else {
+            setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
+            create_mesh_data_buffer(*mesh.ibo, indices._u32, .INDEX);
+        }
+
+        create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
+
+        mesh.albedo.type = .CONSTANT;
+    }
+    // floor cube mesh
     {
         auto_release_temp();
 

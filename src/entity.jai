@@ -23,6 +23,7 @@ boot_entities :: (stage: Boot_Stage) -> bool {
             entity_physics_core = alloc_array(Entity_Physics_Core, ENTITY_MAX_COUNT);
             entity_mesh_collections = alloc_array(Entity_Mesh_Collection, ENTITY_MAX_COUNT);
             creature_interface = alloc_array(*Entity_Creature, CREATURE_MAX_COUNT);
+            precalculated_forward_directions = alloc_array(Vector2, CREATURE_MAX_COUNT);
 
             set_capacity(*entities, ENTITY_MAX_COUNT);
             set_capacity(*creatures, CREATURE_MAX_COUNT);
@@ -151,7 +152,6 @@ get_entity_at :: (using e: *Entity, i: s64) {
         subtype = patch_info.subtype,
         ref = patch_info.ref,
         physics_core = *entity_physics_core[i],
-        // physics_properties = *dynamic_entity_physics_properties[patch_info.physics_properties],
         meshes = get_entity_meshes(patch_info)
     };
     if (patch_info.type_flags & .CREATURE) != 0 {
@@ -166,6 +166,12 @@ get_entity_at :: (using e: *Entity, i: s64) {
     } else {
         assert(patch_info.camera == INVALID_CAMERA_INDEX);
     }
+
+    if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
+        physics_properties = *dynamic_entity_physics_properties[patch_info.physics_properties];
+    } else {
+        physics_properties = *PHYSICS_PROPERTIES_TEMPLATES[patch_info.physics_properties];
+    }
 }
 
 is_creature_type :: (t: Entity_Type) -> bool {
@@ -177,7 +183,7 @@ is_creature_type :: (t: Entity_Type) -> bool {
 }
 
 
-spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template  := Physics_Properties_Template.DEFAULT, make_physics_properties_dynamic := false) -> Entity_Ref {
+spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template  := Physics_Properties_Template.DEFAULT_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
     // scope_lock_mutex(*spawn_entity_mutex);
     i := request_item(*entities);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
@@ -198,18 +204,16 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
         ref = .{xx i, xx new_id},
     };
 
-    {
-        i : u16 = xx physics_properties_template;
-
-        if make_physics_properties_dynamic {
-            phys_props_index := request_item(*dynamic_entity_physics_properties);   
-            assert(phys_props_index < ENTITY_MAX_COUNT);
-            phys_props := get_item(*dynamic_entity_physics_properties, i);
-            phys_props.template = physics_properties_template;
-            phys_props.base = PHYSICS_PROPERTIES_TEMPLATES[physics_properties_template];
-            e.flags |= .DYNAMIC_PHYSICS_PROPERTIES;
-        }
-        e.physics_properties = xx i;
+    if make_physics_properties_dynamic {
+        phys_props_index := request_item(*dynamic_entity_physics_properties);   
+        assert(phys_props_index < ENTITY_MAX_COUNT);
+        phys_props := *dynamic_entity_physics_properties[xx physics_properties_template];
+        phys_props.template = physics_properties_template;
+        phys_props.base = PHYSICS_PROPERTIES_TEMPLATES[physics_properties_template];
+        e.flags |= .DYNAMIC_PHYSICS_PROPERTIES;
+        e.physics_properties = xx phys_props_index;
+    } else {
+        e.physics_properties = xx physics_properties_template;
     }
 
     if (e.type_flags & .CAMERA) != 0 {
@@ -261,6 +265,7 @@ entity_patch_layer: []*Entity_Patch_Info;
 // default entity data
 entity_physics_core: []Entity_Physics_Core;
 entity_mesh_collections: []Entity_Mesh_Collection;
+precalculated_forward_directions: []Vector2;
 entity_mesh_array_allocator: Nesting_Allocator;
 // type-specific entity data
 creature_interface: []*Entity_Creature;

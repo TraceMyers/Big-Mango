@@ -12,4 +12,11 @@ boot_allocators :: (stage: Boot_Stage) -> bool {
     }
 }
 
+program_runtime_reserve :: (array: *[..]$T, count: s64) {
+    assert(array.data == null && array.count == 0 && array.allocated == 0);
+    array.allocator = program_runtime_allocator;
+    array_reserve(*array, count);
+    array.allocator = no_allocator;
+}
+
 program_runtime_allocator: Bump_Allocator;

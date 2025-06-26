@@ -20,15 +20,17 @@ ENABLE_VALIDATION_LAYERS :: true;
 
 // TODO: custom validation layer callback
 // TODO: if graphics and present end up with different queues, validation complains about things I don't understand / haven't looked into
-// TODO: I have a VkQueueWaitIdle in the part where we get the next swapchain image. It's there to prevent a situation where the signal semaphore is still signaled...? I suppose meaning that post-present, the semaphore resets. apparently VK_EXT_swapchain_maintenance1 provides a solution for this issue. or, maybe just having one set of sync primitives per image would do it. I'm not really sure. I need to take an hour or two to understand what's going on.
 // TODO: to fix the above thing, I can probably just reference the main vulkan tutorial
-// TODO: do I have to recreate the views whe I remake a swapchain?
-// TODO: mark the swapchain dirty when its dimensions don't match window dimensions
+// TODO: do I have to recreate the views when I remake a swapchain?
 // TODO: need non-vsync present mode. otherwise, I can't see performance problems coming from afar.
 // TODO: it might be better to have one big descriptor pool
-// TODO: learn about gamma correction and why it's necessary to display the image as intended. put gamma into the post-processing shader rather than doing it in the exture sampler.
-// TODO: shader hash table
-// TODO: creating shader modules should use a bump allocator
+// TODO: learn about gamma correction and why it's necessary to display the image as intended. put gamma into the post-processing shader rather than doing it in the exture sampler. (NOTE: no longer using srgb render target, so...?)
+// TODO: drawing a 3d shape (say, a capsule) could work like this:
+//      1. generate a bounding box for the shape
+//      2. transform the bounding box into screen space
+//      3. generate a 2d render box from the bounding box
+//      4. dispatch a compute shader with work groups covering the 2d box and params that tell it how to draw the shape in that area. (draw the rest of the fucking owl)
+//      5. depth test and alpha mix fragments during draw
 
 boot_vulkan :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
@@ -165,6 +167,8 @@ render_frame :: () {
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
 
+    draw_sphere(cmd, draw_image.vk_obj);
+
     // -----------------------------------------------------------------------------------------------------------------
     // graphics pipeline draw
     // -----------------------------------------------------------------------------------------------------------------
@@ -203,7 +207,17 @@ render_frame :: () {
         scale := make_scale_matrix4(.{1, 1, 1});
         model *= scale;
         draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
-
+    }
+    for npc : npcs {
+        for mesh : npc.meshes {
+            mesh.albedo.tint.w = 1.0;
+            model := make_translation_matrix4(npc.position);
+            rot := rotation_matrix(Matrix4, npc.orientation);
+            model *= rot;
+            scale := make_scale_matrix4(.{1, 1, 1});
+            model *= scale;
+            draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
+        }
     }
 
     draw_lines(cmd, *vp_mat);
@@ -419,6 +433,7 @@ vk_draw_imgui :: (cmd: VkCommandBuffer, view: VkImageView) {
 
 pre_init :: () {
     array_reserve(*game_deletion_queue, 2048);
+    program_runtime_reserve(*shader_hash_table, 1024);
 }
 
 create_vk_instance :: () {

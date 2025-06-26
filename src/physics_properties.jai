@@ -1,21 +1,23 @@
 PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.[
     .{
-        "DEFAULT", .{
-            mass=1
-        }
-    }, .{
-        "HEAVY", .{
-            mass=2
-        }
-    }, .{
-        "WHO_CARES", .{
-            mass=4
+        "DEFAULT_MAN", .{
+            mass = 1,
+            body_collider = .{
+                type = .CYLINDER,
+                data = .{
+                    cylinder = .{
+                        height = 21,
+                        radius = 2.15
+                    }
+                }
+            }
         }
     }
 ];
 
 Physics_Properties :: struct {
     mass := 1.0;
+    body_collider: Entity_Collider;
 }
 
 Physics_Properties_Dynamic :: struct {

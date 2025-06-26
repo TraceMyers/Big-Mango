@@ -3,7 +3,7 @@
 // that paves the way toward what I want to do.
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
-whatever :: () {
+main :: () {
     defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
     #if OS == .WINDOWS {
@@ -39,13 +39,15 @@ whatever :: () {
         pc_hips_maybe := player_character.position + WORLD_UP * 20.0;
         draw_line(pc_hips_maybe, pc_hips_maybe + fore_direction(*player_character) * 50.0, .{1,0,0,1}, .{0,0,1,1});
 
-        c: Entity_Collider;
-        c.type = .CYLINDER;
-        c.height = 21.0;
-        c.cylinder.radius = 2.15;
         forward := fore_direction(*player_character);
         color := Color4f.{0.6, 0.11, 0.9, 1.0};
-        draw_cylinder(*c, *player_character.position, *forward, *color, 100);
+        draw_cylinder(*player_character.physics_properties.body_collider, *player_character.position, *forward.xy, *color, 50);
+
+        for npcs {
+            forward := fore_direction(*it);
+            color := Color4f.{0.6, 0.11, 0.9, 1.0};
+            draw_cylinder(*it.physics_properties.body_collider, *it.position, *forward.xy, *color, 50);
+        }
 
         new_non_render_time := seconds_since_init();
         simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
@@ -112,6 +114,7 @@ quit := false;
 
 camera: Entity;
 player_character: Entity;
+npcs: [..]Entity;
 
 simulation_dt: float;
 render_dt: float;
@@ -135,6 +138,7 @@ dt_index: s32;
 #import "stb_image";
 #import "xxHash";
 #import "Flat_Pool";
+#import "Sort";
 ImGui :: #import "ImGui_VulkanWin32";
 Input :: #import "Input";
 

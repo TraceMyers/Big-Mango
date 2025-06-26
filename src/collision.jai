@@ -28,7 +28,7 @@ to_bottom_position :: inline (using c: *Entity_Collider, center: Vector3) -> Vec
     return center - Vector3.{0,0,height*0.5};
 }
 
-draw_collider :: (c: *Entity_Collider, position: *Vector3, forward: *Vector3, color: *Color4f, lines : s32 = 32, position_at_bottom := true) {
+draw_collider :: (c: *Entity_Collider, position: *Vector3, forward: *Vector2, color: *Color4f, lines : s32 = 32, position_at_bottom := true) {
     bot_pos := ifx position_at_bottom then position.* else to_bottom_position(c, position);
     if c.type == {
     case .CYLINDER;
@@ -41,7 +41,7 @@ draw_collider :: (c: *Entity_Collider, position: *Vector3, forward: *Vector3, co
 // one of the infinitely many shortest paths from one bottom center to the top center. each set of lines runs perfectly
 // across the surface, as opposed to the circle, which only crudely represents the edge.
 // i just think it'll look nice
-draw_cylinder :: (c: *Entity_Collider, bottom_position: *Vector3, forward: *Vector3, color: *Color4f, lines : s32 = 32) {
+draw_cylinder :: (c: *Entity_Collider, bottom_position: *Vector3, forward: *Vector2, color: *Color4f, lines : s32 = 32) {
     assert(lines > 0);
     bot_pos := bottom_position;
     top_pos := bot_pos + Vector3.{0,0,c.height};
@@ -63,3 +63,22 @@ draw_cylinder :: (c: *Entity_Collider, bottom_position: *Vector3, forward: *Vect
         outward = rotate(outward, step_quat);
     }
 }
+
+// solve_potential_collision :: inline (entity_a: *Entity, entity_b: *Entity) -> bool {
+//     unused_dir: Vector3 = ---;
+//     unused_gap: float = ---;
+//     return solve_potential_collision(entity_a, entity_b, *unused_dir, *unused_gap);
+// }
+
+// solve_potential_collision :: inline (entity_a: *Entity, entity_b: *Entity, out_collision_dir: *Vector3, out_gap: *float) -> bool {
+//     return solve_potential_collision(*entity_a.position, *entity_a.velocity, *precalculated_forward_directions[entity_a.index], entity_a.physics_properties, *entity_b.position, *entity_b.velocity, *precalculated_forward_directions[entity_b.index], entity_b.physics_properties, out_collision_dir, out_gap);
+// }
+
+// solve_potential_collision :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector2, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector2, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
+//     collider_a := *physics_properties_a.body_collider;
+//     collider_b := *physics_properties_b.body_collider;
+//     if collider_a.type == {
+//     case .CYLINDER;
+//     case .BOX;
+//     }
+// }
