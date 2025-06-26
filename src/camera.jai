@@ -54,7 +54,7 @@ projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
         return orthographic_projection_matrix(-v.x, v.x, -v.y, v.y, NEAR_PLANE, FAR_PLANE, true);
     } else { // PERSPECTIVE
         fov_radians := camera.perspective.vertical_fov * (PI / 180.0);
-        aspect := ifx camera.perspective.aspect_ratio == 0.0 then viewport.y / viewport.x else camera.perspective.aspect_ratio;
+        aspect := ifx camera.perspective.aspect_ratio == 0.0 then viewport.x / viewport.y else camera.perspective.aspect_ratio;
         return make_projection_matrix(fov_radians, aspect, NEAR_PLANE, FAR_PLANE, 0, 0, true);
     }
 }

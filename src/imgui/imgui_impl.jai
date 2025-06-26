@@ -3,10 +3,10 @@ imgui_pool: VkDescriptorPool;
 imgui_context: *ImGuiContext;
 command_line_text_buffer: [1024]u8;
 log_filter_buffer: [256]u8;
-log_height := 200.0;
 log_paused: bool;
 
-DEEP_DARK_BLUE :: Vector4.{0.07, 0.07, 0.25, 1.0};
+DEEP_DARK_BLUE :: Color4f.{0.07, 0.07, 0.25, 1.0};
+DARK_GREY_BLUE :: Color4f.{0.14, 0.16, 0.3, 1.0};
 
 // todo: metaprogram or whatever
 dev_ui_opacities := float.[
@@ -106,9 +106,11 @@ imgui_draw :: () {
 
     {
         scope_set_allocator(temp);
-        left_sidebar_width := add_left_sidebar();
-        perf_readout_width := add_basic_perf_readout(left_sidebar_width);
-        right_sidebar_width := add_right_sidebar();
+        PushStyleVar(.WindowBorderSize, 0.0);
+        defer PopStyleVar();
+        menu_bar_height := add_main_menu_bar();
+        left_sidebar_width := add_left_sidebar(menu_bar_height);
+        right_sidebar_width := add_right_sidebar(menu_bar_height);
         command_line_text_x, command_line_input_height := add_command_line(left_sidebar_width, right_sidebar_width);
     }
 
@@ -154,7 +156,7 @@ text_size :: (text: string) -> Vector2 {
 
 Text_align_right :: (left_x: float, box_width: float, text: string) -> Vector2 {
     size := text_size(text);
-    pos_x := left_x + box_width - size.x - GetCursorScreenPos().x;
+    pos_x := left_x + box_width - size.x;
     SetCursorPosX(pos_x);
     Text(text);
     return size;
@@ -166,14 +168,14 @@ Text_align_right_for_auto_resize :: (cumulative_text_size: *Vector2, text: strin
     cumulative_text_size.y += print_size.y;
 }
 
-add_basic_perf_readout :: (parent_width: float) -> float32 {
-    window_open := Begin("PerformanceReadout", flags=.NoResize | .NoTitleBar | .NoBackground);
-    defer End();
-    if !window_open then return 0.0;
-    SetCursorPos(.{});
+add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
+    // window_open := BeginChild("PerformanceReadout");
+    // defer EndChild();
+    // if !window_open then return 0.0;
+    // SetCursorPos(.{-30,0});
 
     text_size: Vector2;
-    left_offset := 10.0;
+    left_offset := 0.0;
 
     perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
     alpha := min(perf_opacity * 1.3, 1);
@@ -182,24 +184,25 @@ add_basic_perf_readout :: (parent_width: float) -> float32 {
     defer PopStyleColor();
 
     // Text_align_right_for_auto_resize(*text_size, tprint("% | % ", input_focus, control_mode), left_offset);
-    Text_align_right_for_auto_resize(*text_size, tprint("frames per second: %    ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("frames per second: %   ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=6, zero_removal=.NO}), left_offset);
     Text_align_right_for_auto_resize(*text_size, tprint("frame time: % ms", FormatFloat.{value=calc_avg(delta_times) * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
     Text_align_right_for_auto_resize(*text_size, tprint("simulation time: % ms", FormatFloat.{value=simulation_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
     Text_align_right_for_auto_resize(*text_size, tprint("render time: % ms", FormatFloat.{value=render_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
 
     text_size.y += 6;
     window_size := GetWindowSize();
-    SetWindowSize(.{text_size.x + 10, text_size.y});
-    SetWindowPos(.{parent_width - (text_size.x + 2), 12});
+    // SetWindowSize(.{text_size.x + 10, text_size.y});
+    // SetWindowPos(.{parent_width - (text_size.x + 2), 12});
 
     return text_size.x;
 }
 
-add_perf_graph :: (parent_width: float) {
+add_perf_graph :: (menu_bar_height: float, parent_width: float) {
     HEIGHT :: 220.0;
     window_open := BeginChild("PerformanceGraph", .{parent_width, HEIGHT + 4.0});
     defer EndChild();
     if !window_open then return;
+
     SetCursorPos(.{});
 
     draw_list := GetWindowDrawList();
@@ -215,11 +218,8 @@ add_perf_graph :: (parent_width: float) {
 
     ul := screen_pos;
     lr := screen_pos + .{graph_width, graph_height};
-    bg_color := (alter_cast(perf_opacity, u8, true).(u32) << 24) 
-        | (alter_cast(DEEP_DARK_BLUE.x, u8, true).(u32) << 0)
-        | (alter_cast(DEEP_DARK_BLUE.y, u8, true).(u32) << 8)
-        | (alter_cast(DEEP_DARK_BLUE.z, u8, true).(u32) << 16);
-    draw_list.AddRectFilled(draw_list, *ul, *lr, bg_color);
+    bg_color := to_color4b(.{rgb=DEEP_DARK_BLUE.rgb, a=perf_opacity});
+    draw_list.AddRectFilled(draw_list, *ul, *lr, bg_color._u32);
 
     whole_bar_width := graph_width / xx DELTA_TIME_COUNT;
     part_bar_width := graph_width / xx DELTA_TIME_COUNT * 0.9;
@@ -232,9 +232,9 @@ add_perf_graph :: (parent_width: float) {
     all_under_green_mark := true;
     all_under_yellow_mark := true;
 
-    simu_color := ((200.0 * perf_opacity).(u32) << 24) | ((0xa4).(u32) << 16) | ((0xcc).(u32) << 8) | (0x44).(u32);
-    rndr_color := ((200.0 * perf_opacity).(u32) << 24) | ((0xd5).(u32) << 16) | ((0x88).(u32) << 8) | (0x3f).(u32);
-    sync_color := ((70.0 * perf_opacity).(u32) << 24) | ((0x4c).(u32) << 16) | ((0x72).(u32) << 8) | (0xe9).(u32);
+    simu_color := Color4b.{0x44, 0xcc, 0xa4, xx (200.0 * perf_opacity)};
+    rndr_color := Color4b.{0x3f, 0x88, 0xd5, xx (200.0 * perf_opacity)};
+    sync_color := Color4b.{0xe9, 0x72, 0x4c, xx ( 70.0 * perf_opacity)};
 
     for 0..DELTA_TIME_COUNT-1 {
         sync_dt := delta_times[it];
@@ -250,64 +250,86 @@ add_perf_graph :: (parent_width: float) {
         sync_height := HEIGHT * (sync_dt / red_frame_time);
         sync_top_y := sync_height;
 
-        draw_list.AddLine(draw_list, .{x_pos, lr.y}, .{x_pos, simu_top_y}, simu_color, part_bar_width);
-        draw_list.AddLine(draw_list, .{x_pos, simu_top_y}, .{x_pos, rndr_top_y}, rndr_color, part_bar_width);
-        draw_list.AddLine(draw_list, .{x_pos, rndr_top_y}, .{x_pos, sync_top_y}, sync_color, part_bar_width);
+        draw_list.AddLine(draw_list, .{x_pos, lr.y},       .{x_pos, simu_top_y}, simu_color._u32, part_bar_width);
+        draw_list.AddLine(draw_list, .{x_pos, simu_top_y}, .{x_pos, rndr_top_y}, rndr_color._u32, part_bar_width);
+        draw_list.AddLine(draw_list, .{x_pos, rndr_top_y}, .{x_pos, sync_top_y}, sync_color._u32, part_bar_width);
 
         all_under_green_mark &= sum_dt <= green_frame_time;
         all_under_yellow_mark &= sum_dt <= yellow_frame_time;
     }
 
-    red : u32 = ((150 * perf_opacity).(u32) << 24) | ((100).(u32) << 16) | ((100).(u32) << 8) | (200).(u32);
-    yellow : u32 = ((140 * perf_opacity).(u32) << 24) | ((25).(u32) << 16) | ((120).(u32) << 8) | (140).(u32);
-    green : u32 = ((140 * perf_opacity).(u32) << 24) | ((82).(u32) << 16) | ((140).(u32) << 8) | (80).(u32);
+    red     := Color4b.{200, 100, 100, xx (150.0 * perf_opacity)};
+    yellow  := Color4b.{140, 120,  25, xx (140.0 * perf_opacity)};
+    green   := Color4b.{80,  140,  82, xx (140.0 * perf_opacity)};
+
     green_line_thickness := 1.0;
     yellow_line_thickness := 1.0;
     red_line_thickness := 1.0;
 
     if all_under_green_mark {
-        green = (green & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        green.a = alter_cast(perf_opacity, u8, true);
         green_line_thickness = 1.8;
     } else if all_under_yellow_mark {
-        yellow = (yellow & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        yellow.a = alter_cast(perf_opacity, u8, true);
         yellow_line_thickness = 1.8;
     } else {
-        red = (red & 0x00ffffff) | ((255.0 * perf_opacity).(u32) << 24).(u32);
+        red.a = alter_cast(perf_opacity, u8, true);
         red_line_thickness = 1.8;
     }
 
     // 60 fps
-    draw_list.AddLine(draw_list, .{ul.x, ul.y}, .{lr.x, ul.y}, red, red_line_thickness);
+    draw_list.AddLine(draw_list, .{ul.x, ul.y}, .{lr.x, ul.y}, red._u32, red_line_thickness);
     // 120 fps
-    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.5}, .{lr.x, (ul.y + lr.y)*0.5}, yellow, yellow_line_thickness);
+    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.5}, .{lr.x, (ul.y + lr.y)*0.5}, yellow._u32, yellow_line_thickness);
     // 240 fps
-    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.75}, .{lr.x, (ul.y + lr.y)*0.75}, green, green_line_thickness);
+    draw_list.AddLine(draw_list, .{ul.x, (ul.y + lr.y)*0.75}, .{lr.x, (ul.y + lr.y)*0.75}, green._u32, green_line_thickness);
+
+    add_perf_stats(menu_bar_height, parent_width);
 }
 
-add_left_sidebar :: () -> float {
+add_main_menu_bar :: () -> float {
+    PushStyleColor(.MenuBarBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
+    defer PopStyleColor();
+
+    window_open := BeginMainMenuBar();
+    defer EndMainMenuBar();
+
+    SetWindowPos(.{});
+    SetCursorPos(.{});
+
+    if BeginMenu("ui opacities") {
+        defer EndMenu();
+        SliderFloat("perf", *dev_ui_opacities[Dev_UI_Module.PERF], 0, 1);
+        SliderFloat("log", *dev_ui_opacities[Dev_UI_Module.LOG], 0, 1);
+    }
+
+    return GetWindowHeight();
+}
+
+add_left_sidebar :: (main_menu_height: float) -> float {
     PushStyleColor(.WindowBg, .{0.1,0.1,0.1,0.3});
     defer PopStyleColor();
     window_open := Begin("##LeftSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
     defer End();
 
-    SetWindowPos(.{});
-    SetCursorPos(.{6, 6});
+    SetWindowPos(.{0, main_menu_height});
+    // SetCursorPos(.{6, 6});
     app_window_dims := get_window_dimensions();
     fixed_window_size := Vector2.{600, xx app_window_dims.y};
     SetWindowSize(*fixed_window_size);
+    window_width := GetWindowSize().x;
 
     if window_open {
-        add_perf_graph(fixed_window_size.x);
+        add_perf_graph(main_menu_height, fixed_window_size.x);
         add_debug_window_spawner();
     }
 
-    window_width := GetWindowSize().x;
     return window_width;
 }
 
-add_right_sidebar :: () -> float {
+add_right_sidebar :: (menu_bar_height: float) -> float {
     alpha := dev_ui_opacities[Dev_UI_Module.LOG];
-    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.xyz, w=alpha});
+    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=alpha});
     defer PopStyleColor();
 
     window_open := Begin("##RightSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
@@ -316,7 +338,7 @@ add_right_sidebar :: () -> float {
     WIDTH :: 600.0;
     app_window_dims := get_window_dimensions();
 
-    SetWindowPos(.{xx app_window_dims.x - WIDTH, 0});
+    SetWindowPos(.{xx app_window_dims.x - WIDTH, menu_bar_height});
     SetWindowSize(.{WIDTH, xx app_window_dims.y});
     SetCursorPos(.{6, 6});
     window_width := GetWindowSize().x;
@@ -347,7 +369,7 @@ add_log :: (parent_width: float) {
 
     i := decrement_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
     while i != rm_log_message_top {
-        log_message := get_rm_log_message(i);
+        log_message, repeat_count := get_rm_log_message(i);
         i = decrement_wrap(i, 0, xx (rm_log_messages.count-1));
         if filter.count > 0 {
             if find_index_from_left(log_message, filter, true, true) == -1 {
@@ -372,7 +394,14 @@ add_log :: (parent_width: float) {
             PushStyleColor(.Text, .{0.6, 0.84, 0.88, alpha});
             pushed_style = true;
         }
+        cursor_pos := GetCursorPos();
+        PushTextWrapPos(GetCursorPosX() + (parent_width - 30.0));
         TextWrapped(log_message);
+        PopTextWrapPos();
+        if repeat_count > 1 {
+            SameLine();
+            Text_align_right(0, parent_width, tprint("%", repeat_count));
+        }
         if pushed_style {
             PopStyleColor();
         }
@@ -380,14 +409,16 @@ add_log :: (parent_width: float) {
 }
 
 log_filter_callback :: (data: *InputTextCallbackData) -> s32 #c_call {
+    ACCEPT : s32 : 0;
+    REJECT : s32 : 1;
     push_context {
-        // reject char/key that brings up command line
+        // reject char that brings up command line
         if data.EventChar == #char "`" {
-            return 1;
+            return REJECT;
         }
 
     }
-    return 0;
+    return ACCEPT;
 }
 
 add_log_filter :: (parent_width: float) {
@@ -403,19 +434,13 @@ add_log_filter :: (parent_width: float) {
 }
 
 add_debug_window_spawner :: () {
-    if CollapsingHeader("debug windows##debug_windows") {
-        Text("hey");
-    }
+    // if CollapsingHeader("debug windows##debug_windows") {
+    //     Text("hey");
+    // }
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // command line procs
-
-set_log_height :: (args: []Command_Line_Argument) {
-    init_command_line_proc_or_return(args, 1);
-    height, success := try_parse_command_line_arg(*args[0], float64);
-    if success then log_height = xx height;
-} @command_line
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 using ImGui;

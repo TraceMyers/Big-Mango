@@ -165,7 +165,7 @@ update_window_events :: (delta_time: float) {
             target_camera_pos.xy = player_character.position.xy;
             target_camera_pos.xy -= fore_direction(*camera).xy * 30.0;
             target_camera_pos.z = player_character.position.z + 60.0;
-            camera.position = exponential_interp(camera.position, target_camera_pos, 6.0, delta_time);
+            camera.position = exponential_interp(camera.position, target_camera_pos, 4.0, delta_time);
         }
     }
 
@@ -187,28 +187,43 @@ get_window_dimensions :: () -> Int_Vector2 {
 // todo: same input counter
 rm_log_callback :: (text: string) {
     if log_paused then return;
-    using rm_log_messages[rm_log_message_top];
-    if string_count > 0 {
-        na_free(*rm_log_message_allocator, *allocation_ref);
-    } else {
-        assert(allocation_ref.data == null);
+
+    {
+        using rm_log_messages[rm_log_message_top];
+
+        rm_log_message_prev := decrement_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
+        prev_message, _ := get_rm_log_message(rm_log_message_prev);
+        if text == prev_message {
+            rm_log_messages[rm_log_message_prev].repeat_count += 1;
+            return;
+        }
+
+        if string_count > 0 {
+            na_free(*rm_log_message_allocator, *allocation_ref);
+        } else {
+            assert(allocation_ref.data == null);
+        }
+
+        string_count = xx text.count;
+        if text.count > 0 {
+            repeat_count = 1;
+            allocation_ref = na_alloc(*rm_log_message_allocator, string_count);
+            memcpy(allocation_ref.data, text.data, string_count);
+
+        }
+        rm_log_message_top = increment_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
     }
-    string_count = xx text.count;
-    if text.count > 0 {
-        allocation_ref = na_alloc(*rm_log_message_allocator, string_count);
-        memcpy(allocation_ref.data, text.data, string_count);
-    }
-    rm_log_message_top = increment_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
 }
 
 RM_Log_Message :: struct {
+    repeat_count: s32;
     string_count: s32;
     allocation_ref: Nested_Allocation_Ref;
 }
 
-get_rm_log_message :: inline (i: s64) -> string {
+get_rm_log_message :: inline (i: s64) -> string, s32 {
     using rm_log_messages[i];
-    return string.{string_count, allocation_ref.data};
+    return string.{string_count, allocation_ref.data}, repeat_count;
 }
 
 rm_log_messages: []RM_Log_Message;

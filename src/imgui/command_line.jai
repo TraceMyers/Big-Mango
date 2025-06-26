@@ -2,26 +2,30 @@
 add_command_line :: (sidebar_width: float32, perf_readout_width: float32) -> input_begin_x: float32, bar_height: float32 {
     if input_focus != .COMMAND_LINE then return 0,0;
 
-    Begin("CommandLine_InputBar", flags=.NoTitleBar | .NoMove | .NoResize | .NoBackground);
+    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=0.9});
+    defer PopStyleColor();
+
+    Begin("CommandLine_InputBar", flags=.NoTitleBar | .NoMove | .NoResize);
     defer End();
 
-    is_cli_focused := IsWindowFocused();
-    SetWindowPos(.{});
-
     line_height := GetFrameHeight() * 2 - 2;
-    SetCursorPos(.{sidebar_width, line_height*0.1});
+    is_cli_focused := IsWindowFocused();
+    SetWindowPos(.{sidebar_width, 0});
+
+    // SetCursorPos(.{sidebar_width, line_height*0.1});
     PushStyleColor(.Text, 0xff_8f_a2_8a);
     cmd_header_text := " cmd: ";
     cmd_header_text_size := text_size(cmd_header_text);
     Text(cmd_header_text);
     PopStyleColor();
 
-    input_text_x_offset := sidebar_width + cmd_header_text_size.x * 0.5 + 6;
-    SetCursorPos(.{input_text_x_offset, 0});
+    input_text_x_offset := cmd_header_text_size.x - 12;
+    SetCursorPos(.{input_text_x_offset, 6});
 
     // setting the label width to zero. doing custom label
     PushItemWidth(-1);
     PushStyleVar(.WindowPadding, .{});
+
 
     reclaim_focus: bool;
     if InputText("##CommandLine_InputText", command_line_text_buffer.data, command_line_text_buffer.count, .EnterReturnsTrue | .CallbackCompletion, command_line_autocomplete_callback) {
@@ -62,7 +66,7 @@ add_command_line :: (sidebar_width: float32, perf_readout_width: float32) -> inp
 
     window_size: Vector2;
     app_window_dims := get_window_dimensions();
-    window_size.x = xx app_window_dims.x - perf_readout_width;
+    window_size.x = xx app_window_dims.x - (perf_readout_width + sidebar_width);
     window_size.y = line_height;
 
     suggestion_count := add_command_line_input_suggestions(input_text_x_offset, window_size.y);
@@ -79,9 +83,14 @@ add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height:
     if input_tokens.count == 0 || input_tokens[0].count == 0 {
         return 0;
     }
+
+    PushStyleColor(.ChildBg, .{xyz=DARK_GREY_BLUE.vec3, w=0.9});
+    defer PopStyleColor();
+
     is_open := BeginChild("##CommandLine_InputSuggestions"/*, flags=.NoTitleBar | .NoResize | .NoInputs | .NoNav*/);
     defer EndChild();
     if !is_open then return 0;
+
 
     SetCursorPos(.{input_begin_x-4, 0});
 

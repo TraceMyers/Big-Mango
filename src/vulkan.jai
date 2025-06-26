@@ -2408,7 +2408,7 @@ Shader_Hash_Item :: struct {
 Line_Vertex :: struct {
     position: Vector4;
     // _padding := 0.0;
-    color: Vector4;
+    color: Color4f;
 }
 
 Mesh_Vertex :: struct {
