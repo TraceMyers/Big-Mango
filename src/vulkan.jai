@@ -26,10 +26,10 @@ ENABLE_VALIDATION_LAYERS :: true;
 // TODO: it might be better to have one big descriptor pool
 // TODO: learn about gamma correction and why it's necessary to display the image as intended. put gamma into the post-processing shader rather than doing it in the exture sampler. (NOTE: no longer using srgb render target, so...?)
 // TODO: drawing a 3d shape (say, a capsule) could work like this:
-//      1. generate a bounding box for the shape
-//      2. transform the bounding box into screen space
-//      3. generate a 2d render box from the bounding box
-//      4. dispatch a compute shader with work groups covering the 2d box and params that tell it how to draw the shape in that area. (draw the rest of the fucking owl)
+//      1. a capsule is just a line segment with radius. 
+//      2. transform the line segment into screenspace.
+//      3. use the piecewise min and maxs to get a 2d box. this selects the work groups.
+//      4. checking whether or not to draw at a certain fragment is as easy as checking 2d distance from the screenspace line segment against the screenspace radius of the capsule
 //      5. depth test and alpha mix fragments during draw
 
 boot_vulkan :: (stage: Boot_Stage) -> bool {
@@ -167,7 +167,9 @@ render_frame :: () {
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
 
-    draw_sphere(cmd, draw_image.vk_obj);
+    // draw_sphere(cmd, draw_image.vk_obj);
+
+    draw_capsules(cmd, draw_image.vk_obj, *vp_mat);
 
     // -----------------------------------------------------------------------------------------------------------------
     // graphics pipeline draw
@@ -185,7 +187,7 @@ render_frame :: () {
         model *= scale;
         m := *mesh_pool[cube_mesh];
         m.albedo.tint = test_color_1;
-        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        // draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
     for 0..5 {
         offset := ifx it & 1 != 0 then 0.0 else 10.0;
@@ -197,7 +199,7 @@ render_frame :: () {
         model *= scale;
         m := *mesh_pool[cube_mesh];
         m.albedo.tint = test_color_2;
-        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        // draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
     for mesh : player_character.meshes {
         mesh.albedo.tint.w = 1.0;
@@ -216,7 +218,7 @@ render_frame :: () {
             model *= rot;
             scale := make_scale_matrix4(.{1, 1, 1});
             model *= scale;
-            draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
+            // draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
         }
     }
 
@@ -225,9 +227,14 @@ render_frame :: () {
     vkCmdEndRendering(cmd);
 
     // -----------------------------------------------------------------------------------------------------------------
+    // more compute
+    // -----------------------------------------------------------------------------------------------------------------
+    transition_image(cmd, draw_image.vk_obj, .COLOR_ATTACHMENT_OPTIMAL, .GENERAL);
+
+    // -----------------------------------------------------------------------------------------------------------------
     // copy graphics to swapchain
     // -----------------------------------------------------------------------------------------------------------------
-    transition_image(cmd, draw_image.vk_obj, .COLOR_ATTACHMENT_OPTIMAL, .TRANSFER_SRC_OPTIMAL);
+    transition_image(cmd, draw_image.vk_obj, .GENERAL, .TRANSFER_SRC_OPTIMAL);
     transition_image(cmd, render_target, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
     copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*draw_image.extent).(*VkExtent2D).*);
 
@@ -928,6 +935,7 @@ create_experimental_data :: () {
 create_pipelines :: () {
     create_rect_pipeline();
     create_sphere_pipeline();
+    create_capsule_pipeline();
     create_tex_pipeline();
     create_graphics_pipeline();
     create_line_pipeline();
@@ -1005,6 +1013,38 @@ create_sphere_pipeline :: () {
     deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, sphere_pipeline, null));
 }
 
+create_capsule_pipeline :: () {
+    push_constant_description := VkPushConstantRange.{
+            stageFlags = .COMPUTE_BIT,
+            size = size_of(Capsule_Draw_Push_Constants)
+    };
+    layout := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = 1,
+        pSetLayouts = *draw_image_descriptor_layout,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *push_constant_description
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *layout, null, *capsule_pipeline_layout), "failed to create the sphere rect pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, capsule_pipeline_layout, null));
+
+    compute_draw_shader := load_shader("compute_draw_capsule");
+
+    shader_stage_info := VkPipelineShaderStageCreateInfo.{
+        stage = .COMPUTE_BIT,
+        module = compute_draw_shader,
+        pName = "main"
+    };
+
+    compute_pipeline_info := VkComputePipelineCreateInfo.{
+        layout = capsule_pipeline_layout,
+        stage = shader_stage_info
+    };
+
+    vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *capsule_pipeline), "failed to create the sphere draw pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, capsule_pipeline, null));
+}
+
 create_tex_pipeline :: () {
     push_constant_description := VkPushConstantRange.{
         stageFlags = .COMPUTE_BIT,
@@ -1024,7 +1064,7 @@ create_tex_pipeline :: () {
     vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *tex_pipeline_layout), "failed to create a pipeline layout");
     deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, tex_pipeline_layout, null));
 
-    compute_draw_shader := create_shader_module_from_file("../shaders/cpt_draw_quad_textured.spv");
+    compute_draw_shader := load_shader("cpt_draw_quad_textured");
     vk_init_validate(compute_draw_shader != null, "failed to create a shader");
 
     shader_stage_info := VkPipelineShaderStageCreateInfo.{
@@ -1563,7 +1603,7 @@ load_shader :: (filename: string, add_to_deletion_queue := true) -> VkShaderModu
             return it.shader;
         }
     }
-    file_path := tprint("../shaders/%.spv", filename);
+    file_path := tprint("../shaders/intermediate/%.spv", filename);
     shader := create_shader_module_from_file(file_path);
     vk_validate(shader != null, "failed to load shader %", filename);
     array_add(*shader_hash_table, .{hash, shader});
@@ -2272,6 +2312,50 @@ draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDispatch(cmd, xx dispatch_extent, xx dispatch_extent, 1);
 }
 
+draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, vp_mat: *Matrix4) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .COMPUTE, capsule_pipeline);
+    vkCmdBindDescriptorSets(cmd, .COMPUTE, capsule_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
+
+    hail_mary := transpose(vp_mat.*);
+    // 
+    for capsules_to_draw {
+        point_a := Vector4.{xyz=it.segment_point_a, w=1};
+        point_b := Vector4.{xyz=it.segment_point_b, w=1};
+        // radius_vec := Vector4.{x=it.radius,w=1};
+
+        point_a_norm := hail_mary * point_a;
+        point_b_norm := hail_mary * point_b;
+        // radius_norm := length(vp_mat.* * radius_vec);
+
+        push_constants := Capsule_Draw_Push_Constants.{
+            segment_point_a_x = respace(point_a_norm.x, .{-1, 1}, .{0, 1}),
+            segment_point_a_y = respace(point_a_norm.y, .{-1, 1}, .{0, 1}),
+            segment_point_a_z = respace(point_a_norm.z, .{-1, 1}, .{0, 1}),
+            segment_point_b_x = respace(point_b_norm.x, .{-1, 1}, .{0, 1}),
+            segment_point_b_y = respace(point_b_norm.y, .{-1, 1}, .{0, 1}),
+            segment_point_b_z = respace(point_b_norm.z, .{-1, 1}, .{0, 1}),
+            norm_radius = 10.0,
+            color_r = alter_cast(it.color.r, float, true),
+            color_g = alter_cast(it.color.g, float, true),
+            color_b = alter_cast(it.color.b, float, true),
+            color_a = alter_cast(it.color.a, float, true),
+        };
+        screen_ul := Vector2.{min(push_constants.segment_point_a_x, push_constants.segment_point_b_x), min(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
+        screen_lr := Vector2.{max(push_constants.segment_point_a_x, push_constants.segment_point_b_x), max(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
+
+        vkCmdPushConstants(cmd, capsule_pipeline_layout, .COMPUTE_BIT, 0, size_of(Capsule_Draw_Push_Constants), *push_constants);
+
+        dispatch_width := max(ceil((screen_lr.x - screen_ul.x + 100.0 * 2) / 32.0), 1.0);
+        dispatch_height := max(ceil((screen_lr.y - screen_ul.y + 100.0 * 2) / 32.0), 1.0);
+        vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
+        // vkCmdDispatch(cmd, 70, 70, 1);
+    }
+
+    array_reset_keeping_memory(*capsules_to_draw);
+}
+
 draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
@@ -2796,6 +2880,9 @@ rect_pipeline_layout: VkPipelineLayout;
 
 sphere_pipeline: VkPipeline;
 sphere_pipeline_layout: VkPipelineLayout;
+
+capsule_pipeline: VkPipeline;
+capsule_pipeline_layout: VkPipelineLayout;
 
 tex_pipeline: VkPipeline;
 tex_pipeline_layout: VkPipelineLayout;

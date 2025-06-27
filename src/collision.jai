@@ -25,7 +25,7 @@ Entity_Collider :: struct {
 }
 
 to_bottom_position :: inline (using c: *Entity_Collider, center: Vector3) -> Vector3 {
-    return center - Vector3.{0,0,height*0.5};
+    return center - Vector3.{z=height*0.5};
 }
 
 draw_collider :: (c: *Entity_Collider, position: *Vector3, forward: *Vector2, color: *Color4f, lines : s32 = 32, position_at_bottom := true) {
@@ -52,7 +52,7 @@ draw_cylinder :: (c: *Entity_Collider, bottom_position: *Vector3, forward: *Vect
 
     outward := WORLD_RIGHT;
     step_quat: Quaternion;
-    rotate(*step_quat, .{0,0,1}, 2.0 * PI / step_ct.(float));
+    rotate(*step_quat, WORLD_UP, 2.0 * PI / step_ct.(float));
 
     for 0..step_ct-1 {
         bot_edge_pt := bot_pos + outward * c.cylinder.radius;
