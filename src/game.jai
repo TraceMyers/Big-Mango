@@ -36,15 +36,15 @@ main :: () {
         update_window_events(delta_time);
         imgui_draw();
 
-        half_height := 10.2;
+        height := 20.8;
         radius := 3.0;
-        pc_middle := player_character.position + WORLD_UP * half_height;
+        pc_middle := player_character.position + WORLD_UP * height;
 
         forward := fore_direction(*player_character);
         color := Color4f.{0.6, 0.11, 0.9, 1.0};
-        pt_a := pc_middle - WORLD_UP * (half_height - radius);
-        pt_b := pc_middle + WORLD_UP * (half_height - radius);
-        draw_capsule(.{pt_a, pt_b, radius, .{130, 11, 190, 255}});
+        pt_a := WORLD_UP * radius;
+        pt_b := WORLD_UP * (height - radius);
+        draw_capsule(.{pt_a, pt_b, radius, .{130, 11, 190, 100}});
         // draw_cylinder(*player_character.physics_properties.body_collider, *player_character.position, *forward.xy, *color, 50);
 
         for npcs {

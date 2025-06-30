@@ -37,7 +37,7 @@ boot_entities :: (stage: Boot_Stage) -> bool {
         lock_allocation(*dynamic_entity_physics_properties);
         lock_allocation(*colliders);
 
-        all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(*Mesh);
+        all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
 
         maybe_optimal_chunk_list_size := 4096 * 16;
         maybe_optimal_chunk_list_count := div_ceil(all_mesh_ptrs_array_data_size, maybe_optimal_chunk_list_size);
@@ -125,8 +125,16 @@ Entity :: struct {
     using physics_core: *Entity_Physics_Core;
     physics_properties: *Physics_Properties;
     body_collider: *Entity_Collider;
-    meshes: []*Mesh;
+    meshes: []Entity_Mesh;
     creature: *Entity_Creature;
+}
+
+Entity_Mesh :: struct {
+    type: enum {
+        BODY;
+        COLLIDER;
+    };
+    data: *Mesh;
 }
 
 Creature_Type :: enum u16 {
@@ -225,7 +233,7 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
     return e.ref;
 }
 
-set_entity_meshes :: (ref: Entity_Ref, meshes: ..*Mesh) {
+set_entity_meshes :: (ref: Entity_Ref, meshes: ..Entity_Mesh) {
     assert(meshes.count > 0 && meshes.count <= ENTITY_MESHES_MAX_COUNT);
     patch_info := get_entity_patch_info(ref);
 
@@ -236,7 +244,7 @@ set_entity_meshes :: (ref: Entity_Ref, meshes: ..*Mesh) {
         } else {
             assert(mesh_collection.mesh_count == 0);
         }
-        mesh_collection.allocation_ref = na_alloc(*entity_mesh_array_allocator, meshes.count * size_of(*Mesh));
+        mesh_collection.allocation_ref = na_alloc(*entity_mesh_array_allocator, meshes.count * size_of(Entity_Mesh));
         assert(basic_validity_check(*mesh_collection.allocation_ref));
     }
 
@@ -248,13 +256,13 @@ set_entity_meshes :: (ref: Entity_Ref, meshes: ..*Mesh) {
     }
 }
 
-get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []*Mesh {
+get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
     mesh_collection := *entity_mesh_collections[patch_info.index];
     if mesh_collection.mesh_count == 0 {
         return .[];
     }
     assert(basic_validity_check(mesh_collection.allocation_ref));
-    meshes: []*Mesh;
+    meshes: []Entity_Mesh;
     meshes.data = mesh_collection.allocation_ref.data;
     meshes.count = mesh_collection.mesh_count;
     return meshes;

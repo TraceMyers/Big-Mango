@@ -47,6 +47,14 @@ view_matrix :: (camera: *Entity) -> Matrix4 {
     return translate(rotation, -camera.position);
 }
 
+get_aspect_ratio :: inline (camera: *Entity, viewport: Vector2, $which := enum { X_OVER_Y; Y_OVER_X; }.X_OVER_Y) -> float {
+    #if which == .X_OVER_Y {
+        return ifx camera.perspective.aspect_ratio == 0.0 then viewport.x / viewport.y else camera.perspective.aspect_ratio;
+    } else {
+        return ifx camera.perspective.aspect_ratio == 0.0 then viewport.y / viewport.x else 1.0 / camera.perspective.aspect_ratio;
+    }
+}
+
 projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
     assert((camera.type_flags & .CAMERA) != 0);
     if camera.projection == .ORTHOGRAPHIC {
@@ -54,7 +62,7 @@ projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
         return orthographic_projection_matrix(-v.x, v.x, -v.y, v.y, NEAR_PLANE, FAR_PLANE, true);
     } else { // PERSPECTIVE
         fov_radians := camera.perspective.vertical_fov * (PI / 180.0);
-        aspect := ifx camera.perspective.aspect_ratio == 0.0 then viewport.x / viewport.y else camera.perspective.aspect_ratio;
+        aspect := get_aspect_ratio(camera, viewport);
         return make_projection_matrix(fov_radians, aspect, NEAR_PLANE, FAR_PLANE, 0, 0, true);
     }
 }

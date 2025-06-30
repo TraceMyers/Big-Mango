@@ -32,10 +32,8 @@ scratch_init_game :: () {
         man_mesh_index := request_item(*mesh_pool);
         mesh := *mesh_pool[man_mesh_index];
 
-        set_entity_meshes(entity_ref, mesh);
-        get_entity(*player_character, entity_ref);
-
-        mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
+        mesh.albedo.tint = .{0.7,0.7,0.9,0.5};
+        mesh.albedo.type = .CONSTANT;
 
         reorient_mesh_quat: Quaternion;
         set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
@@ -54,7 +52,32 @@ scratch_init_game :: () {
 
         create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
 
-        mesh.albedo.type = .CONSTANT;
+        // todo: maybe auto-gen capsule from a bounding box on the mesh just for ease of use
+        capsule_indices: [..]u16;
+        capsule_indices.allocator = temp;
+        capsule_vertices: [..]Mesh_Vertex;
+        capsule_vertices.allocator = temp;
+        {
+            temp_verts: [..]Mesh_Vertex;
+            temp_verts.allocator = temp;
+            generate_capsule_geo(*temp_verts, *capsule_indices, 21.5, 3.0, 1.0);
+            for *temp_verts {
+                it.position += WORLD_UP * 10.0;
+            }
+            setup_mesh_data_for_flat_shading(temp_verts, capsule_indices, *capsule_vertices);
+        }
+
+        capsule_mesh_index := request_item(*mesh_pool);
+        capsule_mesh := *mesh_pool[capsule_mesh_index];
+        capsule_mesh.albedo.tint = .{0.6, 0.1, 0.9, 0.8};
+        capsule_mesh.albedo.type = .CONSTANT;
+
+        create_mesh_data_buffer(*capsule_mesh.vbo, capsule_vertices, .VERTEX);
+        create_mesh_data_buffer(*capsule_mesh.ibo, capsule_indices, .INDEX);
+
+        set_entity_meshes(entity_ref, .{.BODY, mesh}, .{.COLLIDER, capsule_mesh});
+
+        get_entity(*player_character, entity_ref);
     }
     // npc 
     {
@@ -63,7 +86,7 @@ scratch_init_game :: () {
         entity_ref := spawn_entity(.STATIC_MESH);
         mesh := *mesh_pool[man_mesh_index];
 
-        set_entity_meshes(entity_ref, mesh);
+        set_entity_meshes(entity_ref, .{.BODY, mesh});
         npc := array_add(*npcs);
         get_entity(npc, entity_ref);
 

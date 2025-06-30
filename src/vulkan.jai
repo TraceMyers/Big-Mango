@@ -169,7 +169,6 @@ render_frame :: () {
 
     // draw_sphere(cmd, draw_image.vk_obj);
 
-    draw_capsules(cmd, draw_image.vk_obj, *vp_mat);
 
     // -----------------------------------------------------------------------------------------------------------------
     // graphics pipeline draw
@@ -187,7 +186,7 @@ render_frame :: () {
         model *= scale;
         m := *mesh_pool[cube_mesh];
         m.albedo.tint = test_color_1;
-        // draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
     for 0..5 {
         offset := ifx it & 1 != 0 then 0.0 else 10.0;
@@ -199,10 +198,13 @@ render_frame :: () {
         model *= scale;
         m := *mesh_pool[cube_mesh];
         m.albedo.tint = test_color_2;
-        // draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
     }
-    for mesh : player_character.meshes {
-        mesh.albedo.tint.w = 1.0;
+    rm_log("player meshes: %", player_character.meshes);
+    for emesh : player_character.meshes {
+        // if it_index == 0 then continue;
+        mesh := emesh.data;
+        // mesh.albedo.tint.w = 1.0;
         model := make_translation_matrix4(player_character.position);
         rot := rotation_matrix(Matrix4, player_character.orientation);
         model *= rot;
@@ -211,7 +213,8 @@ render_frame :: () {
         draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
     }
     for npc : npcs {
-        for mesh : npc.meshes {
+        for emesh : npc.meshes {
+            mesh := emesh.data;
             mesh.albedo.tint.w = 1.0;
             model := make_translation_matrix4(npc.position);
             rot := rotation_matrix(Matrix4, npc.orientation);
@@ -230,6 +233,18 @@ render_frame :: () {
     // more compute
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .COLOR_ATTACHMENT_OPTIMAL, .GENERAL);
+
+    // {
+    //     using mesh := player_character.meshes[0].data;
+    //     mesh.albedo.tint.w = 1.0;
+    //     model := make_translation_matrix4(player_character.position);
+    //     rot := rotation_matrix(Matrix4, player_character.orientation);
+    //     model *= rot;
+    //     scale := make_scale_matrix4(.{1, 1, 1});
+    //     model *= scale;
+    //     mvp := vp_mat * model;
+    //     draw_capsules(cmd, draw_image.vk_obj, *mvp, *vp_mat, player_character.position);
+    // }
 
     // -----------------------------------------------------------------------------------------------------------------
     // copy graphics to swapchain
@@ -1137,8 +1152,8 @@ create_graphics_pipeline :: () {
         polygonMode = .FILL,
         lineWidth = 1.0,
         // cullMode = .FRONT_BIT,
-        cullMode = .BACK_BIT,
-        // cullMode = .NONE,
+        // cullMode = .BACK_BIT,
+        cullMode = .NONE,
         frontFace = .CLOCKWISE,
         depthBiasEnable = VK_FALSE,
         depthBiasConstantFactor = 0.0,
@@ -2312,31 +2327,50 @@ draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDispatch(cmd, xx dispatch_extent, xx dispatch_extent, 1);
 }
 
-draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, vp_mat: *Matrix4) {
+draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, mvp_matrix: *Matrix4, vp_matrix: *Matrix4, capsule_bottom_center: Vector3) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
     vkCmdBindPipeline(cmd, .COMPUTE, capsule_pipeline);
     vkCmdBindDescriptorSets(cmd, .COMPUTE, capsule_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
 
-    hail_mary := transpose(vp_mat.*);
-    // 
+    // a lot of stuff in here needs information about the camera... 
+    // but the camera is supposed to be a dynamic thing, so maybe referencing an old state.
+    // preparing data for compute shaders feels messy as hell
+    // cameras are simple and cheap to repeatedly store, so they can be saved with the draw requests that need them to reference at draw time.
+
     for capsules_to_draw {
+        cam_to_pos := normalize(capsule_bottom_center - camera.position);
+        relevant_right := right_direction(*camera);
+        radius_vec_0 := Vector4.{xyz=.{}, w=1}; 
+        radius_vec_1 := Vector4.{xyz=relevant_right * it.radius, w=1};
+
         point_a := Vector4.{xyz=it.segment_point_a, w=1};
         point_b := Vector4.{xyz=it.segment_point_b, w=1};
-        // radius_vec := Vector4.{x=it.radius,w=1};
-
-        point_a_norm := hail_mary * point_a;
-        point_b_norm := hail_mary * point_b;
-        // radius_norm := length(vp_mat.* * radius_vec);
+        point_a_clip := mvp_matrix.* * point_a;
+        point_b_clip := mvp_matrix.* * point_b;
+        point_a_norm := point_a_clip / point_a_clip.w;
+        point_b_norm := point_b_clip / point_b_clip.w;
+        
+        radius_norm: float;
+        if camera.projection == .ORTHOGRAPHIC {
+            radius_norm = it.radius * camera.orthographic.scale / draw_extent.width.(float);
+        } else {
+            radius_clip_vec_0 := mvp_matrix.* * radius_vec_0;
+            radius_norm_vec_0 := radius_clip_vec_0 / radius_clip_vec_0.w;
+            radius_clip_vec_1 := mvp_matrix.* * radius_vec_1;
+            radius_norm_vec_1 := radius_clip_vec_1 / radius_clip_vec_1.w;
+            radius_norm_vec := radius_norm_vec_0 - radius_norm_vec_1;
+            radius_norm = length(radius_norm_vec * 0.5);
+        }
 
         push_constants := Capsule_Draw_Push_Constants.{
-            segment_point_a_x = respace(point_a_norm.x, .{-1, 1}, .{0, 1}),
-            segment_point_a_y = respace(point_a_norm.y, .{-1, 1}, .{0, 1}),
-            segment_point_a_z = respace(point_a_norm.z, .{-1, 1}, .{0, 1}),
-            segment_point_b_x = respace(point_b_norm.x, .{-1, 1}, .{0, 1}),
-            segment_point_b_y = respace(point_b_norm.y, .{-1, 1}, .{0, 1}),
-            segment_point_b_z = respace(point_b_norm.z, .{-1, 1}, .{0, 1}),
-            norm_radius = 10.0,
+            segment_point_a_x = respace(point_a_norm.x, .{-1, 1}, .{0, 1}, false),
+            segment_point_a_y = respace(point_a_norm.y, .{-1, 1}, .{0, 1}, false),
+            segment_point_a_z = respace(point_a_norm.z, .{-1, 1}, .{0, 1}, false),
+            segment_point_b_x = respace(point_b_norm.x, .{-1, 1}, .{0, 1}, false),
+            segment_point_b_y = respace(point_b_norm.y, .{-1, 1}, .{0, 1}, false),
+            segment_point_b_z = respace(point_b_norm.z, .{-1, 1}, .{0, 1}, false),
+            norm_radius = radius_norm,
             color_r = alter_cast(it.color.r, float, true),
             color_g = alter_cast(it.color.g, float, true),
             color_b = alter_cast(it.color.b, float, true),
@@ -2347,10 +2381,10 @@ draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, vp_mat: *Matrix4) {
 
         vkCmdPushConstants(cmd, capsule_pipeline_layout, .COMPUTE_BIT, 0, size_of(Capsule_Draw_Push_Constants), *push_constants);
 
-        dispatch_width := max(ceil((screen_lr.x - screen_ul.x + 100.0 * 2) / 32.0), 1.0);
-        dispatch_height := max(ceil((screen_lr.y - screen_ul.y + 100.0 * 2) / 32.0), 1.0);
-        vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
-        // vkCmdDispatch(cmd, 70, 70, 1);
+        // dispatch_width := max(ceil((screen_lr.x - screen_ul.x + 100.0 * 2) / 32.0), 1.0);
+        // dispatch_height := max(ceil((screen_lr.y - screen_ul.y + 100.0 * 2) / 32.0), 1.0);
+        // vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
+        vkCmdDispatch(cmd, 70, 70, 1);
     }
 
     array_reset_keeping_memory(*capsules_to_draw);
@@ -2405,6 +2439,267 @@ prepare_lights :: () {
     down_vec := WORLD_DOWN;
     lights.sun_direction = rotate(down_vec, WORLD_FORE, sun_t);
     copy_cpu_memory_to_buffer(lights.buffer, as_string(lights.data));
+}
+
+// TODO: make it so it can have 0 cylinder sections
+generate_capsule_geo :: (out_vertices: *[..]Mesh_Vertex, out_indices: *[..]u16, height: float, radius: float, triangulize_distance := 1.0) {
+    cylinder_height := height - 2.0 * radius;
+    assert(cylinder_height >= 0);
+    assert(out_indices.data == null && out_indices.count == 0);
+    assert(out_vertices.data == null && out_vertices.count == 0);
+
+    inv_triangulize_distance := 1.0 / triangulize_distance;
+    circumference := 2.0 * PI * radius;
+
+    // the belt is the largest circle/cross section when looking down on an upright capsule. in other words, it's the circle that represents the cylinder part of the capsule in xy space. the vertex count along the belt needs to be a power of two so that by halving it, we always have exactly half with no remainder. important for sphere triangulization. this is broken up into steps as an artifact of a debugging process.
+    target_belt_vertex_count_step_1 := circumference * inv_triangulize_distance;
+    target_belt_vertex_count_step_2 := max(5.0, target_belt_vertex_count_step_1);
+    target_belt_vertex_count_step_3 := round(target_belt_vertex_count_step_2);
+    belt_vertex_count : u32 = xx ceil_to_pow2(target_belt_vertex_count_step_3);
+
+    rot := 2.0 * PI / belt_vertex_count.(float);
+
+    cylinder_ring_rotator: Quaternion;
+    rotate(*cylinder_ring_rotator, WORLD_UP, rot);
+
+    trace_radius_vec := WORLD_RIGHT * radius;
+
+    cylinder_half_height := cylinder_height * 0.5;
+    cylinder_row_count : u32 = xx round(ceil(cylinder_half_height * inv_triangulize_distance));
+    assert(cylinder_row_count >= 1);
+
+    sphere_circumference := 2.0 * PI * radius;
+    quarter_sphere_circumference := sphere_circumference * 0.25;
+    half_sphere_sections := round(ceil(quarter_sphere_circumference * inv_triangulize_distance));
+    // the last section has a single vertex at the top. not counting that among the rings.
+    half_sphere_rings := half_sphere_sections - 1;
+    assert(half_sphere_rings >= 0);
+
+    sphere_ring_radii: []float;
+    sphere_ring_counts: []u16;
+
+    // the sphere part uses aligned vertices and attempts to match the desired number of triangles to the number per row. an operation that can do both (aligned + match desired number) is to sometimes half the number of tris when moving up a row. this loop searches up the half-sphere, finds the halvings, and sums up the vertex count for preallocation.
+
+    half_sphere_vertex_count := 1; // at least one vertex, top center (also represents bottom center w/ symmetry)
+    if half_sphere_rings >= 1 {
+        sphere_ring_radii = alloc_array(float, half_sphere_rings, temp);
+        sphere_ring_counts = alloc_array(u16, half_sphere_rings, temp);
+
+        current_belt_size : u32 = belt_vertex_count;
+        for 0..half_sphere_rings-1 {
+            norm_angular_distance := clamp(1.0 - ((it + 1).(float) / half_sphere_sections.(float)), 0, 1);
+            angle := norm_angular_distance * (PI * 0.5);
+            sphere_ring_radii[it] = radius * sin(angle);
+            ring_circumference := sphere_ring_radii[it] * 2.0 * PI;
+
+            ring_target_vertex_count := round(ring_circumference * inv_triangulize_distance, u32);
+            assert(ring_target_vertex_count <= current_belt_size);
+
+            half_current_belt_size := current_belt_size >> 1;
+
+            if ring_target_vertex_count <= half_current_belt_size {
+                current_belt_size = half_current_belt_size;
+            }
+            sphere_ring_counts[it] = xx current_belt_size;
+            half_sphere_vertex_count += current_belt_size;
+        }
+    }
+
+    half_cylinder_vertex_count_minus_belt := belt_vertex_count * cylinder_row_count;
+    half_vertex_count_minus_belt := half_cylinder_vertex_count_minus_belt + half_sphere_vertex_count;
+    total_vertex_count := belt_vertex_count + half_cylinder_vertex_count_minus_belt * 2 + half_sphere_vertex_count * 2;
+
+    assert(total_vertex_count <= U16_MAX);
+    array_resize(out_vertices, total_vertex_count);
+
+    belt_begin              : u32 = 0;
+    belt_end                : u32 = xx belt_vertex_count;
+
+    cylinder_top_half_begin : u32 = xx belt_end;
+    cylinder_top_half_end   : u32 = xx (cylinder_top_half_begin + half_cylinder_vertex_count_minus_belt);
+
+    sphere_top_half_begin   : u32 = xx cylinder_top_half_end;
+    sphere_top_half_end     : u32 = xx (sphere_top_half_begin + half_sphere_vertex_count);
+
+    cylinder_bot_half_begin : u32 = xx sphere_top_half_end;
+    cylinder_bot_half_end   : u32 = xx (cylinder_bot_half_begin + half_cylinder_vertex_count_minus_belt);
+
+    sphere_bot_half_begin   : u32 = xx cylinder_bot_half_end;
+    sphere_bot_half_end     : u32 = xx (sphere_bot_half_begin + half_sphere_vertex_count);
+
+    assert(sphere_bot_half_end == total_vertex_count);
+
+    // --------------------------
+    // generate cylinder top half
+    // --------------------------
+
+    // triangle gen between vertex rings:
+    //  0            1
+    // |  \          |
+    // |     \       |
+    // |        \    |
+    // |           \ |
+    // 0             1
+
+    for ring_pos : 0..belt_vertex_count-1 {
+        // add belt vertex
+        out_vertices.*[ring_pos] = .{position=trace_radius_vec};
+        // add rest of vertices in cylinder (which vertically align with the belt vertices)
+        for row : 1..cylinder_row_count {
+            // offset from belt
+            height_for_offset := min(row.(float) * triangulize_distance, cylinder_half_height);
+            height_offset := WORLD_UP * height_for_offset;
+
+            v := row * belt_vertex_count + ring_pos;
+            out_vertices.*[v] = .{position=trace_radius_vec + height_offset};
+
+            prev_ring_min : u16 = xx ((row - 1) * belt_vertex_count);
+            prev_ring_max : u16 = xx (prev_ring_min + belt_vertex_count - 1);
+            cur_ring_min  : u16 = xx (row * belt_vertex_count);
+            cur_ring_max  : u16 = xx (cur_ring_min + belt_vertex_count - 1);
+
+            quad_ll : u16 = xx (prev_ring_min + ring_pos);
+            quad_lr : u16 = xx increment_wrap(quad_ll, prev_ring_min, prev_ring_max);
+            quad_ul : u16 = xx v;
+            quad_ur : u16 = xx increment_wrap(v, cur_ring_min, cur_ring_max);
+
+            array_add(out_indices, quad_ll, quad_ul, quad_lr);
+            array_add(out_indices, quad_ul, quad_ur, quad_lr);
+        }
+        trace_radius_vec = rotate(trace_radius_vec, cylinder_ring_rotator);
+    }
+
+    // ------------------------
+    // generate sphere top half
+    // ------------------------
+
+    prev_ring_count     := belt_vertex_count;
+    prev_ring_offset    := cylinder_top_half_end - belt_vertex_count;
+    cur_ring_offset     := sphere_top_half_begin;
+
+    sphere_vertex_sum := 0;
+    sphere_ring_count: u32;
+
+    for 0..half_sphere_rings-1 {
+        ring_radius := sphere_ring_radii[it];
+        // b = sqrt(c^2 - a^2)
+        partial_half_sphere_height_for_offset := sqrt(radius * radius - ring_radius * ring_radius);
+        height_for_offset := cylinder_half_height + partial_half_sphere_height_for_offset;
+        ring_height_offset := WORLD_UP * height_for_offset;
+
+        sphere_ring_count = sphere_ring_counts[it];
+        ring_rot := 2.0 * PI / sphere_ring_count.(float);
+        sphere_ring_rotator: Quaternion;
+        rotate(*sphere_ring_rotator, WORLD_UP, ring_rot);
+
+        trace_radius_vec = WORLD_RIGHT * ring_radius;
+
+        for 0..sphere_ring_count-1 {
+            out_vertices.*[cur_ring_offset+it] = .{position=trace_radius_vec + ring_height_offset};
+            trace_radius_vec = rotate(trace_radius_vec, sphere_ring_rotator);
+
+            if sphere_ring_count < prev_ring_count {
+                // triangle gen when the current ring has half the vertex count of the previous ring (you might thing you can do less triangles by cutting out bot vertex 1 here, but this would leave holes in the mesh)
+                //  0            1
+                // |\           /|
+                // |  \       /  |
+                // |    \    /   |
+                // |      \/     |
+                // 0      1      2
+                assert(prev_ring_count >> 1 == sphere_ring_count);
+
+                prev_ring_min   : u16 = xx prev_ring_offset;
+                prev_ring_max   : u16 = xx (prev_ring_min + prev_ring_count - 1);
+                cur_ring_min    : u16 = xx cur_ring_offset;
+                cur_ring_max    : u16 = xx (cur_ring_min + sphere_ring_count - 1);
+
+                cur_ring_left   : u16 = xx (cur_ring_min + it);
+                cur_ring_right  : u16 = xx increment_wrap(cur_ring_left, cur_ring_min, cur_ring_max);
+
+                prev_ring_right := prev_ring_min + it.(u16) * 2 + 1;
+                prev_ring_mid   := decrement_wrap(prev_ring_right,  prev_ring_min, prev_ring_max);
+                prev_ring_left  := decrement_wrap(prev_ring_mid,    prev_ring_min, prev_ring_max);
+
+                array_add(out_indices, cur_ring_left, cur_ring_right,   prev_ring_right);
+                array_add(out_indices, cur_ring_left, prev_ring_right,  prev_ring_mid);
+                array_add(out_indices, cur_ring_left, prev_ring_mid,    prev_ring_left);
+            } else {
+                // triangle gen when the rings have the same vertex count
+                //  0            1
+                // |  \          |
+                // |     \       |
+                // |        \    |
+                // |           \ |
+                // 0             1
+                prev_ring_min   : u16 = xx (prev_ring_offset);
+                prev_ring_max   : u16 = xx (prev_ring_min + prev_ring_count - 1);
+                cur_ring_min    : u16 = xx (cur_ring_offset);
+                cur_ring_max    : u16 = xx (cur_ring_min + sphere_ring_count - 1);
+
+                prev_ring_left  : u16 = xx (prev_ring_min + it);
+
+                quad_lower_left     : u16 = prev_ring_left;
+                quad_lower_right    : u16 = increment_wrap(prev_ring_left, prev_ring_min, prev_ring_max);
+                quad_upper_left     : u16 = xx (cur_ring_min + it);
+                quad_upper_right    : u16 = increment_wrap((cur_ring_min + it).(u16), cur_ring_min, cur_ring_max);
+
+                array_add(out_indices, quad_lower_left, quad_upper_left,  quad_lower_right);
+                array_add(out_indices, quad_upper_left, quad_upper_right, quad_lower_right);
+            }
+        }
+
+        prev_ring_count  = sphere_ring_count;
+        prev_ring_offset = cur_ring_offset;
+
+        sphere_vertex_sum += sphere_ring_count;
+        cur_ring_offset   += sphere_ring_count;
+    }
+
+    // triangulize distance too high -> too low poly -> just crash
+    assert(sphere_ring_count > 0);
+
+    // final half-sphere section, connecting the top ring to the tippy-top vertex.
+    out_vertices.*[cur_ring_offset] = .{position=WORLD_UP * (cylinder_half_height + radius)};
+    for 0..sphere_ring_count-1 {
+        final_ring_a : u16 = xx (prev_ring_offset + it);
+        final_ring_b := increment_wrap(final_ring_a, xx prev_ring_offset, xx (prev_ring_offset + prev_ring_count - 1)).(u16);
+        array_add(out_indices, final_ring_a, cur_ring_offset.(u16), final_ring_b);
+    }
+
+    // ------------------------------
+    // mirror to make the bottom half
+    // ------------------------------
+
+    // add vertices
+    for 0..half_vertex_count_minus_belt-1 {
+        top_vert : u32 = xx (cylinder_top_half_begin + it);
+        bot_vert : u32 = xx (cylinder_bot_half_begin + it);
+        out_vertices.*[bot_vert] = out_vertices.*[top_vert];
+        out_vertices.*[bot_vert].position.z *= -1.0;
+    }
+
+    // add indices
+    bot_half_begin : u16 = xx cylinder_bot_half_begin;
+    top_half_index_count := out_indices.count;
+    top_center_vertex := bot_half_begin-1;
+    bot_center_vertex := sphere_top_half_end-1;
+    tri_begin : u16 = 0;
+
+    // if the vert index is along the center belt, those indices need to be used for the first section of the bottom half. all other indices get offset to represent vertices exclusively in the bottom half of the mesh.
+    maybe_offset_vert_index :: (vert_index: u16) -> u16 #expand {
+        if vert_index >= `belt_vertex_count {
+            return vert_index + (`half_vertex_count_minus_belt).(u16);
+        }
+        return vert_index;
+    }
+
+    while tri_begin < top_half_index_count {
+        tri_a := maybe_offset_vert_index(out_indices.*[tri_begin+0]);
+        tri_b := maybe_offset_vert_index(out_indices.*[tri_begin+1]);
+        tri_c := maybe_offset_vert_index(out_indices.*[tri_begin+2]);
+        array_add(out_indices, tri_c, tri_b, tri_a);
+        tri_begin += 3;
+    }
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2807,9 +3102,7 @@ setup_mesh_data_for_flat_shading :: (in_vertices: []Mesh_Vertex, indices: []$T, 
             index_offset = 0;
         }
 
-        // in GL and Vulkan both, the 'provoking vertex' is the last vertex of a triangle. this is the vertex
-        // that passes data through to the fragment shader when the vertex output is marked 'flat'.
-        // in this case, this fact is being leveraged to pass face normals through via specific vertices
+        // the 'provoking vertex' is the vertex that passes data through to the fragment shader when the vertex output is marked 'flat'. in this case, this fact is being leveraged to pass face normals through via specific vertices. chatgpt said that vulkan uses the last vertex as the provoking vertex, but that seems to be wrong, since I'm putting normals on the first vertex of each triangle.
         if index_offset == 1 {
             indices[i], indices[i+1], indices[i+2] = indices[i+1], indices[i+2], indices[i+0];
         } else if index_offset == 2 {
@@ -2873,6 +3166,7 @@ graphics_pipeline_layout: VkPipelineLayout;
 
 line_pipeline: VkPipeline;
 line_pipeline_layout: VkPipelineLayout;
+
 line_vbo: Mesh_Data_Buffer;
 
 rect_pipeline: VkPipeline;
