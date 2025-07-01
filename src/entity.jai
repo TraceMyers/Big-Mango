@@ -182,6 +182,15 @@ get_entity_at :: (using e: *Entity, i: s64) {
     }
 }
 
+get_entity_physics_properties :: (e: u16) -> *Physics_Properties {
+    patch_info := *entities[e];
+    if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
+        return *dynamic_entity_physics_properties[patch_info.physics_properties];
+    } else {
+        return *PHYSICS_PROPERTIES_TEMPLATES[patch_info.physics_properties];
+    }
+}
+
 is_creature_type :: (t: Entity_Type) -> bool {
     // if t == {
     // case .STATIC_MESH_CREATURE;
@@ -266,6 +275,34 @@ get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
     meshes.data = mesh_collection.allocation_ref.data;
     meshes.count = mesh_collection.mesh_count;
     return meshes;
+}
+
+move_entities :: () {
+    last_entity := find_last_set_bit(*entities.in_use);
+    for 0..last_entity {
+        e_phys := *entity_physics_core[it];
+        e_props := get_entity_physics_properties(xx it);
+        e_phys.position += e_phys.linear_velocity * delta_time;
+
+        linear_speed_sq := length_squared(e_phys.linear_velocity);
+        if linear_speed_sq > 0 {
+            linear_speed := sqrt(linear_speed_sq);
+            velocity_direction := e_phys.linear_velocity * (1.0 / linear_speed);
+
+            // todo: material friction
+            ground_friction := 2.5;
+            friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
+            assert(friction_coef >= 0.0);
+            friction_accel := friction_coef * 98.0;
+            friction_delta := friction_accel * delta_time;
+
+            if friction_delta > linear_speed {
+                e_phys.linear_velocity = .{};
+            } else {
+                e_phys.linear_velocity -= velocity_direction * friction_delta;
+            }
+        }
+    }
 }
 
 entities: Pool(Entity_Patch_Info);

@@ -167,9 +167,6 @@ render_frame :: () {
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .UNDEFINED, .GENERAL);
 
-    // draw_sphere(cmd, draw_image.vk_obj);
-
-
     // -----------------------------------------------------------------------------------------------------------------
     // graphics pipeline draw
     // -----------------------------------------------------------------------------------------------------------------
@@ -202,7 +199,8 @@ render_frame :: () {
     }
     rm_log("player meshes: %", player_character.meshes);
     for emesh : player_character.meshes {
-        // if it_index == 0 then continue;
+        // if emesh.type != .COLLIDER then continue;
+        // if it_index == 1 then continue;
         mesh := emesh.data;
         // mesh.albedo.tint.w = 1.0;
         model := make_translation_matrix4(player_character.position);
@@ -214,14 +212,15 @@ render_frame :: () {
     }
     for npc : npcs {
         for emesh : npc.meshes {
+            // if emesh.type != .COLLIDER then continue;
             mesh := emesh.data;
-            mesh.albedo.tint.w = 1.0;
+            // mesh.albedo.tint.w = 1.0;
             model := make_translation_matrix4(npc.position);
             rot := rotation_matrix(Matrix4, npc.orientation);
             model *= rot;
             scale := make_scale_matrix4(.{1, 1, 1});
             model *= scale;
-            // draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
+            draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
         }
     }
 
@@ -949,9 +948,9 @@ create_experimental_data :: () {
 
 create_pipelines :: () {
     create_rect_pipeline();
-    create_sphere_pipeline();
-    create_capsule_pipeline();
-    create_tex_pipeline();
+    // create_sphere_pipeline();
+    // create_capsule_pipeline();
+    // create_tex_pipeline();
     create_graphics_pipeline();
     create_line_pipeline();
     if !init_success then return;

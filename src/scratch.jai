@@ -24,11 +24,13 @@ scratch_init_game :: () {
         // rotate(*camera, .{0,0,1}, PI/4);
     }
     man_mesh_index: s64;
+    capsule_mesh_index: s64;
     // character / character mesh
     {
         auto_release_temp();
 
         entity_ref := spawn_entity(.STATIC_MESH);
+        entity_phys_props := get_entity_physics_properties(xx entity_ref.index);
         man_mesh_index := request_item(*mesh_pool);
         mesh := *mesh_pool[man_mesh_index];
 
@@ -60,14 +62,14 @@ scratch_init_game :: () {
         {
             temp_verts: [..]Mesh_Vertex;
             temp_verts.allocator = temp;
-            generate_capsule_geo(*temp_verts, *capsule_indices, 21.5, 3.0, 1.0);
+            generate_capsule_geo(*temp_verts, *capsule_indices, entity_phys_props.body_collider.height, entity_phys_props.body_collider.capsule.radius, 1.0);
             for *temp_verts {
                 it.position += WORLD_UP * 10.0;
             }
             setup_mesh_data_for_flat_shading(temp_verts, capsule_indices, *capsule_vertices);
         }
 
-        capsule_mesh_index := request_item(*mesh_pool);
+        capsule_mesh_index = request_item(*mesh_pool);
         capsule_mesh := *mesh_pool[capsule_mesh_index];
         capsule_mesh.albedo.tint = .{0.6, 0.1, 0.9, 0.8};
         capsule_mesh.albedo.type = .CONSTANT;
@@ -86,9 +88,7 @@ scratch_init_game :: () {
         entity_ref := spawn_entity(.STATIC_MESH);
         mesh := *mesh_pool[man_mesh_index];
 
-        set_entity_meshes(entity_ref, .{.BODY, mesh});
         npc := array_add(*npcs);
-        get_entity(npc, entity_ref);
 
         mesh.albedo.tint = .{0.7,0.7,0.9,1.0};
 
@@ -110,6 +110,10 @@ scratch_init_game :: () {
         create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
 
         mesh.albedo.type = .CONSTANT;
+
+        set_entity_meshes(entity_ref, .{.BODY, mesh}, .{.COLLIDER, *mesh_pool[capsule_mesh_index]});
+        get_entity(npc, entity_ref);
+        npc.position = .{40,0,0};
     }
     // floor cube mesh
     {
@@ -126,5 +130,10 @@ scratch_init_game :: () {
         setup_mesh_data_for_flat_shading(cube_vertices, cube_indices, *modified_vertices);
         create_mesh_data_buffer(*m1.ibo, cube_indices, .INDEX);
         create_mesh_data_buffer(*m1.vbo, modified_vertices, .VERTEX);
+    }
+    {
+        free_fly_entity = *camera;
+        character_entity = *player_character;
+        camera_entity = *camera;
     }
 }

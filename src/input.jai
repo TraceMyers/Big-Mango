@@ -2,6 +2,7 @@
 control_mode := Control_Mode.CHARACTER;
 input_focus := Input_Focus.GAME;
 previous_input_focus: Input_Focus;
+mouse_look_locked: bool;
 
 Input_Focus :: enum {
     GAME;
@@ -69,7 +70,7 @@ update_window_events :: (delta_time: float) {
                     if input_focus == .GAME then control_mode = .CHARACTER;
                 case #char "M";
                     if input_focus == .GAME && control_mode == .FREE_FLY {
-                        do_mouse_move = !do_mouse_move;
+                        mouse_look_locked = !mouse_look_locked;
                     }
                 case #char "`";
                     toggle_input_focus(.COMMAND_LINE);
@@ -78,99 +79,6 @@ update_window_events :: (delta_time: float) {
         }
     }
 
-    if control_mode == .FREE_FLY {
-        camera.projection = .PERSPECTIVE;
-        camera.perspective.vertical_fov = 90;
-        if input_focus == .GAME {
-            speed := 100.0;
-            dt_speed := speed * delta_time;
-            if Input.input_button_states[#char "W"] & .DOWN {
-                camera.position += fore_direction(*camera) * dt_speed;
-            }
-            if Input.input_button_states[#char "S"] & .DOWN {
-                camera.position -= fore_direction(*camera) * dt_speed;
-            }
-            if Input.input_button_states[#char "D"] & .DOWN {
-                camera.position += right_direction(*camera) * dt_speed;
-            }
-            if Input.input_button_states[#char "A"] & .DOWN {
-                camera.position -= right_direction(*camera) * dt_speed;
-            } 
-            if Input.input_button_states[#char "Z"] & .DOWN {
-                camera.position += up_direction(*camera) * dt_speed;
-            }
-            if Input.input_button_states[#char "X"] & .DOWN {
-                camera.position -= up_direction(*camera) * dt_speed;
-            }
-
-            if do_mouse_move {
-                rot_speed := 0.2;
-                rot_dt_speed := rot_speed * delta_time;
-                if abs(Input.mouse_delta_x) > 0 {
-                    angle := -rot_dt_speed * Input.mouse_delta_x.(float);
-                    rotate(*camera, WORLD_UP, angle);
-                }
-                if abs(Input.mouse_delta_y) > 0 {
-                    angle := -rot_dt_speed * Input.mouse_delta_y.(float);
-                    rotate(*camera, right_direction_xy(*camera), angle);
-                }
-            }
-        }
-    } else {
-        camera.projection = .ORTHOGRAPHIC;
-        cos_t := cos(PI/4);
-        sin_t := sin(PI/4);
-        set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
-        camera.orthographic.scale = 10;
-
-        if input_focus == .GAME {
-            target := player_character.orientation;
-            camera_xy_orientation: Quaternion;
-            set_orientation(*camera_xy_orientation, fore_direction_xy(*camera.orientation), .{0,0,1});
-
-            speed := 24.0;
-            dt_speed := speed * delta_time;
-            move_dir: Vector3;
-
-            if Input.input_button_states[#char "W"] & .DOWN {
-                target = camera_xy_orientation;
-                move_dir.xy += fore_direction_xy(*target).xy;
-            }
-            if Input.input_button_states[#char "S"] & .DOWN {
-                target = camera_xy_orientation;
-                rotate(*target, .{0,0,1}, PI);
-                move_dir.xy += fore_direction_xy(*target).xy;
-            }
-            if Input.input_button_states[#char "D"] & .DOWN {
-                target = camera_xy_orientation;
-                rotate(*target, .{0,0,1}, -PI/2);
-                move_dir.xy += fore_direction_xy(*target).xy;
-            }
-            if Input.input_button_states[#char "A"] & .DOWN {
-                target = camera_xy_orientation;
-                rotate(*target, .{0,0,1}, PI/2);
-                move_dir.xy += fore_direction_xy(*target).xy;
-            }
-
-            if move_dir.xy != .{0,0} {
-                move_dir.xy = normalize(move_dir.xy);
-                target = make_quat(.{move_dir.x, move_dir.y, 0}, .{0,0,1});
-                player_character.position.xy += move_dir.xy * dt_speed;
-            }
-
-            rot_speed := 6.5 * PI;
-            interp_rotate(*player_character, target, rot_speed, delta_time);
-
-            target_camera_pos: Vector3 = ---;
-            target_camera_pos.xy = player_character.position.xy;
-            target_camera_pos.xy -= fore_direction(*camera).xy * 30.0;
-            target_camera_pos.z = player_character.position.z + 60.0;
-            camera.position = exponential_interp(camera.position, target_camera_pos, 4.0, delta_time);
-        }
-    }
-
-    // point_at(*camera, .{});
-
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.
     for record: resizes {
         if record.window == window {
@@ -178,6 +86,8 @@ update_window_events :: (delta_time: float) {
             window_height = record.height;
         }
     }
+
+    process_entity_input();
 }
 
 get_window_dimensions :: () -> Int_Vector2 {

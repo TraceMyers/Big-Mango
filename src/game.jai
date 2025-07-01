@@ -36,6 +36,10 @@ main :: () {
         update_window_events(delta_time);
         imgui_draw();
 
+        populate_potential_contacts();
+        solve_potential_contacts();
+        move_entities();
+
         height := 20.8;
         radius := 3.0;
         pc_middle := player_character.position + WORLD_UP * height;
@@ -164,3 +168,4 @@ Zlib :: #import "zlib";
 #load "allocators.jai";
 #load "collision.jai";
 #load "draw.jai";
+#load "entity_control.jai";
