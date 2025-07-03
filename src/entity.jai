@@ -132,7 +132,8 @@ Entity :: struct {
 Entity_Mesh :: struct {
     type: enum {
         BODY;
-        COLLIDER;
+        CAPSULE_COLLIDER;
+        BOX_COLLIDER;
     };
     data: *Mesh;
 }
@@ -200,7 +201,7 @@ is_creature_type :: (t: Entity_Type) -> bool {
 }
 
 
-spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template  := Physics_Properties_Template.DEFAULT_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
+spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CYLINDER_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
     // scope_lock_mutex(*spawn_entity_mutex);
     i := request_item(*entities);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
@@ -224,7 +225,7 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
     if make_physics_properties_dynamic {
         phys_props_index := request_item(*dynamic_entity_physics_properties);   
         assert(phys_props_index < ENTITY_MAX_COUNT);
-        phys_props := *dynamic_entity_physics_properties[xx physics_properties_template];
+        phys_props := *dynamic_entity_physics_properties[phys_props_index];
         phys_props.template = physics_properties_template;
         phys_props.base = PHYSICS_PROPERTIES_TEMPLATES[physics_properties_template];
         e.flags |= .DYNAMIC_PHYSICS_PROPERTIES;

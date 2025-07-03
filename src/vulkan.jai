@@ -56,8 +56,6 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if !init_success then return false;
         vkDeviceWaitIdle(logical_device);
 
-        // reset(*mesh_pool);
-
         for command_frames {
             vkDestroyCommandPool(logical_device, it.command_pool, null);
             vkDestroyFence(logical_device, it.fence, null);
@@ -181,9 +179,8 @@ render_frame :: () {
         model *= rot;
         scale := make_scale_matrix4(.{10,10,1});
         model *= scale;
-        m := *mesh_pool[cube_mesh];
-        m.albedo.tint = test_color_1;
-        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        cube_mesh.albedo.tint = test_color_1;
+        draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
     }
     for 0..5 {
         offset := ifx it & 1 != 0 then 0.0 else 10.0;
@@ -193,20 +190,31 @@ render_frame :: () {
         model *= rot;
         scale := make_scale_matrix4(.{10,10,1});
         model *= scale;
-        m := *mesh_pool[cube_mesh];
-        m.albedo.tint = test_color_2;
-        draw_mesh(cmd, m, *model, *orientation, *vp_mat, 20);
+        cube_mesh.albedo.tint = test_color_2;
+        draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
     }
-    rm_log("player meshes: %", player_character.meshes);
     for emesh : player_character.meshes {
         // if emesh.type != .COLLIDER then continue;
         // if it_index == 1 then continue;
         mesh := emesh.data;
         // mesh.albedo.tint.w = 1.0;
-        model := make_translation_matrix4(player_character.position);
+        model: Matrix4 = ---;
+        if emesh.type == .BOX_COLLIDER {
+            mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
+            box := *player_character.physics_properties.body_collider.box;
+            model = make_translation_matrix4(player_character.position + Vector3.{0,0,box.height * 0.5});
+        } else {
+            model = make_translation_matrix4(player_character.position);
+        }
         rot := rotation_matrix(Matrix4, player_character.orientation);
         model *= rot;
-        scale := make_scale_matrix4(.{1, 1, 1});
+        scale: Matrix4 = ---;
+        if emesh.type == .BOX_COLLIDER {
+            box := *player_character.physics_properties.body_collider.box;
+            scale = make_scale_matrix4(.{box.width, box.length, box.height});
+        } else {
+            scale = make_scale_matrix4(.{1, 1, 1});
+        }
         model *= scale;
         draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
     }
@@ -215,10 +223,23 @@ render_frame :: () {
             // if emesh.type != .COLLIDER then continue;
             mesh := emesh.data;
             // mesh.albedo.tint.w = 1.0;
-            model := make_translation_matrix4(npc.position);
+            model: Matrix4 = ---;
+            if emesh.type == .BOX_COLLIDER {
+                mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
+                box := *npc.physics_properties.body_collider.box;
+                model = make_translation_matrix4(npc.position + Vector3.{0,0,box.height * 0.5});
+            } else {
+                model = make_translation_matrix4(npc.position);
+            }
             rot := rotation_matrix(Matrix4, npc.orientation);
             model *= rot;
-            scale := make_scale_matrix4(.{1, 1, 1});
+            scale: Matrix4 = ---;
+            if emesh.type == .BOX_COLLIDER {
+                box := *npc.physics_properties.body_collider.box;
+                scale = make_scale_matrix4(.{box.width, box.length, box.height});
+            } else {
+                scale = make_scale_matrix4(.{1, 1, 1});
+            }
             model *= scale;
             draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
         }
@@ -942,7 +963,10 @@ create_experimental_data :: () {
         create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
     }
     {
-        array_reserve(*lines, 32_768);
+        program_runtime_reserve(*lines, 32_768);
+    }
+    {
+        program_runtime_reserve(*meshes, 2048);
     }
 }
 
@@ -1651,6 +1675,104 @@ create_shader_module :: (spirv: string) -> VkShaderModule {
     return module;
 }
 
+generate_capsule_mesh_name :: (height: float, radius: float) -> string {
+    return tprint("_capsule_%_%", height, radius);
+}
+
+get_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
+    auto_release_temp();
+
+    capsule_indices: [..]u16;
+    capsule_indices.allocator = temp;
+    capsule_vertices: [..]Mesh_Vertex;
+    capsule_vertices.allocator = temp;
+
+    generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
+    for *capsule_vertices {
+        it.position += WORLD_UP * (height * 0.5);
+    }
+
+    capsule_name := generate_capsule_mesh_name(height, radius);
+    capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices);
+
+    return capsule_mesh;
+}
+
+create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh {
+    // just a convention to make sure the preloads are consistent and intentional. all preload names start with an underscore.
+    assert(starts_with(name, "_"));
+
+    hash := native_XXH64(name.data, xx name.count, 0);
+     for meshes {
+        assert(it.hash != hash);
+    }   
+
+    auto_release_temp();
+
+    mesh: Mesh;
+    modified_vertices: [..]Mesh_Vertex;
+    modified_vertices.allocator = temp;
+
+    setup_mesh_data_for_flat_shading(vertices, indices, *modified_vertices);
+    create_mesh_data_buffer(*mesh.ibo, indices, .INDEX);
+    create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
+
+    array_add(*meshes, .{hash, mesh});
+    return *meshes[meshes.count-1].mesh;
+}
+
+load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
+    hash := native_XXH64(filename.data, xx filename.count, 0);
+    for meshes {
+        if it.hash == hash {
+            return *it.mesh;
+        }
+    }
+    assert(!assert_already_loaded);
+
+    mesh: Mesh;
+    file_path := tprint("../content/%", filename);
+    success := load_mesh_from_file(*mesh, file_path, flip_winding, reorient);
+    if !success {
+        return null;
+    }
+
+    array_add(*meshes, .{hash, mesh});
+    if add_to_deletion_queue {
+        // deletion_queue_add(*game_deletion_queue, ) // ?
+    }
+
+    return *meshes[meshes.count-1].mesh;
+}
+
+load_mesh_from_file :: (out_mesh: *Mesh, file_path: string, flip_winding: bool, reorient := Quaternion.{}) -> bool {
+    auto_release_temp();
+    out_mesh.* = .{};
+
+    vertices: []Mesh_Vertex;
+    indices: Index_Buffer;
+
+    if ends_with(file_path, ".obj") {
+        vertices, indices = load_obj_file(file_path, flip_winding, reorient, temp);
+    } else {
+        return false;
+    }
+
+    modified_vertices: [..]Mesh_Vertex;
+    modified_vertices.allocator = temp;
+
+    if indices.type == .U16 {
+        setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
+        create_mesh_data_buffer(*out_mesh.ibo, indices._u16, .INDEX);
+    } else {
+        setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
+        create_mesh_data_buffer(*out_mesh.ibo, indices._u32, .INDEX);
+    }
+    create_mesh_data_buffer(*out_mesh.vbo, modified_vertices, .VERTEX);
+
+    return true;
+}
+
 // TODO: could maybe use some more params? I guess that'll be obvious later
 // according to vkguide.dev, Blit is more flexible (images can have different extents), Copy is faster, and eventually you just want to write your own custom fragment shader so you can do extra things while copying.
 copy_image :: (cmd: VkCommandBuffer, dst: VkImage, src: VkImage, dst_dims: VkExtent2D, src_dims: VkExtent2D) {
@@ -2047,10 +2169,6 @@ HERE,
         gen_proc_name, gen_proc_args, allocator_param, out_array_type_name, vk_proc_name, first_call_arg_str, check_success_str_1, out_array_type_name, vk_proc_name, second_call_arg_str, check_success_str_2
     );
 }
-
-// generate_vk_obj_destroyer :: (gen_proc_name: string, gen_proc_args: string, vk_proc_name: string, vk_proc_args: []string) -> string {
-
-// }
 
 #insert #run generate_vk_array_getter(
     "get_available_layer_properties", 
@@ -2832,6 +2950,11 @@ Mesh :: struct {
     albedo: Mesh_Albedo;
 }
 
+Hashed_Mesh :: struct {
+    hash: u64;
+    mesh: Mesh;
+}
+
 Render_Buffer :: struct {
     buffer: VkBuffer;
     allocation: VmaAllocation;
@@ -3199,9 +3322,9 @@ init_success := true;
 
 clear_color := Vector4.{0,0,0,1};
 
-mesh_pool: Pool(Mesh);
+meshes: [..]Hashed_Mesh;
 
-cube_mesh: s32 = -1;
+cube_mesh: *Mesh;
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
 

@@ -1,6 +1,7 @@
 PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.[
     .{
-        "DEFAULT_MAN", .{
+        "CYLINDER_MAN", 
+        .{
             mass = 1,
             body_collider = .{
                 type = .CAPSULE,
@@ -8,6 +9,22 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
                     capsule = .{
                         height = 21.4,
                         radius = 2.15
+                    }
+                }
+            }
+        }
+    },
+    .{
+        "BOX_MAN", 
+        .{
+            mass = 2,
+            body_collider = .{
+                type = .BOX,
+                data = .{
+                    box = .{
+                        height = 21.4,
+                        width = 5.15,
+                        length = 2.15
                     }
                 }
             }
@@ -22,7 +39,7 @@ Physics_Properties :: struct {
     // todo: linear accel discrete (or continuous?) function
     linear_acceleration := 500.0;
     accel_opposite_direction_multiplier := 2.0;
-    fast_start_speed_max := 10.0;
+    fast_start_speed_max := 5.0;
     linear_speed_max := 30.0;
     body_collider: Entity_Collider;
 }
