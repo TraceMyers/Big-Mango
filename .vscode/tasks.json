@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build imsim",
+      "type": "shell",
+      "command": "jai",
+      "args": [
+        "build.jai"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
+    },
+    {
+      "label": "build imsim (release)",
+      "type": "shell",
+      "command": "jai",
+      "args": [
+        "build.jai",
+        "-",
+        "release"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
+    },
+    {
+      "label": "build red mango",
+      "type": "shell",
+      "command": "jai",
+      "args": [
+        "./modules/Red_Mango_Core/module.jai"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
+    },
+    {
+      "label": "build red mango (release)",
+      "type": "shell",
+      "command": "jai",
+      "args": [
+        "./modules/Red_Mango_Core/module.jai",
+        "-release"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
+    }
+  ]
+}

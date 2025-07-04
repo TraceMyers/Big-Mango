@@ -1,0 +1,57 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "imsim B+R",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./bin/game.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false,
+      "preLaunchTask": "build imsim"
+    },
+    {
+      "name": "imsim R",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./bin/game.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false
+    },
+    {
+      "name": "imsim B+R (release)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./bin/game.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false,
+      "preLaunchTask": "build imsim (release)"
+    },
+    {
+      "name": "red mango B+R",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./modules/Red_Mango_Core/module.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false,
+      "preLaunchTask": "build red mango"
+    },
+    {
+      "name": "red mango R",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./modules/Red_Mango_Core/module.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false,
+    },
+    {
+      "name": "red mango B+R (release)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "./modules/Red_Mango_Core/module.exe",
+      "cwd": "${workspaceRoot}",
+      "stopAtEntry": false,
+      "preLaunchTask": "build red mango (release)"
+    },
+  ]
+}

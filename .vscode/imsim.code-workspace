@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../../../programs/jai/modules"
+		},
+		{
+			"path": "../../../../jai_modules/modules/zlib"
+		},
+		{
+			"path": "../../../apps/vai/src"
+		}
+	],
+    "settings": {}
+}

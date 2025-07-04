@@ -23,7 +23,8 @@ boot_entities :: (stage: Boot_Stage) -> bool {
             entity_physics_core = alloc_array(Entity_Physics_Core, ENTITY_MAX_COUNT);
             entity_mesh_collections = alloc_array(Entity_Mesh_Collection, ENTITY_MAX_COUNT);
             creature_interface = alloc_array(*Entity_Creature, CREATURE_MAX_COUNT);
-            precalculated_forward_directions = alloc_array(Vector2, CREATURE_MAX_COUNT);
+            precalculated_fore_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
+            precalculated_up_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
 
             set_capacity(*entities, ENTITY_MAX_COUNT);
             set_capacity(*creatures, CREATURE_MAX_COUNT);
@@ -303,6 +304,9 @@ move_entities :: () {
                 e_phys.linear_velocity -= velocity_direction * friction_delta;
             }
         }
+
+        precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
+        precalculated_up_directions[it] = up_direction(*e_phys.orientation);
     }
 }
 
@@ -311,7 +315,8 @@ entity_patch_layer: []*Entity_Patch_Info;
 // default entity data
 entity_physics_core: []Entity_Physics_Core;
 entity_mesh_collections: []Entity_Mesh_Collection;
-precalculated_forward_directions: []Vector2;
+precalculated_fore_directions: []Vector3;
+precalculated_up_directions: []Vector3;
 entity_mesh_array_allocator: Nesting_Allocator;
 // type-specific entity data
 creature_interface: []*Entity_Creature;
@@ -324,7 +329,7 @@ spawn_entity_mutex: Mutex;
 entity_id_counter: u32;
 
 // patchwork entity system:
-// - (almost) all entities just use the base Entity as their type. instead use runtime typing.
+// - all entities just use the base Entity as their type. use runtime typing.
 // - base data is indexed
 // - a unit's Entity_Type decides the base patch set.
 // - the unit's current state (over all data) determines what extra, probably temporary, patches it has.

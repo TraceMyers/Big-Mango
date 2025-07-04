@@ -40,23 +40,6 @@ main :: () {
         solve_potential_contacts();
         move_entities();
 
-        height := 20.8;
-        radius := 3.0;
-        pc_middle := player_character.position + WORLD_UP * height;
-
-        forward := fore_direction(*player_character);
-        color := Color4f.{0.6, 0.11, 0.9, 1.0};
-        pt_a := WORLD_UP * radius;
-        pt_b := WORLD_UP * (height - radius);
-        draw_capsule(.{pt_a, pt_b, radius, .{130, 11, 190, 100}});
-        // draw_cylinder(*player_character.physics_properties.body_collider, *player_character.position, *forward.xy, *color, 50);
-
-        for npcs {
-            forward := fore_direction(*it);
-            color := Color4f.{0.6, 0.11, 0.9, 1.0};
-            // draw_cylinder(*it.physics_properties.body_collider, *it.position, *forward.xy, *color, 50);
-        }
-
         new_non_render_time := seconds_since_init();
         simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
         render_frame();
