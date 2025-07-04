@@ -248,7 +248,7 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
         rndr_height := HEIGHT * (rndr_dt / red_frame_time);
         rndr_top_y := simu_top_y - rndr_height;
         sync_height := HEIGHT * (sync_dt / red_frame_time);
-        sync_top_y := sync_height;
+        sync_top_y := min(lr.y - sync_height, graph_height-1.0);
 
         draw_list.AddLine(draw_list, .{x_pos, lr.y},       .{x_pos, simu_top_y}, simu_color._u32, part_bar_width);
         draw_list.AddLine(draw_list, .{x_pos, simu_top_y}, .{x_pos, rndr_top_y}, rndr_color._u32, part_bar_width);

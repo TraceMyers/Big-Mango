@@ -1,6 +1,5 @@
 
 compile_shaders := true;
-
 #run {
     if compile_shaders {
         scope_set_working_directory("shaders");
@@ -73,6 +72,7 @@ compile_shaders := true;
     }
     // vulkan memory allocator depends on this
     array_add(*linker_args, "libcpmt.lib");
+    array_add(*linker_args, "concrt.lib");
     build_options.additional_linker_arguments = linker_args;
 
     set_build_options(build_options, w);

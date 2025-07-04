@@ -40,23 +40,27 @@ main :: () {
         solve_potential_contacts();
         move_entities();
 
-        new_non_render_time := seconds_since_init();
-        simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
-        render_frame();
-        non_render_time = seconds_since_init();
-
-        new_time := seconds_since_init();
-        delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
-        per_frame_time = new_time;
-        game_frame_count += 1;
-
-        delta_times[dt_index] = delta_time;
-        simulation_times[dt_index] = simulation_dt;
-        render_times[dt_index] = render_dt;
-        dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
-
-        reset_temporary_storage();
+        end_frame();
     }
+}
+
+end_frame :: () {
+    new_non_render_time := seconds_since_init();
+    simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
+    render_frame();
+    non_render_time = seconds_since_init();
+
+    new_time := seconds_since_init();
+    delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
+    per_frame_time = new_time;
+
+    delta_times[dt_index] = delta_time;
+    render_times[dt_index] = render_dt;
+    simulation_times[dt_index] = simulation_dt;
+    dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
+
+    reset_temporary_storage();
+    game_frame_count += 1;
 }
 
 calc_fps :: () -> float32 {

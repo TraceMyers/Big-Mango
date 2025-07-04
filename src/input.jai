@@ -17,8 +17,8 @@ Control_Mode :: enum {
 
 boot_input :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        window = create_window(1920, 1200, "a butt", 27, -1300);
-        // window = create_window(1920, 1200, "a butt", 0, 0);
+        // window = create_window(1920, 1200, "a butt", 90, -1300);
+        window = create_window(1920, 1200, "a butt", 0, 0);
         // get initial dimensions because we won't update this until the first resize
         if window != null {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
