@@ -90,6 +90,9 @@ Entity_Physics_Core :: struct {
     linear_velocity: Vector3;
     angular_velocity: Vector3;
     orientation: Quaternion;
+    flags: enum_flags u8 {
+        ON_GROUND;
+    };
 }
 
 Entity_Patch_Flags :: enum_flags u32 {
@@ -202,7 +205,7 @@ is_creature_type :: (t: Entity_Type) -> bool {
 }
 
 
-spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CYLINDER_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
+spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
     // scope_lock_mutex(*spawn_entity_mutex);
     i := request_item(*entities);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
@@ -280,34 +283,37 @@ get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
 }
 
 move_entities :: () {
-    last_entity := find_last_set_bit(*entities.in_use);
-    for 0..last_entity {
-        e_phys := *entity_physics_core[it];
-        e_props := get_entity_physics_properties(xx it);
-        e_phys.position += e_phys.linear_velocity * delta_time;
+    // last_entity := find_last_set_bit(*entities.in_use);
+    // for 0..last_entity {
+    //     if entities[it].id == camera.id then continue;
+    //     e_phys := *entity_physics_core[it];
+    //     e_props := get_entity_physics_properties(xx it);
+    //     e_phys.position += e_phys.linear_velocity * delta_time;
 
-        linear_speed_sq := length_squared(e_phys.linear_velocity);
-        if linear_speed_sq > 0 {
-            linear_speed := sqrt(linear_speed_sq);
-            velocity_direction := e_phys.linear_velocity * (1.0 / linear_speed);
+    //     e_phys.linear_velocity.z -= e_props.gravity_accel * delta_time;
 
-            // todo: material friction
-            ground_friction := 2.5;
-            friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
-            assert(friction_coef >= 0.0);
-            friction_accel := friction_coef * 98.0;
-            friction_delta := friction_accel * delta_time;
+    //     linear_speed_xy_sq := length_squared(e_phys.linear_velocity.xy);
+    //     if linear_speed_xy_sq > 0 {
+    //         linear_speed_xy := sqrt(linear_speed_xy_sq);
+    //         velocity_direction_xy := e_phys.linear_velocity.xy * (1.0 / linear_speed_xy);
 
-            if friction_delta > linear_speed {
-                e_phys.linear_velocity = .{};
-            } else {
-                e_phys.linear_velocity -= velocity_direction * friction_delta;
-            }
-        }
+    //         // todo: material friction
+    //         ground_friction := 2.5;
+    //         friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
+    //         assert(friction_coef >= 0.0);
+    //         friction_accel := friction_coef * 98.0;
+    //         friction_delta := friction_accel * delta_time;
 
-        precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
-        precalculated_up_directions[it] = up_direction(*e_phys.orientation);
-    }
+    //         if friction_delta > linear_speed_xy {
+    //             e_phys.linear_velocity.xy = .{};
+    //         } else {
+    //             e_phys.linear_velocity.xy -= velocity_direction_xy * friction_delta;
+    //         }
+    //     }
+
+    //     precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
+    //     precalculated_up_directions[it] = up_direction(*e_phys.orientation);
+    // }
 }
 
 entities: Pool(Entity_Patch_Info);

@@ -1,4 +1,6 @@
 
+fixed_delta_time := 0.0;
+
 // I feel silly for taking so long to see this language, compiler, and module set for what it is: a gift 
 // that paves the way toward what I want to do.
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
@@ -36,8 +38,12 @@ main :: () {
         update_window_events(delta_time);
         imgui_draw();
 
-        populate_potential_contacts();
-        solve_potential_contacts();
+        scratch_think();
+
+        if game_frame_count > 0 {
+            populate_potential_contacts();
+            solve_potential_contacts();
+        }
         move_entities();
 
         end_frame();
@@ -51,7 +57,11 @@ end_frame :: () {
     non_render_time = seconds_since_init();
 
     new_time := seconds_since_init();
-    delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
+    if fixed_delta_time != 0.0 {
+        delta_time = fixed_delta_time;
+    } else {
+        delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
+    }
     per_frame_time = new_time;
 
     delta_times[dt_index] = delta_time;
@@ -109,6 +119,7 @@ quit := false;
 
 camera: Entity;
 player_character: Entity;
+ground: Entity;
 npcs: [..]Entity;
 
 simulation_dt: float;

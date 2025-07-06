@@ -1,13 +1,12 @@
 PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.[
     .{
-        "CYLINDER_MAN", 
-        .{
+        "CAPSULE_MAN", .{
             mass = 1,
             body_collider = .{
                 type = .CAPSULE,
                 data = .{
                     capsule = .{
-                        height = 21.4,
+                        half_height = 21.4*0.5,
                         radius = 2.15
                     }
                 }
@@ -15,16 +14,28 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
         }
     },
     .{
-        "BOX_MAN", 
-        .{
+        "BOX_MAN", .{
             mass = 2,
             body_collider = .{
                 type = .BOX,
                 data = .{
                     box = .{
-                        height = 21.4,
+                        half_height = 21.4*0.5,
                         width = 5.15,
                         length = 2.15
+                    }
+                }
+            }
+        }
+    },
+    .{
+        "SPHERE_MAN", .{
+            mass = 2,
+            body_collider = .{
+                type = .SPHERE,
+                data = .{
+                    sphere = .{
+                        radius = 10.0
                     }
                 }
             }
@@ -32,16 +43,25 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
     }
 ];
 
+Collision_Channels :: enum_flags u64 {
+    DEFAULT :: 0x1;
+}
+
+
 Physics_Properties :: struct {
     mass := 1.0;
     friction_bias := 0.0;
-    friction_multiplier := 1.0;
     // todo: linear accel discrete (or continuous?) function
-    linear_acceleration := 500.0;
+    friction_multiplier := 1.0;
+    linear_acceleration := 250.0;
     accel_opposite_direction_multiplier := 2.0;
     fast_start_speed_max := 5.0;
     linear_speed_max := 30.0;
+    gravity_accel := 150.0;
     body_collider: Entity_Collider;
+    body_elasticity := 0.1;
+    body_collision_channels: Collision_Channels = .DEFAULT;
+    // collision bounciness is a combination of the elasticities of the two colliding objects
 }
 
 Physics_Properties_Dynamic :: struct {
@@ -55,6 +75,15 @@ Physics_Properties_Dynamic :: struct {
 Physics_Property_Template_Create_Info :: struct {
     name: string;
     props: Code;
+}
+
+// the idea here is that two equally elastic things meeting each other should not bounce off of each other AND two inelastic things should not also bounce. this is achieved by mapping input to output like so:
+// (0,0) -> 0; (1,1) -> 0; (1,0)-> 1; (0,1) -> 1
+collision_bounciness :: (props_a: *Physics_Properties, props_b: *Physics_Properties) -> float {
+    a := props_a.body_elasticity;
+    b := -props_a.body_elasticity;
+    assert(a >= 0 && a <= 1 && b <= 0 && b >= -1);
+    return abs(a + b);
 }
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }

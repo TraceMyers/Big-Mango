@@ -18,6 +18,7 @@ ENABLE_VALIDATION_LAYERS :: true;
 // you store once, and create multiple samplers.
 
 
+// TODO: I *think* uniforms are aligned to 16 bytes, soo.....
 // TODO: custom validation layer callback
 // TODO: if graphics and present end up with different queues, validation complains about things I don't understand / haven't looked into
 // TODO: to fix the above thing, I can probably just reference the main vulkan tutorial
@@ -133,12 +134,10 @@ render_frame :: () {
         }
     }
 
-    draw_line(.{}, WORLD_X * 10.0, .{1,0,0,1});
-    draw_line(.{}, WORLD_Y * 10.0, .{0,1,0,1});
-    draw_line(.{0,-10,0}, Vector3.{0,-10,0} + WORLD_FORE * 3.0, .{0,0,1,1});
-    draw_line(.{0,-10,0}, Vector3.{0,-10,0} + WORLD_RIGHT * 3.0, .{0,1,1,1});
-    // draw_line(.{}, WORLD_Z * 10.0, .{0,0,1,1});
-    copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
+    // ship line draws to line draw buffer
+    if lines.count > 0 {
+        copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
+    }
     defer array_reset_keeping_memory(*lines);
 
     image_index := acquire_next_swapchain_image(current_frame);
@@ -171,6 +170,8 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
+    draw_lines(cmd, *vp_mat);
+
     for 0..5 {
         orientation: Quaternion;
         offset := ifx it & 1 == 0 then 0.0 else 10.0;
@@ -202,7 +203,7 @@ render_frame :: () {
         if emesh.type == .BOX_COLLIDER {
             mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
             box := *player_character.physics_properties.body_collider.box;
-            model = make_translation_matrix4(player_character.position + Vector3.{0,0,box.height * 0.5});
+            model = make_translation_matrix4(player_character.position + Vector3.{0,0,box.half_height});
         } else {
             model = make_translation_matrix4(player_character.position);
         }
@@ -211,7 +212,7 @@ render_frame :: () {
         scale: Matrix4 = ---;
         if emesh.type == .BOX_COLLIDER {
             box := *player_character.physics_properties.body_collider.box;
-            scale = make_scale_matrix4(.{box.width, box.length, box.height});
+            scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
         } else {
             scale = make_scale_matrix4(.{1, 1, 1});
         }
@@ -227,7 +228,7 @@ render_frame :: () {
             if emesh.type == .BOX_COLLIDER {
                 mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
                 box := *npc.physics_properties.body_collider.box;
-                model = make_translation_matrix4(npc.position + Vector3.{0,0,box.height * 0.5});
+                model = make_translation_matrix4(npc.position + Vector3.{0,0,box.half_height});
             } else {
                 model = make_translation_matrix4(npc.position);
             }
@@ -236,7 +237,7 @@ render_frame :: () {
             scale: Matrix4 = ---;
             if emesh.type == .BOX_COLLIDER {
                 box := *npc.physics_properties.body_collider.box;
-                scale = make_scale_matrix4(.{box.width, box.length, box.height});
+                scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
             } else {
                 scale = make_scale_matrix4(.{1, 1, 1});
             }
@@ -244,8 +245,6 @@ render_frame :: () {
             draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
         }
     }
-
-    draw_lines(cmd, *vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -1675,11 +1674,11 @@ create_shader_module :: (spirv: string) -> VkShaderModule {
     return module;
 }
 
-generate_capsule_mesh_name :: (height: float, radius: float) -> string {
-    return tprint("_capsule_%_%", height, radius);
+generate_capsule_mesh_name :: (height: float, radius: float, triangulize_distance: float) -> string {
+    return tprint("_capsule_%_%_%", height, radius, triangulize_distance);
 }
 
-get_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
+create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
     auto_release_temp();
 
     capsule_indices: [..]u16;
@@ -1692,10 +1691,31 @@ get_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) 
         it.position += WORLD_UP * (height * 0.5);
     }
 
-    capsule_name := generate_capsule_mesh_name(height, radius);
+    capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
     capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices);
 
     return capsule_mesh;
+}
+
+get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
+    capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
+    mesh := get_existing_mesh(capsule_name);
+    if mesh == null then mesh = create_capsule_mesh(height, radius, triangulize_distance);
+    return mesh;
+}
+
+get_existing_mesh :: (name: string) -> *Mesh {
+    hash := native_XXH64(name.data, xx name.count, 0);
+    for meshes {
+        if hash == it.hash then return *it.mesh;
+    }
+    return null;
+}
+
+get_or_create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh {
+    mesh := get_existing_mesh(name);
+    if mesh then return mesh;
+    return create_mesh(name, vertices, indices);
 }
 
 create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh {
@@ -1703,7 +1723,7 @@ create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh 
     assert(starts_with(name, "_"));
 
     hash := native_XXH64(name.data, xx name.count, 0);
-     for meshes {
+    for meshes {
         assert(it.hash != hash);
     }   
 
@@ -1721,7 +1741,7 @@ create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh 
     return *meshes[meshes.count-1].mesh;
 }
 
-load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
+get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
     hash := native_XXH64(filename.data, xx filename.count, 0);
     for meshes {
         if it.hash == hash {
@@ -2583,7 +2603,6 @@ generate_capsule_geo :: (out_vertices: *[..]Mesh_Vertex, out_indices: *[..]u16, 
 
     cylinder_half_height := cylinder_height * 0.5;
     cylinder_row_count : u32 = xx round(ceil(cylinder_half_height * inv_triangulize_distance));
-    assert(cylinder_row_count >= 1);
 
     sphere_circumference := 2.0 * PI * radius;
     quarter_sphere_circumference := sphere_circumference * 0.25;

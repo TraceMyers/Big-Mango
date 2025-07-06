@@ -99,13 +99,13 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
 
     if move_dir != .{0,0} {
         move_dir = normalize(move_dir);
-        prev_speed_sq := length_squared(entity.linear_velocity);
+        prev_speed_sq := length_squared(entity.linear_velocity.xy);
         linear_accel := entity.physics_properties.linear_acceleration;
 
         if prev_speed_sq > 0.0001 {
             prev_speed := sqrt(prev_speed_sq);
-            prev_velocity_dir := entity.linear_velocity / prev_speed;
-            cos_t := dot(move_dir, prev_velocity_dir.xy);
+            prev_velocity_dir := entity.linear_velocity.xy / prev_speed;
+            cos_t := dot(move_dir, prev_velocity_dir);
             if cos_t <= COS_PI_OVER_4 {
                 linear_accel *= entity.physics_properties.accel_opposite_direction_multiplier;
             }
@@ -114,12 +114,12 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
             linear_accel *= 4.0;
         }
 
-        entity.linear_velocity += Vector3.{xy=move_dir,z=0} * (linear_accel * delta_time);
-        new_speed_sq := length_squared(entity.linear_velocity);
+        entity.linear_velocity.xy += move_dir * (linear_accel * delta_time);
+        new_speed_sq := length_squared(entity.linear_velocity.xy);
 
         if new_speed_sq > square(entity.physics_properties.linear_speed_max) {
             new_speed := sqrt(new_speed_sq);
-            entity.linear_velocity *= entity.physics_properties.linear_speed_max / new_speed;
+            entity.linear_velocity.xy *= entity.physics_properties.linear_speed_max / new_speed;
         }
 
         target = make_quat(.{xy=move_dir, z=0}, WORLD_UP);
