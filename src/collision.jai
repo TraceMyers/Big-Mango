@@ -47,6 +47,14 @@ Entity_Collider :: struct {
     };
 }
 
+Collision_Result :: struct {
+    contact_norm_time: float;
+    contact_depth: float;
+    contact_point: Vector3;
+    contact_normal: Vector3;
+    is_contact: bool;
+}
+
 min_dimension :: (c: *Entity_Collider) -> float {
     if c.type == {
     case .SPHERE;
@@ -131,9 +139,8 @@ solve_potential_contacts :: () {
                 sweep_beg := e_phys.position;
                 sweep_end := sweep_beg + e_phys.linear_velocity * remaining_time;
 
-                closest_contact_norm_time := 1.0;
-                closest_contact_point: Vector3;
-                closest_contact_normal: Vector3; // toward A
+                closest_collision_result: Collision_Result;
+                closest_collision_result.contact_norm_time = 1.0;
                 closest_phys_b: *Entity_Physics_Core;
                 closest_props_b: *Physics_Properties;
                 closest_entity_index: s64;
@@ -156,52 +163,47 @@ solve_potential_contacts :: () {
                     fore_b := *precalculated_fore_directions[it];
                     up_b := *precalculated_up_directions[it];
 
-                    contact_norm_time := FLOAT32_MAX;
-                    contact_point: Vector3 = ---;
-                    contact_normal: Vector3 = ---;
+                    collision_result: Collision_Result;
+                    is_contact := solve_potential_collision(*sweep_beg, *sweep_end, fore_a, up_a, e_props, *center_b, fore_b, up_b, props_b, *collision_result);
 
-                    is_contact := solve_potential_collision(*sweep_beg, *sweep_end, fore_a, up_a, e_props, *center_b, fore_b, up_b, props_b, *contact_norm_time, *contact_point, *contact_normal);
-
-                    if is_contact && contact_norm_time < closest_contact_norm_time {
-                        closest_contact_norm_time = contact_norm_time;
-                        closest_contact_point = contact_point;
-                        closest_contact_normal = contact_normal;
+                    if is_contact && collision_result.contact_norm_time < closest_collision_result.contact_norm_time {
+                        closest_collision_result = collision_result;
                         closest_phys_b = phys_b;
                         closest_props_b = props_b;
                         closest_entity_index = it;
                     }
                 }
 
-                if closest_contact_norm_time >= 1.0 {
+                using closest_collision_result;
+
+                if contact_norm_time >= 1.0 {
                     e_phys.position = sweep_end;
                     break;
                 }
                 prev_contacted_entity_index = closest_entity_index;
 
-                // resolve the collision by moving the entity to the contact point (which might mean moving backwards)
+                // resolve the collision by moving the entity to the contact point, which might mean moving backwards (negative norm time)
 
-                travel_time := closest_contact_norm_time * remaining_time;
-                // e_phys.position = closest_contact_point;
+                travel_time := contact_norm_time * remaining_time;
+                if travel_time == 0 {
+                    e_phys.position += contact_normal * contact_depth;
+                } else {
+                    e_phys.position += e_phys.linear_velocity * travel_time;
+                }
 
                 // resolve the physics interaction
                 
                 if closest_props_b.mass >= IMMOVABLE_ENTITY_MASS {
-                    speed_in_direction_of_hit_normal := dot(e_phys.linear_velocity, closest_contact_normal);
+                    speed_in_direction_of_hit_normal := dot(e_phys.linear_velocity, contact_normal);
                     if speed_in_direction_of_hit_normal < 0.0 {
-                        e_phys.linear_velocity -= closest_contact_normal * speed_in_direction_of_hit_normal;
+                        e_phys.linear_velocity -= contact_normal * speed_in_direction_of_hit_normal;
                     }
-                    if dot(closest_contact_normal, WORLD_UP) >= COS_PI_OVER_3 {
+                    if dot(contact_normal, WORLD_UP) >= COS_PI_OVER_3 {
                         e_phys.flags |= .ON_GROUND;
                     }
                 } else {
                     // (0,0) -> 0; (1,1) -> 0; (1,0)-> 1; (0,1) -> 1
                     bounciness := collision_bounciness(e_props, closest_props_b);
-                }
-
-                if travel_time == 0 {
-                    e_phys.position = closest_contact_point;
-                } else {
-                    e_phys.position += e_phys.linear_velocity * travel_time;
                 }
 
                 // solving for *this* entity in iterations, we may have time time remaining in the step
@@ -320,17 +322,45 @@ apply_velocity_change_with_bounce :: (linear_velocity: *Vector3, collis_vec: Vec
     }
 }
 
-solve_potential_collision :: (position_a_start: *Vector3, position_a_end: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_contact_time: *float, out_contact_point: *Vector3, out_contact_normal: *Vector3) -> bool {
+solve_potential_collision :: (position_a_start: *Vector3, position_a_end: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
     collider_a := *properties_a.body_collider;
     collider_b := *properties_b.body_collider;
-    if collider_a.type == .SPHERE && collider_b.type == .PLANE {
-        return solve_collision_sphere_plane(position_a_start, position_a_end, forward_a, up_a, properties_a, position_b, forward_b, up_b, properties_b, out_contact_time, out_contact_point, out_contact_normal);
+    if collider_a.type == {
+    case .SPHERE;
+        if collider_b.type == {
+        case .SPHERE;
+        case .CAPSULE;
+        case .PLANE;
+            return solve_collision_sphere_plane(position_a_start, position_a_end, forward_a, up_a, properties_a, position_b, forward_b, up_b, properties_b, result);
+        case .BOX;
+        }
+    case .CAPSULE;
+        if collider_b.type == {
+        case .SPHERE;
+        case .CAPSULE;
+        case .PLANE;
+        case .BOX;
+        }
+    case .PLANE;
+        if collider_b.type == {
+        case .SPHERE;
+        case .CAPSULE;
+        case .PLANE;
+        case .BOX;
+        }
+    case .BOX;
+        if collider_b.type == {
+        case .SPHERE;
+        case .CAPSULE;
+        case .PLANE;
+        case .BOX;
+        }
     }
     return false;
 }
 
-solve_collision_sphere_plane :: (start_a: *Vector3, end_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_contact_time: *float, out_contact_point: *Vector3, out_contact_normal: *Vector3) -> bool {
-    out_contact_time.* = FLOAT32_MAX;
+solve_collision_sphere_plane :: (start_a: *Vector3, end_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
+    result.contact_norm_time = FLOAT32_MAX;
 
     sphere_a := *properties_a.body_collider.sphere;
     plane_b := *properties_b.body_collider.plane;
@@ -371,26 +401,29 @@ solve_collision_sphere_plane :: (start_a: *Vector3, end_a: *Vector3, forward_a: 
     a_closest_point, b_closest_point: Vector3 = ---;
     dist_sq := distance_squared_between_line_segments(*pos_a_beg, *pos_a_end, *a_projected_and_clamped, *a_next_projected_and_clamped, *a_closest_point, *b_closest_point);
 
-    out_contact_point.* = b_closest_point;
-    out_contact_normal.* = forward_b.*;
+    result.contact_point = b_closest_point;
+    result.contact_normal = forward_b.*;
     contact_dist: float;
 
     if dist_sq <= VERY_SMALL_NUMBER {
-        // sphere wants to pass through the plane
-        // out_contact_normal.* = forward_b.*;
-
+        result.contact_norm_time = 0;
+        result.contact_depth = sphere_a.radius;
     } else {
-        // sphere *may* be penetrating the plane, but not passing through it
         contact_dist = sqrt(dist_sq);
-        // could be on plane edge. if two plane redcts are edge-to-edge, you don't really want to use the plane normal, because a corner will push in two directions
-        // out_contact_normal.* = (a_closest_point - b_closest_point) / contact_dist;
+        // NOTE: the idea of having a norm contact time calculated with a dot product is dependent on velocity being in the direction of the contact. this is why the full story of how to correct the collision is told in two parts: norm time and contact depth.
+        result.contact_norm_time = dot((result.contact_point - start_a.*), (end_a.* - start_a.*)) / contact_dist;
+        result.contact_depth = sphere_a.radius - contact_dist;
     }
 
-    out_contact_time.* = dot((out_contact_point.* - start_a.*), (end_a.* - start_a.*)) / contact_dist;
-
-    // return out_position_correction.* > 0;
-    return contact_dist < sphere_a.radius;
+    result.is_contact = result.contact_depth > 0;
+    return result.is_contact;
 }
+
+solve_collision_sphere_sphere :: (start_a: *Vector3, end_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
+    sphere_a := *properties_a.body_collider.sphere;
+    sphere_b := *properties_b.body_collider.sphere;
+}
+
 /*
 solve_potential_collision :: inline (entity_a: *Entity, entity_b: *Entity) -> bool {
     unused_dir: Vector3 = ---;
