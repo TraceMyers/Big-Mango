@@ -44,7 +44,6 @@ main :: () {
             populate_potential_contacts();
             solve_potential_contacts();
         }
-        move_entities();
 
         end_frame();
     }

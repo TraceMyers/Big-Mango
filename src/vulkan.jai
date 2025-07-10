@@ -2,6 +2,7 @@
 // config
 
 ENABLE_VALIDATION_LAYERS :: true;
+UNLIT :: true;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -172,41 +173,53 @@ render_frame :: () {
 
     draw_lines(cmd, *vp_mat);
 
-    for 0..5 {
-        orientation: Quaternion;
-        offset := ifx it & 1 == 0 then 0.0 else 10.0;
-        model := make_translation_matrix4(.{offset,10.0*it,-4});
-        rot := Matrix4_Identity;
+    // for 0..5 {
+    //     orientation: Quaternion;
+    //     offset := ifx it & 1 == 0 then 0.0 else 10.0;
+    //     model := make_translation_matrix4(.{offset,10.0*it,ground.position.z-0.5});
+    //     rot := Matrix4_Identity;
+    //     model *= rot;
+    //     scale := make_scale_matrix4(.{10,10,1});
+    //     model *= scale;
+    //     cube_mesh.albedo.tint = test_color_1;
+    //     draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
+    // }
+    // for 0..5 {
+    //     offset := ifx it & 1 != 0 then 0.0 else 10.0;
+    //     orientation: Quaternion;
+    //     model := make_translation_matrix4(.{offset,10.0*it,ground.position.z-0.5});
+    //     rot := Matrix4_Identity;
+    //     model *= rot;
+    //     scale := make_scale_matrix4(.{10,10,1});
+    //     model *= scale;
+    //     cube_mesh.albedo.tint = test_color_2;
+    //     draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
+    // }
+
+    // draw ground plane
+    for emesh : ground.meshes {
+        mesh := emesh.data;
+        model := make_translation_matrix4(ground.position);
+        rot := rotation_matrix(Matrix4, ground.orientation);
         model *= rot;
-        scale := make_scale_matrix4(.{10,10,1});
+        scale: Matrix4 = ---;
+        if emesh.type == .PLANE_COLLIDER {
+            plane := *ground.physics_properties.body_collider.plane;
+            scale = make_scale_matrix4(.{plane.width, 1.0, plane.half_height*2.0});
+        } else {
+            scale = make_scale_matrix4(.{1, 1, 1});
+        }
         model *= scale;
-        cube_mesh.albedo.tint = test_color_1;
-        draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
+        draw_mesh(cmd, mesh, *model, *ground.orientation, *vp_mat, 1);
     }
-    for 0..5 {
-        offset := ifx it & 1 != 0 then 0.0 else 10.0;
-        orientation: Quaternion;
-        model := make_translation_matrix4(.{offset,10.0*it,-4});
-        rot := Matrix4_Identity;
-        model *= rot;
-        scale := make_scale_matrix4(.{10,10,1});
-        model *= scale;
-        cube_mesh.albedo.tint = test_color_2;
-        draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
-    }
+
     for emesh : player_character.meshes {
         // if emesh.type != .COLLIDER then continue;
         // if it_index == 1 then continue;
         mesh := emesh.data;
         // mesh.albedo.tint.w = 1.0;
         model: Matrix4 = ---;
-        if emesh.type == .BOX_COLLIDER {
-            mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
-            box := *player_character.physics_properties.body_collider.box;
-            model = make_translation_matrix4(player_character.position + Vector3.{0,0,box.half_height});
-        } else {
-            model = make_translation_matrix4(player_character.position);
-        }
+        model = make_translation_matrix4(player_character.position);
         rot := rotation_matrix(Matrix4, player_character.orientation);
         model *= rot;
         scale: Matrix4 = ---;
@@ -225,13 +238,7 @@ render_frame :: () {
             mesh := emesh.data;
             // mesh.albedo.tint.w = 1.0;
             model: Matrix4 = ---;
-            if emesh.type == .BOX_COLLIDER {
-                mesh.albedo.tint = .{0.1, 0.6, 0.2, 0.5};
-                box := *npc.physics_properties.body_collider.box;
-                model = make_translation_matrix4(npc.position + Vector3.{0,0,box.half_height});
-            } else {
-                model = make_translation_matrix4(npc.position);
-            }
+            model = make_translation_matrix4(npc.position);
             rot := rotation_matrix(Matrix4, npc.orientation);
             model *= rot;
             scale: Matrix4 = ---;
@@ -1124,7 +1131,7 @@ create_tex_pipeline :: () {
 create_graphics_pipeline :: () {
     auto_release_temp();
 
-    test_frag := load_shader("color_mesh_frag");
+    test_frag := ifx UNLIT then load_shader("unlit_color_mesh_frag") else load_shader("color_mesh_frag");
     test_vert := load_shader("color_mesh_vert");
 
     shader_stages := VkPipelineShaderStageCreateInfo.[
@@ -1687,9 +1694,6 @@ create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.
     capsule_vertices.allocator = temp;
 
     generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
-    for *capsule_vertices {
-        it.position += WORLD_UP * (height * 0.5);
-    }
 
     capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
     capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices);
@@ -2572,9 +2576,12 @@ draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
 }
 
 prepare_lights :: () {
-    sun_t := asin(respace(sin(seconds_since_init().(float)), .{-1, 1}, .{-0.5, 0.5}));
-    down_vec := WORLD_DOWN;
-    lights.sun_direction = rotate(down_vec, WORLD_FORE, sun_t);
+    // sun_t := asin(respace(sin(seconds_since_init().(float)), .{-1, 1}, .{-0.5, 0.5}));
+    // down_vec := WORLD_DOWN;
+    // sun_t := 0;
+    // lights.sun_direction = rotate(down_vec, WORLD_FORE, sun_t);
+    // lights.sun_direction = rotate(WORLD_FORE, WORLD_RIGHT, 0.5);
+    lights.sun_direction = WORLD_DOWN;
     copy_cpu_memory_to_buffer(lights.buffer, as_string(lights.data));
 }
 
@@ -3344,6 +3351,8 @@ clear_color := Vector4.{0,0,0,1};
 meshes: [..]Hashed_Mesh;
 
 cube_mesh: *Mesh;
+plane_mesh: *Mesh;
+
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
 
@@ -3401,4 +3410,15 @@ cube_indices := u16.[
     7, 3, 4,
     2, 1, 6, // bottom
     1, 5, 6
+];
+
+plane_vertices := Mesh_Vertex.[
+    .{.{-0.5, 0, -0.5}, .{0,0}, .{0,0,-1}},
+    .{.{ 0.5, 0, -0.5}, .{0,0}, .{0,0,-1}},
+    .{.{ 0.5,  0, 0.5}, .{0,0}, .{0,0,-1}},
+    .{.{-0.5,  0, 0.5}, .{0,0}, .{0,0,-1}},
+];
+plane_indices := u16.[
+    0, 1, 2,
+    0, 2, 3
 ];

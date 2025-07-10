@@ -13,6 +13,7 @@ ENTITY_MAX_COUNT :: 32767;
 CREATURE_MAX_COUNT :: 32767;
 CAMERA_MAX_COUNT :: 256;
 ENTITY_MESHES_MAX_COUNT :: 8;
+ENTITY_NAME_MAX_COUNT :: 32;
 
 boot_entities :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
@@ -25,6 +26,7 @@ boot_entities :: (stage: Boot_Stage) -> bool {
             creature_interface = alloc_array(*Entity_Creature, CREATURE_MAX_COUNT);
             precalculated_fore_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
             precalculated_up_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
+            name_allocations = alloc_array(Entity_Name_Allocation, ENTITY_MAX_COUNT);
 
             set_capacity(*entities, ENTITY_MAX_COUNT);
             set_capacity(*creatures, CREATURE_MAX_COUNT);
@@ -38,13 +40,23 @@ boot_entities :: (stage: Boot_Stage) -> bool {
         lock_allocation(*dynamic_entity_physics_properties);
         lock_allocation(*colliders);
 
-        all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
+        {
+            all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
+            maybe_optimal_chunk_list_size := 4096 * 16;
+            maybe_optimal_chunk_list_count := div_ceil(all_mesh_ptrs_array_data_size, maybe_optimal_chunk_list_size);
 
-        maybe_optimal_chunk_list_size := 4096 * 16;
-        maybe_optimal_chunk_list_count := div_ceil(all_mesh_ptrs_array_data_size, maybe_optimal_chunk_list_size);
+            initialize_nesting_allocator(*entity_mesh_array_allocator, program_runtime_allocator, maybe_optimal_chunk_list_size, maybe_optimal_chunk_list_count);
+            entity_mesh_array_allocator.parent_allocator = no_allocator;
+        }
 
-        initialize_nesting_allocator(*entity_mesh_array_allocator, program_runtime_allocator, maybe_optimal_chunk_list_size, maybe_optimal_chunk_list_count);
-        entity_mesh_array_allocator.parent_allocator = no_allocator;
+        {
+            all_entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_COUNT;
+            maybe_optimal_chunk_list_size := 4096 * 16;
+            maybe_optimal_chunk_list_count := div_ceil(all_entity_name_data_size, maybe_optimal_chunk_list_size);
+
+            initialize_nesting_allocator(*entity_name_allocator, program_runtime_allocator, maybe_optimal_chunk_list_size, maybe_optimal_chunk_list_count);
+            entity_name_allocator.parent_allocator = no_allocator;
+        }
 
         // 0 is invalid index
         null_entity := spawn_entity(ALL_ENTITY_TYPE_FLAGS.(Entity_Type));
@@ -109,6 +121,11 @@ Entity_Mesh_Collection :: struct {
     mesh_count: s32;
 }
 
+Entity_Name_Allocation :: struct {
+    allocation_ref: Nested_Allocation_Ref;
+    count: s32;
+}
+
 Entity_Patch_Info :: struct {
     using type_union: Entity_Type_Flags_Union;
     using subtype: Entity_Subtype;
@@ -131,6 +148,7 @@ Entity :: struct {
     body_collider: *Entity_Collider;
     meshes: []Entity_Mesh;
     creature: *Entity_Creature;
+    name: string;
 }
 
 Entity_Mesh :: struct {
@@ -138,6 +156,7 @@ Entity_Mesh :: struct {
         BODY;
         CAPSULE_COLLIDER;
         BOX_COLLIDER;
+        PLANE_COLLIDER;
     };
     data: *Mesh;
 }
@@ -165,7 +184,8 @@ get_entity_at :: (using e: *Entity, i: s64) {
         subtype = patch_info.subtype,
         ref = patch_info.ref,
         physics_core = *entity_physics_core[i],
-        meshes = get_entity_meshes(patch_info)
+        meshes = get_entity_meshes(patch_info),
+        name = get_entity_name(patch_info)
     };
     if (patch_info.type_flags & .CREATURE) != 0 {
         assert(patch_info.creature != INVALID_CREATURE_INDEX);
@@ -205,7 +225,7 @@ is_creature_type :: (t: Entity_Type) -> bool {
 }
 
 
-spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
+spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
     // scope_lock_mutex(*spawn_entity_mutex);
     i := request_item(*entities);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
@@ -244,7 +264,32 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, physics := Entity
         e.camera = xx index;
     }
 
+    set_entity_name(e.ref, name);
+
     return e.ref;
+}
+
+set_entity_name :: (ref: Entity_Ref, name: string) {
+    i := ref.index;
+    if basic_validity_check(*name_allocations[i].allocation_ref) {
+        na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
+    } else {
+        assert(name_allocations[i].count == 0);
+    }
+
+    use_name: string;
+    if name.count > 0 {
+        use_name = tprint("eid % / %", ref.id, name);
+    } else {
+        use_name = tprint("eid %", ref.id, name);
+    }
+    assert(use_name.count <= ENTITY_NAME_MAX_COUNT);
+
+    name_allocations[i].allocation_ref = na_alloc(*entity_name_allocator, use_name.count);
+    name_allocations[i].count = xx use_name.count;
+    e_name := get_entity_name(*entities[i]);
+    assert(e_name.count == use_name.count);
+    memcpy(e_name.data, use_name.data, e_name.count);
 }
 
 set_entity_meshes :: (ref: Entity_Ref, meshes: ..Entity_Mesh) {
@@ -282,38 +327,12 @@ get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
     return meshes;
 }
 
-move_entities :: () {
-    // last_entity := find_last_set_bit(*entities.in_use);
-    // for 0..last_entity {
-    //     if entities[it].id == camera.id then continue;
-    //     e_phys := *entity_physics_core[it];
-    //     e_props := get_entity_physics_properties(xx it);
-    //     e_phys.position += e_phys.linear_velocity * delta_time;
-
-    //     e_phys.linear_velocity.z -= e_props.gravity_accel * delta_time;
-
-    //     linear_speed_xy_sq := length_squared(e_phys.linear_velocity.xy);
-    //     if linear_speed_xy_sq > 0 {
-    //         linear_speed_xy := sqrt(linear_speed_xy_sq);
-    //         velocity_direction_xy := e_phys.linear_velocity.xy * (1.0 / linear_speed_xy);
-
-    //         // todo: material friction
-    //         ground_friction := 2.5;
-    //         friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
-    //         assert(friction_coef >= 0.0);
-    //         friction_accel := friction_coef * 98.0;
-    //         friction_delta := friction_accel * delta_time;
-
-    //         if friction_delta > linear_speed_xy {
-    //             e_phys.linear_velocity.xy = .{};
-    //         } else {
-    //             e_phys.linear_velocity.xy -= velocity_direction_xy * friction_delta;
-    //         }
-    //     }
-
-    //     precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
-    //     precalculated_up_directions[it] = up_direction(*e_phys.orientation);
-    // }
+get_entity_name :: (patch_info: *Entity_Patch_Info) -> string {
+    assert(basic_validity_check(name_allocations[patch_info.index].allocation_ref));
+    allocation: string;
+    allocation.data = name_allocations[patch_info.index].allocation_ref.data;
+    allocation.count = name_allocations[patch_info.index].count;
+    return allocation;
 }
 
 entities: Pool(Entity_Patch_Info);
@@ -323,7 +342,9 @@ entity_physics_core: []Entity_Physics_Core;
 entity_mesh_collections: []Entity_Mesh_Collection;
 precalculated_fore_directions: []Vector3;
 precalculated_up_directions: []Vector3;
+name_allocations: []Entity_Name_Allocation;
 entity_mesh_array_allocator: Nesting_Allocator;
+entity_name_allocator: Nesting_Allocator;
 // type-specific entity data
 creature_interface: []*Entity_Creature;
 creatures: Pool(Entity_Creature);

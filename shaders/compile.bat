@@ -8,6 +8,7 @@ set compiler=%VULKAN_SDK%/Bin/glslc.exe
 %compiler% src/mesh.frag -o intermediate/mesh_frag.spv
 %compiler% src/color_mesh.vert -o intermediate/color_mesh_vert.spv
 %compiler% src/color_mesh.frag -o intermediate/color_mesh_frag.spv
+%compiler% src/unlit_color_mesh.frag -o intermediate/unlit_color_mesh_frag.spv
 %compiler% src/line.vert -o intermediate/line_vert.spv
 %compiler% src/line.frag -o intermediate/line_frag.spv
 %compiler% -fshader-stage=compute src/compute_draw_capsule.glsl -o intermediate/compute_draw_capsule.spv

@@ -12,13 +12,15 @@ DARK_GREY_BLUE :: Color4f.{0.14, 0.16, 0.3, 1.0};
 dev_ui_opacities := float.[
     0.4,
     0.4,
-    0.4
+    0.4,
+    0.8
 ];
 
 Dev_UI_Module :: enum {
     PERF;
     LOG;
     CMD;
+    LEFT_SIDEBAR;
 }
 
 set_dev_ui_opacity :: (args: []Command_Line_Argument) {
@@ -307,7 +309,7 @@ add_main_menu_bar :: () -> float {
 }
 
 add_left_sidebar :: (main_menu_height: float) -> float {
-    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,0.3});
+    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,dev_ui_opacities[Dev_UI_Module.LEFT_SIDEBAR]});
     defer PopStyleColor();
     window_open := Begin("##LeftSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
     defer End();
@@ -322,6 +324,9 @@ add_left_sidebar :: (main_menu_height: float) -> float {
     if window_open {
         add_perf_graph(main_menu_height, fixed_window_size.x);
         add_debug_window_spawner();
+        add_player_character_readout();
+        add_camera_controls();
+        add_physics_debugger();
     }
 
     return window_width;
@@ -437,6 +442,102 @@ add_debug_window_spawner :: () {
     // if CollapsingHeader("debug windows##debug_windows") {
     //     Text("hey");
     // }
+}
+
+add_player_character_readout :: () {
+    if CollapsingHeader("player character") {
+
+    }
+}
+
+add_camera_controls :: () {
+    if CollapsingHeader("camera") {
+        SliderFloat("free fly move speed", *free_fly_linear_speed, 0.0, 1000.0);
+        SliderFloat("free fly look speed", *free_fly_mouse_look_speed, 0.0, 1.0);
+        SliderFloat("ortho scale", *ortho_scale, 0.01, 100.0);
+    }
+}
+
+add_physics_debugger :: () {
+    INDENT_WIDTH :: 20.0;
+    scope_push_indent :: () #expand {
+        Indent(INDENT_WIDTH);
+        `defer Unindent(INDENT_WIDTH);
+    }
+
+
+    if CollapsingHeader("physics debugger") {
+        scope_push_indent();
+        if Button("step") {
+            physics_debugger_step = true;
+        }
+
+        struct_formatted :: (a: $T) -> string #expand {
+            return tprint("%", FormatStruct.{value=a, draw_type_name=true, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=true});
+        }
+
+        entity: Entity;
+        if entity_index != 0 {
+            get_entity_at(*entity, entity_index);
+        }
+        Text("entity:           %", entity.name);
+        Text("entity index:     %", entity_index);
+        Text("resolve step:     %", inner_index_1);
+        Text("remaining time:   %", remaining_time);
+
+        prev_contacted_entity: Entity;
+        if prev_contacted_entity_index != -1 {
+            get_entity_at(*prev_contacted_entity, prev_contacted_entity_index);
+        }
+        Text("contacted entity: %", prev_contacted_entity.name);
+
+        phys := ifx e_phys != null then e_phys.* else Entity_Physics_Core.{};
+        props := ifx e_props != null then e_props.* else Physics_Properties.{};
+        if CollapsingHeader("entity phys") {
+            scope_push_indent();
+            TextWrapped("entity phys:      %", struct_formatted(phys));
+        }
+        if CollapsingHeader("entity props") {
+            scope_push_indent();
+            TextWrapped("entity props:     %", struct_formatted(props));
+        }
+
+        phys_2 := ifx closest_phys_b != null then closest_phys_b.* else Entity_Physics_Core.{};
+        props_2 := ifx closest_props_b != null then closest_props_b.* else Physics_Properties.{};
+        if CollapsingHeader("contacted entity phys") {
+            scope_push_indent();
+            TextWrapped(struct_formatted(phys_2));
+        }
+        if CollapsingHeader("contacted entity props") {
+            scope_push_indent();
+            TextWrapped(struct_formatted(props_2));
+        } 
+
+        if CollapsingHeader("result") {
+            scope_push_indent();
+            TextWrapped(struct_formatted(closest_collision_result));     
+        }
+
+        if CollapsingHeader("intermediate data") {
+            scope_push_indent();
+            if collision_intermediate.type != 0 {
+                TextWrapped(struct_formatted(collision_intermediate.basic));
+                if collision_intermediate.type == {
+                case .SPHERE_SPHERE;
+                    TextWrapped(struct_formatted(collision_intermediate.sphere_sphere));
+                    using collision_intermediate.specific.sphere_sphere;
+                    draw_line(collision_intermediate._pos_a_begin, collision_intermediate._pos_a_end, .{r=1});
+                    draw_line(collision_intermediate._pos_b, collision_intermediate._pos_b + WORLD_UP * 2.0, .{r=0.8,b=0.8});
+                    draw_line(_point_on_segment, _point_on_segment + WORLD_UP * 2.0, .{g=1});
+                    draw_line(_point_on_line, _point_on_line + WORLD_UP * 2.0, .{b=1});
+                case .SPHERE_PLANE;
+                    TextWrapped(struct_formatted(collision_intermediate.sphere_plane));
+                    using collision_intermediate.specific.sphere_plane;
+                    draw_line(_a_closest_point, _b_closest_point, .{r=1});
+                }
+            }
+        }
+    }
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

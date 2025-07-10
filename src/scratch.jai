@@ -50,22 +50,22 @@ scratch_init_game :: () {
     // camera init
     {
         // temp camera stuff;
-        camera_ref := spawn_entity(.CAMERA);
+        camera_ref := spawn_entity(.CAMERA, name="camera");
         get_entity(*camera, camera_ref);
 
         camera.camera.* = camera_make(.ORTHOGRAPHIC);
-        camera.orthographic.scale = 10.0;
+        camera.orthographic.scale = ortho_scale;
 
         // camera.camera.* = camera_make(.PERSPECTIVE);
 
-        // camera.position.y = -30.0;
+        camera.position.y = -30.0;
         camera.position.z = 60.0;
-
         cos_t := cos(PI/4);
         sin_t := sin(PI/4);
-
-        // set_orientation(*camera, .{0,0,-1}, .{0,1,0});
         set_orientation(*camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
+
+        // set_orientation(*camera, .{0,1,0}, .{0,0,1});
+
         // rotate(*camera, .{0,0,1}, PI/4);
     }
     // cube mesh
@@ -73,11 +73,16 @@ scratch_init_game :: () {
         cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
         cube_mesh.albedo.tint = .{1,1,1,1};
     }
+    // plane mesh
+    {
+        plane_mesh = create_mesh("_plane", plane_vertices, plane_indices);
+        plane_mesh.albedo.tint = .{1,1,1,1};
+    }
     // character / character mesh
     {
-        entity_ref := spawn_entity(.STATIC_MESH, physics_properties_template=.SPHERE_MAN);
+        entity_ref := spawn_entity(.STATIC_MESH, name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
         entity_phys_props := get_entity_physics_properties(xx entity_ref.index);
-        // assert(entity_phys_props.body_collider.type == .BOX);
+        entity_phys_props.body_elasticity = 1.0;
 
         reorient_mesh_quat: Quaternion;
         set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
@@ -89,14 +94,18 @@ scratch_init_game :: () {
         capsule_mesh := get_or_create_capsule_mesh(body_collider.sphere.radius*2.0, body_collider.sphere.radius);
         capsule_mesh.albedo.tint = .{0.6, 0.1, 0.9, 0.5};
         capsule_mesh.albedo.type = .CONSTANT;
+
+        body_elasticity = 0.0;
         // cube_mesh := load_mesh("_cube");
 
         set_entity_meshes(entity_ref, .{.BODY, mesh}, .{.CAPSULE_COLLIDER, capsule_mesh});
         get_entity(*player_character, entity_ref);
+        set_orientation(*player_character.orientation, .{0,0,1}, .{1,0,0});
+        player_character.position.z = 5.0;
     }
     // npc 
     {
-        entity_ref := spawn_entity(.STATIC_MESH, physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
+        entity_ref := spawn_entity(.STATIC_MESH, name="npc", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
         mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj");
         npc := array_add(*npcs);
         entity_phys_props := get_entity_physics_properties(xx entity_ref.index);
@@ -107,11 +116,14 @@ scratch_init_game :: () {
         // body_collider.height *= 0.5;
         // body_collider.capsule.radius *= 2.0;
         capsule_mesh := get_or_create_capsule_mesh(body_collider.sphere.radius*2.0, body_collider.sphere.radius);
+        // mass = IMMOVABLE_ENTITY_MASS;
+        mass = 1.0;
+        body_elasticity = 0.0;
         // cube_mesh := load_mesh("_cube");
 
         set_entity_meshes(entity_ref, .{.BODY, mesh}, .{.CAPSULE_COLLIDER, capsule_mesh});
         get_entity(npc, entity_ref);
-        npc.position = .{40,0,0};
+        npc.position = .{40,0,2};
     }
     // set experimental global pointers
     {
@@ -121,7 +133,7 @@ scratch_init_game :: () {
     }
     // ground entity
     {
-        entity_ref := spawn_entity(.STATIC_MESH, make_physics_properties_dynamic=true);
+        entity_ref := spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
         phys_props := get_entity_physics_properties(xx entity_ref.index);
 
         {
@@ -129,13 +141,18 @@ scratch_init_game :: () {
             body_collider.type = .PLANE;
             body_collider.plane.half_height = 50.0;
             body_collider.plane.width = 100.0;
+            body_elasticity = 0.01;
             gravity_accel = 0.0;
             mass = IMMOVABLE_ENTITY_MASS;
         }
 
+        set_entity_meshes(entity_ref, .{.PLANE_COLLIDER, plane_mesh});
+
         get_entity(*ground, entity_ref);
         set_orientation(*ground.orientation, .{0,0,1}, .{1,0,0});
-        ground.position.z = 1;
+        // rotate(*ground, WORLD_FORE, PI/6.0);
+        ground.position.z = 0.0;
+
         // ground.position.x -= phys_props.body_collider.plane.width * 0.5;
         // ground.position.y -= phys_props.body_collider.half_height;
     }
@@ -144,7 +161,7 @@ scratch_init_game :: () {
 scratch_think :: () {
     player_half_height := player_character.physics_properties.body_collider.half_height;
     player_center := player_character.position + Vector3.{z=player_half_height};
-
+    end_pt := project_point_onto_plane(player_character.position, ground.position, .{0,0,1});
 }
 
 

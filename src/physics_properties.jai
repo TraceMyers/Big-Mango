@@ -1,3 +1,6 @@
+
+IMMOVABLE_ENTITY_MASS :: 0.0;
+
 PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.[
     .{
         "CAPSULE_MAN", .{
@@ -40,6 +43,12 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
                 }
             }
         }
+    },
+    .{
+        "GROUND", .{
+            mass = IMMOVABLE_ENTITY_MASS,
+            body_elasticity = 0
+        }
     }
 ];
 
@@ -81,7 +90,7 @@ Physics_Property_Template_Create_Info :: struct {
 // (0,0) -> 0; (1,1) -> 0; (1,0)-> 1; (0,1) -> 1
 collision_bounciness :: (props_a: *Physics_Properties, props_b: *Physics_Properties) -> float {
     a := props_a.body_elasticity;
-    b := -props_a.body_elasticity;
+    b := -props_b.body_elasticity;
     assert(a >= 0 && a <= 1 && b <= 0 && b >= -1);
     return abs(a + b);
 }

@@ -5,8 +5,9 @@ free_fly_entity: *Entity;
 character_entity: *Entity;
 camera_entity: *Entity;
 
-free_fly_linear_speed := 200.0;
+free_fly_linear_speed := 80.0;
 free_fly_mouse_look_speed := 0.2;
+ortho_scale := 10.0;
 
 process_entity_input :: () {
     if control_mode == .FREE_FLY {
@@ -66,7 +67,7 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
         cos_t := cos(PI/4);
         sin_t := sin(PI/4);
         set_orientation(follow_camera, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
-        follow_camera.orthographic.scale = 10;
+        follow_camera.orthographic.scale = ortho_scale;
     }
 
     if input_focus != .GAME then return;
@@ -97,6 +98,10 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
         move_dir += fore_direction_xy(*target).xy;
     }
 
+    if move_dir == .{} {
+        move_dir = .{1,0};
+    }
+
     if move_dir != .{0,0} {
         move_dir = normalize(move_dir);
         prev_speed_sq := length_squared(entity.linear_velocity.xy);
@@ -122,16 +127,19 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
             entity.linear_velocity.xy *= entity.physics_properties.linear_speed_max / new_speed;
         }
 
-        target = make_quat(.{xy=move_dir, z=0}, WORLD_UP);
-        rot_speed := 6.5 * PI;
-        interp_rotate(entity, target, rot_speed, delta_time);
+        axis := normalize(WORLD_UP + WORLD_RIGHT);
+        // rotate(entity, axis, PI * delta_time);
+        // target = make_quat(.{xy=move_dir, z=0}, WORLD_UP);
+        // rot_speed := 6.5 * PI;
+        // interp_rotate(entity, target, rot_speed, delta_time);
     }
 
     if follow_camera != null {
         target_camera_pos: Vector3 = ---;
         target_camera_pos.xy = entity.position.xy;
         target_camera_pos.xy -= fore_direction(follow_camera).xy * 30.0;
-        target_camera_pos.z = entity.position.z + 60.0;
-        camera.position = exponential_interp(follow_camera.position, target_camera_pos, 4.0, delta_time);
+        target_camera_pos.z = entity.position.z + 30.0;
+        // camera.position = exponential_interp(follow_camera.position, target_camera_pos, 4.0, delta_time);
+        camera.position = target_camera_pos;
     }
 }
