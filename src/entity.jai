@@ -102,6 +102,7 @@ Entity_Physics_Core :: struct {
     linear_velocity: Vector3;
     angular_velocity: Vector3;
     orientation: Quaternion;
+    linear_input: Vector3;
     flags: enum_flags u8 {
         ON_GROUND;
     };

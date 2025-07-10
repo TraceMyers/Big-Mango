@@ -98,36 +98,40 @@ handle_character_input :: (entity: *Entity, follow_camera: *Entity) {
         move_dir += fore_direction_xy(*target).xy;
     }
 
-    if move_dir == .{} {
-        move_dir = .{1,0};
-    }
+    // if move_dir == .{} {
+    //     move_dir = .{1,0};
+    // }
 
     if move_dir != .{0,0} {
         move_dir = normalize(move_dir);
-        prev_speed_sq := length_squared(entity.linear_velocity.xy);
-        linear_accel := entity.physics_properties.linear_acceleration;
 
-        if prev_speed_sq > 0.0001 {
-            prev_speed := sqrt(prev_speed_sq);
-            prev_velocity_dir := entity.linear_velocity.xy / prev_speed;
-            cos_t := dot(move_dir, prev_velocity_dir);
-            if cos_t <= COS_PI_OVER_4 {
-                linear_accel *= entity.physics_properties.accel_opposite_direction_multiplier;
-            }
-        }
-        if prev_speed_sq <= entity.physics_properties.fast_start_speed_max {
-            linear_accel *= 4.0;
-        }
+        entity.linear_input.xy = move_dir;
+        entity.linear_input.z = 0;
 
-        entity.linear_velocity.xy += move_dir * (linear_accel * delta_time);
-        new_speed_sq := length_squared(entity.linear_velocity.xy);
+        // prev_speed_sq := length_squared(entity.linear_velocity.xy);
+        // linear_accel := entity.physics_properties.linear_acceleration;
 
-        if new_speed_sq > square(entity.physics_properties.linear_speed_max) {
-            new_speed := sqrt(new_speed_sq);
-            entity.linear_velocity.xy *= entity.physics_properties.linear_speed_max / new_speed;
-        }
+        // if prev_speed_sq > 0.0001 {
+        //     prev_speed := sqrt(prev_speed_sq);
+        //     prev_velocity_dir := entity.linear_velocity.xy / prev_speed;
+        //     cos_t := dot(move_dir, prev_velocity_dir);
+        //     if cos_t <= COS_PI_OVER_4 {
+        //         linear_accel *= entity.physics_properties.accel_opposite_direction_multiplier;
+        //     }
+        // }
+        // if prev_speed_sq <= entity.physics_properties.fast_start_speed_max {
+        //     linear_accel *= 4.0;
+        // }
 
-        axis := normalize(WORLD_UP + WORLD_RIGHT);
+        // entity.linear_velocity.xy += move_dir * (linear_accel * delta_time);
+        // new_speed_sq := length_squared(entity.linear_velocity.xy);
+
+        // if new_speed_sq > square(entity.physics_properties.linear_speed_max) {
+        //     new_speed := sqrt(new_speed_sq);
+        //     entity.linear_velocity.xy *= entity.physics_properties.linear_speed_max / new_speed;
+        // }
+
+        // axis := normalize(WORLD_UP + WORLD_RIGHT);
         // rotate(entity, axis, PI * delta_time);
         // target = make_quat(.{xy=move_dir, z=0}, WORLD_UP);
         // rot_speed := 6.5 * PI;

@@ -467,75 +467,96 @@ add_physics_debugger :: () {
 
 
     if CollapsingHeader("physics debugger") {
-        scope_push_indent();
-        if Button("step") {
-            physics_debugger_step = true;
-        }
-
-        struct_formatted :: (a: $T) -> string #expand {
-            return tprint("%", FormatStruct.{value=a, draw_type_name=true, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=true});
-        }
-
-        entity: Entity;
-        if entity_index != 0 {
-            get_entity_at(*entity, entity_index);
-        }
-        Text("entity:           %", entity.name);
-        Text("entity index:     %", entity_index);
-        Text("resolve step:     %", inner_index_1);
-        Text("remaining time:   %", remaining_time);
-
-        prev_contacted_entity: Entity;
-        if prev_contacted_entity_index != -1 {
-            get_entity_at(*prev_contacted_entity, prev_contacted_entity_index);
-        }
-        Text("contacted entity: %", prev_contacted_entity.name);
-
-        phys := ifx e_phys != null then e_phys.* else Entity_Physics_Core.{};
-        props := ifx e_props != null then e_props.* else Physics_Properties.{};
-        if CollapsingHeader("entity phys") {
+        #if RUN_PHYSICS_DEBUGGER {
             scope_push_indent();
-            TextWrapped("entity phys:      %", struct_formatted(phys));
-        }
-        if CollapsingHeader("entity props") {
-            scope_push_indent();
-            TextWrapped("entity props:     %", struct_formatted(props));
-        }
 
-        phys_2 := ifx closest_phys_b != null then closest_phys_b.* else Entity_Physics_Core.{};
-        props_2 := ifx closest_props_b != null then closest_props_b.* else Physics_Properties.{};
-        if CollapsingHeader("contacted entity phys") {
-            scope_push_indent();
-            TextWrapped(struct_formatted(phys_2));
-        }
-        if CollapsingHeader("contacted entity props") {
-            scope_push_indent();
-            TextWrapped(struct_formatted(props_2));
-        } 
+            if !physics_debugger_pause {
+                Text("haven't encountered a break");
+                return;
+            }
 
-        if CollapsingHeader("result") {
-            scope_push_indent();
-            TextWrapped(struct_formatted(closest_collision_result));     
-        }
+            if Button("step") {
+                physics_debugger_step = true;
+            }
 
-        if CollapsingHeader("intermediate data") {
-            scope_push_indent();
-            if collision_intermediate.type != 0 {
-                TextWrapped(struct_formatted(collision_intermediate.basic));
-                if collision_intermediate.type == {
-                case .SPHERE_SPHERE;
-                    TextWrapped(struct_formatted(collision_intermediate.sphere_sphere));
-                    using collision_intermediate.specific.sphere_sphere;
-                    draw_line(collision_intermediate._pos_a_begin, collision_intermediate._pos_a_end, .{r=1});
-                    draw_line(collision_intermediate._pos_b, collision_intermediate._pos_b + WORLD_UP * 2.0, .{r=0.8,b=0.8});
-                    draw_line(_point_on_segment, _point_on_segment + WORLD_UP * 2.0, .{g=1});
-                    draw_line(_point_on_line, _point_on_line + WORLD_UP * 2.0, .{b=1});
-                case .SPHERE_PLANE;
-                    TextWrapped(struct_formatted(collision_intermediate.sphere_plane));
-                    using collision_intermediate.specific.sphere_plane;
-                    draw_line(_a_closest_point, _b_closest_point, .{r=1});
+            struct_formatted :: (a: $T) -> string #expand {
+                return tprint("%", FormatStruct.{value=a, draw_type_name=true, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=true});
+            }
+
+            entity: Entity;
+            if entity_index != 0 {
+                get_entity_at(*entity, entity_index);
+            }
+            Text("entity:           %", entity.name);
+            Text("entity index:     %", entity_index);
+            Text("resolve step:     %", inner_index_1);
+            Text("remaining time:   %", remaining_time);
+
+            prev_contacted_entity: Entity;
+            if prev_contacted_entity_index != -1 {
+                get_entity_at(*prev_contacted_entity, prev_contacted_entity_index);
+            }
+            Text("contacted entity: %", prev_contacted_entity.name);
+
+            phys := ifx e_phys != null then e_phys.* else Entity_Physics_Core.{};
+            props := ifx e_props != null then e_props.* else Physics_Properties.{};
+            if CollapsingHeader("entity phys") {
+                scope_push_indent();
+                TextWrapped("entity phys:      %", struct_formatted(phys));
+            }
+            if CollapsingHeader("entity props") {
+                scope_push_indent();
+                TextWrapped("entity props:     %", struct_formatted(props));
+            }
+
+            phys_2 := ifx closest_phys_b != null then closest_phys_b.* else Entity_Physics_Core.{};
+            props_2 := ifx closest_props_b != null then closest_props_b.* else Physics_Properties.{};
+            if CollapsingHeader("contacted entity phys") {
+                scope_push_indent();
+                TextWrapped(struct_formatted(phys_2));
+            }
+            if CollapsingHeader("contacted entity props") {
+                scope_push_indent();
+                TextWrapped(struct_formatted(props_2));
+            } 
+
+            if CollapsingHeader("result") {
+                scope_push_indent();
+                TextWrapped(struct_formatted(closest_collision_result));     
+            }
+
+            if CollapsingHeader("intermediate data") {
+                scope_push_indent();
+                if collision_intermediate.type != 0 {
+                    TextWrapped(struct_formatted(collision_intermediate.basic));
+                    if collision_intermediate.type == {
+                    case .SPHERE_SPHERE;
+                        TextWrapped(struct_formatted(collision_intermediate.sphere_sphere));
+                        using collision_intermediate.specific.sphere_sphere;
+                        draw_line(collision_intermediate._pos_a_begin, collision_intermediate._pos_a_end, .{r=1});
+                        draw_line(collision_intermediate._pos_b, collision_intermediate._pos_b + WORLD_UP * 2.0, .{r=0.8,b=0.8});
+                        draw_line(_point_on_segment, _point_on_segment + WORLD_UP * 2.0, .{g=1});
+                        draw_line(_point_on_line, _point_on_line + WORLD_UP * 2.0, .{b=1});
+                    case .SPHERE_PLANE;
+                        TextWrapped(struct_formatted(collision_intermediate.sphere_plane));
+                        using collision_intermediate.specific.sphere_plane;
+                        draw_line(_a_closest_point, _b_closest_point, .{r=1});
+                    }
                 }
             }
+
+            if CollapsingHeader("collision solution data") {
+                scope_push_indent();
+                using collision_intermediate.solve;
+                Text("bounciness: %", _bounciness);
+                if type == .ONE_WAY {
+                    TextWrapped("one way: %", struct_formatted(one_way));
+                } else {
+                    TextWrapped("two way %", struct_formatted(two_way));
+                }
+            }
+        } else {
+            Text("physics debugger is compiled out. set RUN_PHYSICS_DEBUGGER to true.");
         }
     }
 }

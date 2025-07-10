@@ -82,7 +82,10 @@ scratch_init_game :: () {
     {
         entity_ref := spawn_entity(.STATIC_MESH, name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
         entity_phys_props := get_entity_physics_properties(xx entity_ref.index);
-        entity_phys_props.body_elasticity = 1.0;
+        // entity_phys_props.body_elasticity = 1.0;
+
+        array_add(*physics_debugger_entity_ids, entity_ref.id);
+        // physics_debugger_ignore_immovable = true;
 
         reorient_mesh_quat: Quaternion;
         set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
@@ -94,14 +97,16 @@ scratch_init_game :: () {
         capsule_mesh := get_or_create_capsule_mesh(body_collider.sphere.radius*2.0, body_collider.sphere.radius);
         capsule_mesh.albedo.tint = .{0.6, 0.1, 0.9, 0.5};
         capsule_mesh.albedo.type = .CONSTANT;
+        mass = 1.0;
 
         body_elasticity = 0.0;
         // cube_mesh := load_mesh("_cube");
 
         set_entity_meshes(entity_ref, .{.BODY, mesh}, .{.CAPSULE_COLLIDER, capsule_mesh});
         get_entity(*player_character, entity_ref);
-        set_orientation(*player_character.orientation, .{0,0,1}, .{1,0,0});
-        player_character.position.z = 5.0;
+        // set_orientation(*player_character.orientation, .{0,0,1}, .{1,0,0});
+        player_character.position.x=40;
+        player_character.position.z = 50.0;
     }
     // npc 
     {
@@ -109,6 +114,8 @@ scratch_init_game :: () {
         mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj");
         npc := array_add(*npcs);
         entity_phys_props := get_entity_physics_properties(xx entity_ref.index);
+
+        // array_add(*physics_debugger_entity_ids, entity_ref.id);
         
         using entity_phys_props;
         // body_collider.height += 3.0;
@@ -150,7 +157,7 @@ scratch_init_game :: () {
 
         get_entity(*ground, entity_ref);
         set_orientation(*ground.orientation, .{0,0,1}, .{1,0,0});
-        // rotate(*ground, WORLD_FORE, PI/6.0);
+        rotate(*ground, WORLD_FORE, PI/6.0);
         ground.position.z = 0.0;
 
         // ground.position.x -= phys_props.body_collider.plane.width * 0.5;

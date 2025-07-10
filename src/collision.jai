@@ -1,6 +1,8 @@
 // this game wants collisions with torque application!
 // to do that requires contact point estimation in the collision solving
 
+RUN_PHYSICS_DEBUGGER :: false;
+
 potential_collisions: [..]Potential_Collision;
 
 Potential_Collision :: struct {
@@ -68,36 +70,8 @@ min_dimension :: (c: *Entity_Collider) -> float {
     return 0.0;
 }
 
-// to_bottom_position :: inline (using c: *Entity_Collider, center: Vector3) -> Vector3 {
-//     return center - Vector3.{z=height*0.5};
-// }
-
 to_collider_center :: inline (using c: *Entity_Collider, bottom_center: Vector3) -> Vector3 {
     return .{xy=bottom_center.xy, z=bottom_center.z + c.half_height};
-}
-
-populate_potential_contacts :: () {
-    // auto_release_temp();
-
-    // last_entity := find_last_set_bit(*entities.in_use);
-    // entity_count := last_entity + 1;
-
-    // // todo: grid
-
-    // for 0..entity_count-1 {
-    //     phys := *entity_physics_core[it];
-    //     props := get_entity_physics_properties(xx it);
-    // }
-    
-    // for i : 0..last_entity-1 {
-    //     assert(bit_is_set(*entities.in_use, i));
-    //     if entities[i].type != .STATIC_MESH then continue;
-    //     for j : i+1..last_entity {
-    //         assert(bit_is_set(*entities.in_use, j));
-    //         if entities[j].type != .STATIC_MESH then continue;
-    //         array_add(*potential_collisions, .{xx i, xx j});
-    //     }
-    // }
 }
 
 Collision_Intermediate_Data :: struct {
@@ -115,6 +89,30 @@ Collision_Intermediate_Data :: struct {
         _forward_a: Vector3;
         _forward_b: Vector3;
     };
+
+    solve: struct {
+        type: enum { ONE_WAY; TWO_WAY; };
+        _bounciness: float;
+        using which: union {
+            one_way: struct {
+                _speed_in_direction_of_hit_normal: float;
+                _full_bounce_speed: float;
+                _bounce_impulse: Vector3;
+            } = ---;
+            two_way: struct {
+                _relative_velocity: Vector3;
+                _rv_along_normal: float;
+                _self_impulse: Vector3;
+                _other_impulse: Vector3;
+                _impulse_magnitude: float;
+                _base_impulse: Vector3;
+                _new_normal_speed: float;
+                _self_normal_momentum: float;
+                _other_normal_momentum: float;
+                _inv_mass_sum: float;
+            } = ---;
+        }
+    }
 
     using specific: union {
         sphere_sphere: struct {
@@ -149,32 +147,43 @@ COLLISION_SOLVE_ITERATION_COUNT :: 1;
 INV_COLLISION_SOLVE_ITERATION_COUNT :: 1.0 / COLLISION_SOLVE_ITERATION_COUNT.(float);
 FIXED_TIME_STEP :: 1.0 / 60.0;
 
-entity_index := 1;
-inner_index_1 := 0;
-remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+#if RUN_PHYSICS_DEBUGGER {
+    entity_index := 1;
+    inner_index_1 := 0;
+    remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+    prev_contacted_entity_index := -1;
+    prev_contacted_entity_id := -1;
+    e_props: *Physics_Properties;
+    e_phys: *Entity_Physics_Core;
+    closest_collision_result: Collision_Result;
+    closest_phys_b: *Entity_Physics_Core;
+    closest_props_b: *Physics_Properties;
+    closest_entity_index: s64;
+    closest_entity_id: s64;
+    fucking_fuck: [..]s16;
+}
 
-fucking_fuck: [..]s16;
-prev_contacted_entity_index := -1;
+#if RUN_PHYSICS_DEBUGGER {
+    collision_intermediate: Collision_Intermediate_Data;
+    physics_debugger_pause := false;
+    physics_debugger_step := false;
+    do_phys_debugger_turnover := false;
+}
 
-e_props: *Physics_Properties;
-e_phys: *Entity_Physics_Core;
-closest_collision_result: Collision_Result;
-closest_phys_b: *Entity_Physics_Core;
-closest_props_b: *Physics_Properties;
-closest_entity_index: s64;
-collision_intermediate: Collision_Intermediate_Data;
+physics_debugger_entity_ids: [..]u32;
+physics_debugger_ignore_immovable := false;
 
-physics_debugger_step := false;
-do_phys_debugger_turnover := false;
-
-queue_phys_debugger_entity_turnover :: () {
-    do_phys_debugger_turnover = true;
+queue_phys_debugger_entity_turnover :: inline () {
+    #if RUN_PHYSICS_DEBUGGER {
+        if physics_debugger_pause then do_phys_debugger_turnover = true;
+    }
 }
 
 phys_debugger_entity_turnover :: () #expand {
-    remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
     inner_index_1 = 0;
     entity_index += 1;
+
+    remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
     array_reset_keeping_memory(*fucking_fuck);
     prev_contacted_entity_index = -1;
 
@@ -194,18 +203,55 @@ phys_debugger_entity_turnover :: () #expand {
     }
 }
 
-solve_potential_contacts :: () {
-
-    if !physics_debugger_step {
+phys_debugger_outer_loop_continue :: () #expand {
+    if physics_debugger_pause {
+        entity_index = increment_wrap(entity_index, 1, `last_entity);
         return;
+    } {
+        entity_index += 1;
+        continue;
     }
-    physics_debugger_step = false;
+}
 
+
+prep_ccd_substeps :: () #expand {
+    `remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+    `prev_contacted_entity_index = -1;
+    array_reset_keeping_memory(*`fucking_fuck);
+}
+
+solve_potential_contacts :: () {
     last_entity := find_last_set_bit(*entities.in_use);
 
-    if do_phys_debugger_turnover {
-        phys_debugger_entity_turnover();
-        do_phys_debugger_turnover = false;
+    #if RUN_PHYSICS_DEBUGGER {
+        if physics_debugger_pause {
+            if !physics_debugger_step {
+                return;
+            }
+            physics_debugger_step = false;
+            if do_phys_debugger_turnover {
+                phys_debugger_entity_turnover();
+                do_phys_debugger_turnover = false;
+            }
+        } else {
+            entity_index = 1;
+            inner_index_1 = 0;
+            remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+            prev_contacted_entity_index = -1;
+        }
+    } else {
+        entity_index := 1;
+        inner_index_1 := 0;
+        remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+        prev_contacted_entity_index := -1;
+        e_props: *Physics_Properties;
+        e_phys: *Entity_Physics_Core;
+        closest_collision_result: Collision_Result;
+        closest_phys_b: *Entity_Physics_Core;
+        closest_props_b: *Physics_Properties;
+        closest_entity_index: s64;
+        fucking_fuck: [..]s16;
+        fucking_fuck.allocator = temp;
     }
 
     for 0..last_entity {
@@ -223,24 +269,29 @@ solve_potential_contacts :: () {
     // for solve_iteration : 0..COLLISION_SOLVE_ITERATION_COUNT-1 {
     {
         while entity_index <= last_entity {
-            if entity_index == INVALID_ENTITY_INDEX {
-                entity_index = increment_wrap(entity_index, 1, last_entity);
-                return;
-            }
+            #if !RUN_PHYSICS_DEBUGGER then defer entity_index += 1;
 
+            if entity_index == INVALID_ENTITY_INDEX {
+                #if RUN_PHYSICS_DEBUGGER {
+                    phys_debugger_outer_loop_continue();
+                } else continue;
+            }
             if entities[entity_index].id == camera.id {
-                entity_index = increment_wrap(entity_index, 1, last_entity);
-                return;
+                #if RUN_PHYSICS_DEBUGGER {
+                    phys_debugger_outer_loop_continue();
+                } else continue;
             }
 
             e_props = get_entity_physics_properties(xx entity_index);
             if e_props.mass <= IMMOVABLE_ENTITY_MASS {
-                entity_index = increment_wrap(entity_index, 1, last_entity);
-                return;
+                #if RUN_PHYSICS_DEBUGGER {
+                    phys_debugger_outer_loop_continue();
+                } else continue;
             }
             if e_props.body_collision_channels == 0 {
-                entity_index = increment_wrap(entity_index, 1, last_entity);
-                return;
+                #if RUN_PHYSICS_DEBUGGER {
+                    phys_debugger_outer_loop_continue();
+                } else continue;
             }
 
             // apply gravity
@@ -250,7 +301,16 @@ solve_potential_contacts :: () {
                 e_phys.linear_velocity.z -= e_props.gravity_accel * FIXED_TIME_STEP;
             }
 
+            #if !RUN_PHYSICS_DEBUGGER {
+                prep_ccd_substeps();
+            } else {
+                if !physics_debugger_pause {
+                    prep_ccd_substeps();
+                }
+            }
+
             while inner_index_1 < max_step_count {
+                inner_index_1 += 1;
 
                 sweep_beg := e_phys.position;
                 sweep_end := sweep_beg + e_phys.linear_velocity * remaining_time;
@@ -258,12 +318,16 @@ solve_potential_contacts :: () {
                 fore_a := precalculated_fore_directions[entity_index];
                 up_a := precalculated_up_directions[entity_index];
 
-                closest_collision_result = .{};
-                closest_collision_result.contact_norm_time = 1.0;
+                closest_collision_result = .{contact_norm_time=1.0};
+                closest_phys_b = null;
+                closest_props_b = null;
+                closest_entity_index = -1;
 
-                closest_collision_intermediate: Collision_Intermediate_Data = ---;
+                #if RUN_PHYSICS_DEBUGGER {
+                    closest_collision_intermediate: Collision_Intermediate_Data = ---;
+                    closest_entity_id = -1;
+                }
 
-                // todo: grid
                 inner_index_2 := 1;
                 while inner_index_2 <= last_entity {
                     defer inner_index_2 += 1;
@@ -290,24 +354,19 @@ solve_potential_contacts :: () {
                         closest_phys_b = phys_b;
                         closest_props_b = props_b;
                         closest_entity_index = inner_index_2;
-                        #if true {
+                        #if RUN_PHYSICS_DEBUGGER {
                             closest_collision_intermediate = collision_intermediate;
+                            closest_entity_id = entities[inner_index_2].id;
                         }
                     }
                 }
 
+                #if RUN_PHYSICS_DEBUGGER {
+                    physics_debugger_pause = false;
+                }
+
                 array_add(*fucking_fuck, xx closest_entity_index);
                 prev_contacted_entity_index = closest_entity_index;
-
-                #if true {
-                    collision_intermediate = closest_collision_intermediate;
-                }
-
-                inner_index_1 += 1;
-                if inner_index_1 == max_step_count {
-                    queue_phys_debugger_entity_turnover();
-                    break;
-                }
 
                 using closest_collision_result;
 
@@ -315,6 +374,17 @@ solve_potential_contacts :: () {
                     e_phys.position = sweep_end;
                     queue_phys_debugger_entity_turnover();
                     break;
+                }
+
+                #if RUN_PHYSICS_DEBUGGER {
+                    if !physics_debugger_ignore_immovable || closest_props_b.mass > IMMOVABLE_ENTITY_MASS {
+                        physics_debugger_pause = array_find(physics_debugger_entity_ids, xx closest_entity_id) || array_find(physics_debugger_entity_ids, entities[entity_index].id);
+                        if physics_debugger_pause {
+                            collision_intermediate = closest_collision_intermediate;
+                        }
+                    } else {
+                        physics_debugger_pause = false;
+                    }
                 }
 
                 // resolve the collision by moving the entity to the contact point, which might mean moving backwards (negative norm time)
@@ -335,8 +405,8 @@ solve_potential_contacts :: () {
 
                 assert(closest_props_b.mass >= 0);
 
-                // todo: immovable entity mass should just be 0
                 if closest_props_b.mass == IMMOVABLE_ENTITY_MASS {
+                    full_bounce_speed := reflection_component(e_phys.linear_velocity, contact_normal) * 0.5;
                     // kill all velocity along normal because the other thing can't move
                     speed_in_direction_of_hit_normal := dot(e_phys.linear_velocity, contact_normal);
                     if speed_in_direction_of_hit_normal < 0.0 {
@@ -347,22 +417,97 @@ solve_potential_contacts :: () {
                     }
 
                     // multiply by 0.5 because this vector would be added to the velocity in order to perfectly bounce. but, half of this is already dealt with in the part where we kill the velocity's component along the collision normal
-                    full_bounce_speed := reflection_component(e_phys.linear_velocity, contact_normal) * 0.5;
-                    e_phys.linear_velocity += contact_normal * (bounciness * full_bounce_speed);
-                } else {
-                    if e_props.body_collider.type == .SPHERE && closest_props_b.body_collider.type == .SPHERE {
-                        a := 0;
+                    bounce_impulse := contact_normal * (bounciness * full_bounce_speed);
+                    e_phys.linear_velocity += bounce_impulse;
+                    #if RUN_PHYSICS_DEBUGGER {
+                        if physics_debugger_pause {
+                            using collision_intermediate.solve;
+                            type = .ONE_WAY;
+                            _bounciness = bounciness;
+                            one_way._speed_in_direction_of_hit_normal = speed_in_direction_of_hit_normal;
+                            one_way._full_bounce_speed = full_bounce_speed;
+                            one_way._bounce_impulse = bounce_impulse;
+                        }
                     }
+                } else {
                     relative_velocity := closest_phys_b.linear_velocity - e_phys.linear_velocity;
                     rv_along_normal := dot(relative_velocity, contact_normal);
                     if rv_along_normal > 0 {
-                        inv_mass_a := 1.0 / e_props.mass;
-                        inv_mass_b := 1.0 / closest_props_b.mass;
-                        impulse_magnitude := -(1.0 + bounciness) * rv_along_normal / (inv_mass_a + inv_mass_b);
-                        impulse := contact_normal * impulse_magnitude;
+                        inv_mass_a, inv_mass_b, impulse_magnitude: float = ---;
+                        base_impulse, self_impulse, other_impulse: Vector3 = ---;
+                        if bounciness > 0 {
+                            inv_mass_a = 1.0 / e_props.mass;
+                            inv_mass_b = 1.0 / closest_props_b.mass;
+                            impulse_magnitude = -(1.0 + bounciness) * rv_along_normal / (inv_mass_a + inv_mass_b);
+                            base_impulse = contact_normal * impulse_magnitude;
+                            self_impulse = -base_impulse * closest_props_b.mass;
+                            other_impulse = base_impulse * e_props.mass;
+                        } else {
 
-                        e_phys.linear_velocity -= impulse * closest_props_b.mass;
-                        closest_phys_b.linear_velocity += impulse * e_props.mass;
+                            inv_mass_sum := 1.0 / (e_props.mass + closest_props_b.mass);
+
+                            self_speed_along_normal := dot(e_phys.linear_velocity, contact_normal);
+                            other_speed_along_normal := dot(closest_phys_b.linear_velocity, contact_normal);
+
+                            self_normal_momentum := e_props.mass * -self_speed_along_normal;
+                            other_normal_momentum := closest_props_b.mass * other_speed_along_normal;
+
+                            new_normal_speed := (self_normal_momentum - other_normal_momentum) * inv_mass_sum;
+
+                            // e_phys.linear_velocity -= contact_normal * self_speed_along_normal;
+                            // closest_phys_b.linear_velocity += contact_normal * other_speed_along_normal;
+
+                            self_impulse = -contact_normal * (new_normal_speed + self_speed_along_normal); 
+                            other_impulse = -contact_normal * (new_normal_speed + other_speed_along_normal);
+
+                            // e_phys.linear_velocity += self_impulse;
+                            // closest_phys_b.linear_velocity += other_impulse;
+
+                            // impulse_magnitude = -rv_along_normal;
+                            // base_impulse = contact_normal * impulse_magnitude;
+                            // self_impulse = contact_normal * 
+                            // self_impulse = -base_impulse;
+                            // other_impulse = base_impulse;
+                            #if RUN_PHYSICS_DEBUGGER {
+                                if physics_debugger_pause {
+                                    using collision_intermediate.solve;
+                                    inv_mass_a, inv_mass_b = 0;
+                                    two_way._new_normal_speed = new_normal_speed;
+                                    two_way._self_normal_momentum = self_normal_momentum;
+                                    two_way._other_normal_momentum = other_normal_momentum;
+                                    two_way._inv_mass_sum = inv_mass_sum;
+                                }
+                            }
+                        }
+
+                        e_phys.linear_velocity += self_impulse;
+                        closest_phys_b.linear_velocity += other_impulse;
+
+                        #if RUN_PHYSICS_DEBUGGER {
+                            if physics_debugger_pause {
+                                using collision_intermediate.solve;
+                                type = .TWO_WAY;
+                                two_way._relative_velocity = relative_velocity;
+                                two_way._rv_along_normal = rv_along_normal;
+                                two_way._self_impulse = self_impulse;
+                                two_way._other_impulse = other_impulse;
+                                two_way._impulse_magnitude = impulse_magnitude;
+                                two_way._base_impulse = base_impulse;
+                            }
+                        }
+                    } else {
+                        #if RUN_PHYSICS_DEBUGGER {
+                            if physics_debugger_pause {
+                                using collision_intermediate.solve;
+                                type = .TWO_WAY;
+                                two_way._relative_velocity = relative_velocity;
+                                two_way._rv_along_normal = rv_along_normal;
+                                two_way._self_impulse = .{};
+                                two_way._other_impulse = .{};
+                                two_way._impulse_magnitude = 0;
+                                two_way._base_impulse = .{};
+                            }
+                        }
                     }
                 }
 
@@ -370,37 +515,85 @@ solve_potential_contacts :: () {
                 remaining_time -= max(travel_time, 0);
                 if remaining_time <= 0 {
                     queue_phys_debugger_entity_turnover();
+                    break;
                 }
-                break;
-            }
-
-            if solve_iteration == COLLISION_SOLVE_ITERATION_COUNT - 1 && (e_phys.flags & .ON_GROUND) != 0 {
-                linear_speed_xy_sq := length_squared(e_phys.linear_velocity.xy);
-                if linear_speed_xy_sq > 0 {
-                    linear_speed_xy := sqrt(linear_speed_xy_sq);
-                    velocity_direction_xy := e_phys.linear_velocity.xy * (1.0 / linear_speed_xy);
-
-                    // todo: material friction
-                    ground_friction := 1.5;
-                    friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
-                    assert(friction_coef >= 0.0);
-                    friction_accel := friction_coef * 98.0;
-                    friction_delta := friction_accel * FIXED_TIME_STEP;
-
-                    if friction_delta > linear_speed_xy {
-                        e_phys.linear_velocity.xy = .{};
-                    } else {
-                        e_phys.linear_velocity.xy -= velocity_direction_xy * friction_delta;
+                #if RUN_PHYSICS_DEBUGGER {
+                    if physics_debugger_pause {
+                        if inner_index_1 == max_step_count {
+                            queue_phys_debugger_entity_turnover();
+                        }
+                        break;
                     }
                 }
             }
-            return;
+
+            if solve_iteration == COLLISION_SOLVE_ITERATION_COUNT - 1 {
+                // friction
+                if (e_phys.flags & .ON_GROUND) != 0 {
+                    linear_speed_xy_sq := length_squared(e_phys.linear_velocity.xy);
+                    if linear_speed_xy_sq > 0 {
+                        linear_speed_xy := sqrt(linear_speed_xy_sq);
+                        velocity_direction_xy := e_phys.linear_velocity.xy * (1.0 / linear_speed_xy);
+
+                        // todo: material friction
+                        ground_friction := 1.5;
+                        friction_coef := ground_friction * e_props.friction_multiplier + e_props.friction_bias;
+                        assert(friction_coef >= 0.0);
+                        friction_accel := friction_coef * 98.0;
+                        friction_delta := friction_accel * FIXED_TIME_STEP;
+
+                        if friction_delta > linear_speed_xy {
+                            e_phys.linear_velocity.xy = .{};
+                        } else {
+                            e_phys.linear_velocity.xy -= velocity_direction_xy * friction_delta;
+                        }
+                    }
+                }
+                
+                if e_phys.linear_input != .{} {
+                    // linear move
+                    prev_speed_sq := length_squared(e_phys.linear_velocity.xy);
+                    linear_accel := e_props.linear_acceleration;
+
+                    if prev_speed_sq > 0.0001 {
+                        prev_speed := sqrt(prev_speed_sq);
+                        prev_velocity_dir := e_phys.linear_velocity.xy / prev_speed;
+                        cos_t := dot(e_phys.linear_input.xy, prev_velocity_dir);
+                        if cos_t <= COS_PI_OVER_4 {
+                            linear_accel *= e_props.accel_opposite_direction_multiplier;
+                        }
+                    }
+                    if prev_speed_sq <= e_props.fast_start_speed_max {
+                        linear_accel *= 4.0;
+                    }
+
+                    e_phys.linear_velocity.xy += e_phys.linear_input.xy * (linear_accel * FIXED_TIME_STEP);
+                    new_speed_sq := length_squared(e_phys.linear_velocity.xy);
+
+                    if new_speed_sq > square(e_props.linear_speed_max) {
+                        new_speed := sqrt(new_speed_sq);
+                        e_phys.linear_velocity.xy *= e_props.linear_speed_max / new_speed;
+                    }
+
+                    // rotate
+                    rot_speed := 6.5 * PI;
+                    axis := normalize(WORLD_UP + WORLD_RIGHT);
+                    target := make_quat(e_phys.linear_input, WORLD_UP);
+                    interp_rotate(*e_phys.orientation, target, rot_speed, FIXED_TIME_STEP);
+
+                    e_phys.linear_input = .{};
+                }
+            }
+            #if RUN_PHYSICS_DEBUGGER {
+                if physics_debugger_pause then return;
+                else entity_index += 1;
+            }
         }
     }
 }
 
 solve_potential_collision :: inline (position_a_start: Vector3, position_a_end: Vector3, forward_a: Vector3, up_a: Vector3, properties_a: *Physics_Properties, position_b: Vector3, forward_b: Vector3, up_b: Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
-    #if true {
+    #if RUN_PHYSICS_DEBUGGER {
         using collision_intermediate.basic;
         _pos_a_begin = position_a_start;
         _pos_a_end = position_a_end;
@@ -448,7 +641,7 @@ solve_potential_collision :: inline (position_a_start: Vector3, position_a_end: 
 }
 
 solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward_a: Vector3, up_a: Vector3, properties_a: *Physics_Properties, pos_b: Vector3, forward_b: Vector3, up_b: Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
-    #if true {
+    #if RUN_PHYSICS_DEBUGGER {
         collision_intermediate.type = .SPHERE_PLANE;
     }
     result.contact_norm_time = FLOAT32_MAX;
@@ -522,7 +715,7 @@ solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward
         full_travel_dist := sqrt(full_travel_dist_sq);
         travel_norm := (pos_a_end - pos_a_beg) / full_travel_dist;
         cos_t = dot(travel_norm, -result.contact_normal);
-        #if true {
+        #if RUN_PHYSICS_DEBUGGER {
             using collision_intermediate.specific.sphere_plane;
             _full_travel_dist = full_travel_dist;
             _travel_norm = travel_norm;
@@ -535,15 +728,10 @@ solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward
             // heading toward plane
             signed_distance_to_collis := result.contact_depth / cos_t;
             result.contact_norm_time = signed_distance_to_collis / full_travel_dist;
-            #if true {
-                using collision_intermediate.specific.sphere_plane;
-                _c = 0;
-                _truncated_dist = 0;
-            }
         }
     }
 
-    #if true {
+    #if RUN_PHYSICS_DEBUGGER {
         using collision_intermediate.specific.sphere_plane;
         _a_proj = a_proj;
         _a_proj_next = a_proj_next;
@@ -562,7 +750,7 @@ solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward
 }
 
 solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward_a: Vector3, up_a: Vector3, properties_a: *Physics_Properties, pos_b: Vector3, forward_b: Vector3, up_b: Vector3, properties_b: *Physics_Properties, result: *Collision_Result) -> bool {
-    #if true {
+    #if RUN_PHYSICS_DEBUGGER {
         collision_intermediate.type = .SPHERE_SPHERE;
     }
     result.contact_norm_time = FLOAT32_MAX;
@@ -588,7 +776,6 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
     line_dist := sqrt(line_dist_sq);
     proj_diff := line_dist - seg_dist;
     
-    // todo: seg_dist_sq == line_dist_sq
     move_back_from_line_proj_dist := sqrt(buffer_dist_sq - line_dist_sq);
 
     a_radius_portion := sphere_a.radius / buffer_dist;
@@ -615,17 +802,12 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
         result.contact_depth = buffer_dist - seg_dist;
         result.contact_point = a_center_at_contact + (pos_b - a_center_at_contact) * a_radius_portion;
         result.contact_normal = normalize(a_center_at_contact - pos_b);
-
-        if result.contact_norm_time < -50 {
-            a := 0;
-        }
     }
-
 
     result.is_contact = true;
     result.do_move = true;
 
-    #if true {
+    #if RUN_PHYSICS_DEBUGGER {
         using collision_intermediate.specific.sphere_sphere;
         _point_on_segment = pt_on_segment;
         _point_on_line = pt_on_line;

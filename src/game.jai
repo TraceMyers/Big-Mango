@@ -41,7 +41,6 @@ main :: () {
         scratch_think();
 
         if game_frame_count > 0 {
-            populate_potential_contacts();
             solve_potential_contacts();
         }
 
