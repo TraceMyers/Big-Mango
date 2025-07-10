@@ -1,4 +1,4 @@
-set compiler=%VULKAN_SDK%/Bin/glslc.exe
+set compiler="%VULKAN_SDK%/Bin/glslc.exe"
 %compiler% src/shader.vert -o intermediate/vert.spv
 %compiler% src/shader.frag -o intermediate/frag.spv
 %compiler% -fshader-stage=compute src/cmp_draw_rect.glsl -o intermediate/cmp_draw_rect.spv
