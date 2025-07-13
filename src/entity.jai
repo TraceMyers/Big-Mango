@@ -27,6 +27,7 @@ boot_entities :: (stage: Boot_Stage) -> bool {
             precalculated_fore_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
             precalculated_up_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
             name_allocations = alloc_array(Entity_Name_Allocation, ENTITY_MAX_COUNT);
+            entity_physics_constraints = alloc_array([..]Entity_Physics_Contraint, ENTITY_MAX_COUNT);
 
             set_capacity(*entities, ENTITY_MAX_COUNT);
             set_capacity(*creatures, CREATURE_MAX_COUNT);
@@ -103,9 +104,11 @@ Entity_Physics_Core :: struct {
     angular_velocity: Vector3;
     orientation: Quaternion;
     linear_input: Vector3;
-    flags: enum_flags u8 {
-        ON_GROUND;
+    physics_flags: enum_flags u32 {
+        ON_GROUND :: 1;
+        JUMP_QUEUED;
     };
+    jump_queued_at_time: float;
 }
 
 Entity_Patch_Flags :: enum_flags u32 {
@@ -153,13 +156,8 @@ Entity :: struct {
 }
 
 Entity_Mesh :: struct {
-    type: enum {
-        BODY;
-        CAPSULE_COLLIDER;
-        BOX_COLLIDER;
-        PLANE_COLLIDER;
-    };
     data: *Mesh;
+    albedo: Mesh_Albedo;
 }
 
 Creature_Type :: enum u16 {
@@ -336,6 +334,10 @@ get_entity_name :: (patch_info: *Entity_Patch_Info) -> string {
     return allocation;
 }
 
+Entity_Physics_Contraint :: struct {
+    kill_normal: Vector3;
+}
+
 entities: Pool(Entity_Patch_Info);
 entity_patch_layer: []*Entity_Patch_Info;
 // default entity data
@@ -343,11 +345,13 @@ entity_physics_core: []Entity_Physics_Core;
 entity_mesh_collections: []Entity_Mesh_Collection;
 precalculated_fore_directions: []Vector3;
 precalculated_up_directions: []Vector3;
+entity_physics_constraints: [][..]Entity_Physics_Contraint;
 name_allocations: []Entity_Name_Allocation;
-entity_mesh_array_allocator: Nesting_Allocator;
-entity_name_allocator: Nesting_Allocator;
+entity_mesh_array_allocator: Nesting_Allocator(8);
+entity_name_allocator: Nesting_Allocator(8);
 // type-specific entity data
 creature_interface: []*Entity_Creature;
+
 creatures: Pool(Entity_Creature);
 cameras: Pool(Entity_Camera);
 colliders: Pool(Entity_Collider);

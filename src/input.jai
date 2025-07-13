@@ -1,5 +1,7 @@
 
-control_mode := Control_Mode.CHARACTER;
+DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON;
+control_mode := DEFAULT_CONTROL_MODE;
+prev_control_mode := Control_Mode.FREE_FLY;
 input_focus := Input_Focus.GAME;
 previous_input_focus: Input_Focus;
 mouse_look_locked: bool;
@@ -12,13 +14,18 @@ Input_Focus :: enum {
 
 Control_Mode :: enum {
     FREE_FLY;
-    CHARACTER;
+    FIRST_PERSON;
+    ORTHO_YZ_45_DOWN;
+    ORTHO_YZ;
+    ORTHO_XZ;
+    ORTHO_XY;
 }
 
 boot_input :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
+        // NOTE: the window is born into this world through the fires of whatever monitor it is initially displayed on. as a result, it appears that spawning the window on a monitor whose display adapter isn't your big beefy graphics card I think means the graphics card is being forced to communicate through the integrated gpu or I don't know but anyway it totally fucks up the stability of the moving images. like, it looked like I was getting some horrific per-pixel-row-blend of past and present images.
         // window = create_window(1920, 1200, "a butt", 90, -1300);
-        window = create_window(1200, 1200, "a butt", 0, 0);
+        window = create_window(1920, 1200, "a butt", 0, 0);
         // get initial dimensions because we won't update this until the first resize
         if window != null {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
@@ -28,6 +35,13 @@ boot_input :: (stage: Boot_Stage) -> bool {
     } else {
         return true;
     }
+}
+
+move_window :: (new_pos: Int_Vector2) {
+    rect: Win32.RECT;
+    Win32.GetClientRect(window, *rect);
+    // Win32.SetWindowPos(window, null, 90, -1300, rect.right-rect.left+16, rect.bottom-rect.top+39, 0);
+    Win32.SetWindowPos(window, null, new_pos.x, new_pos.y, rect.right-rect.left+16, rect.bottom-rect.top+39, 0);
 }
 
 // returns true if focus was changed
@@ -57,6 +71,8 @@ revert_input_focus :: () {
 update_window_events :: (delta_time: float) {
     Input.update_window_events();
 
+    prev_control_mode = control_mode;
+
     for Input.events_this_frame {
         imgui_process_event(it);
         if it.type == .QUIT then quit = true;
@@ -64,27 +80,51 @@ update_window_events :: (delta_time: float) {
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
-                if it.key_code == {
-                case .F1;
-                    if input_focus == .GAME then control_mode = .FREE_FLY;
-                case .F2;
-                    if input_focus == .GAME then control_mode = .CHARACTER;
-                case #char "M";
-                    if input_focus == .GAME && control_mode == .FREE_FLY {
-                        mouse_look_locked = !mouse_look_locked;
+                if input_focus == .GAME {
+                    if it.key_code == {
+                    case .F1;
+                        control_mode = .ORTHO_YZ_45_DOWN;
+                    case .F2;
+                        control_mode = .ORTHO_YZ;
+                    case .F3;
+                        control_mode = .ORTHO_XZ;
+                    case .F4;
+                        control_mode = .ORTHO_XY;
+                    case .F5;
+                        control_mode = .FIRST_PERSON;
+                    case .F6;
+                        control_mode = .FREE_FLY;
+                    case #char "M";
+                        if (control_mode == .FREE_FLY || control_mode == .FIRST_PERSON) {
+                            toggle(*mouse_look_locked);
+                        }
                     }
-                case #char "`";
+                    if control_mode == .FIRST_PERSON {
+                        if it.key_code == {
+                        case .SPACEBAR;
+                            jump_queued = true;
+                            jump_queued_at_time = xx seconds_since_init();
+                        }
+                    }
+                }
+                if it.key_code == #char "`" {
                     toggle_input_focus(.COMMAND_LINE);
                 }
             }
         }
     }
-
+    // NOTE: these resizes give the drawable (client) rect, not the full size
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.
     for record: resizes {
         if record.window == window {
-            window_width = record.width;
-            window_height = record.height;
+            // window_width = record.width;
+            // window_height = record.height;
+        }
+    }
+    if resizes.count > 0 {
+        _, _, window_width=, window_height=, success := get_dimensions(window, true);
+        if !success {
+            rm_error("failed to get window dimensions after resize");
         }
     }
 
@@ -95,7 +135,6 @@ get_window_dimensions :: () -> Int_Vector2 {
     return .{window_width, window_height};
 }
 
-// todo: same input counter
 rm_log_callback :: (text: string) {
     if log_paused then return;
 
@@ -105,7 +144,7 @@ rm_log_callback :: (text: string) {
         rm_log_message_prev := decrement_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
         prev_message, _ := get_rm_log_message(rm_log_message_prev);
         if text == prev_message {
-            rm_log_messages[rm_log_message_prev].repeat_count += 1;
+            repeat_count += 1;
             return;
         }
 

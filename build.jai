@@ -86,6 +86,7 @@ compile_shaders := true;
 
     add_build_file("src/game.jai", w);
 
+    gen_float_command_line_var_procs: [..]string;
     command_line_proc_names: [..]string;
     added_command_line_procedures: bool;
 
@@ -103,11 +104,21 @@ compile_shaders := true;
             m_typechecked := cast(*Message_Typechecked)m;
             for m_typechecked.declarations {
                 if it.expression.kind != .DECLARATION then continue;
-                if it.expression.type.type != .PROCEDURE then continue;
-                for note : it.expression.notes {
-                    if note.text == "command_line" {
-                        log("found command line proc: %", it.expression.name);
-                        array_add(*command_line_proc_names, it.expression.name);
+                if it.expression.type.type == .PROCEDURE {
+                    for note : it.expression.notes {
+                        if note.text == "command_line" {
+                            log("found command line proc: %", it.expression.name);
+                            array_add(*command_line_proc_names, it.expression.name);
+                        }
+                    }
+                } else if it.expression.type.type == .FLOAT {
+                    for note : it.expression.notes {
+                        if note.text == "command_line" {
+                            log("found command line var: %", it.expression.name);
+                            array_add(*gen_float_command_line_var_procs, it.expression.name);
+                            command_line_proc_name := tprint("setvar_%", it.expression.name);
+                            array_add(*command_line_proc_names, command_line_proc_name);
+                        }
                     }
                 }
             }
@@ -115,7 +126,25 @@ compile_shaders := true;
         if m.kind == .PHASE {
             m_phase := cast(*Message_Phase)m;
             if m_phase.phase == .TYPECHECKED_ALL_WE_CAN && !added_command_line_procedures {
+
                 builder: String_Builder;
+                for varname : gen_float_command_line_var_procs {
+                    print_to_builder(*builder, 
+#string HERE
+                        setvar_% :: (args: []Command_Line_Argument) {
+                            init_command_line_proc_or_return(args, 1);
+                            x, success := try_parse_command_line_arg(*args[0], float64);
+                            if success {
+                                % = xx x;
+                            } else {
+                                rm_error("failed parsing input as float: %%", args[0]._string);
+                            }
+                        }
+HERE,
+                        varname, varname
+                    );
+                }
+
                 print_to_builder(*builder, "COMMAND_LINE_PROCEDURES :: Command_Line_Procedure.[\n");
                 for command_line_proc_names {
                     print_to_builder(*builder, "\t.{name=\"%\", proc=%},\n", it, it);

@@ -67,6 +67,7 @@ Physics_Properties :: struct {
     fast_start_speed_max := 5.0;
     linear_speed_max := 30.0;
     gravity_accel := 150.0;
+    jump_delta_velocity := 50.0;
     body_collider: Entity_Collider;
     body_elasticity := 0.1;
     body_collision_channels: Collision_Channels = .DEFAULT;

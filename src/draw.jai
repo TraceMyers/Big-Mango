@@ -16,18 +16,36 @@ draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Col
     });
 }
 
-draw_capsule :: (request: Capsule_Draw_Request) {
-    array_add(*capsules_to_draw, request);
+draw_sphere :: (center: Vector3, radius: float, color: Color4f, poly_count := Sphere_Poly_Count.MEDIUM) {
+    array_add(*sphere_draws, .{center, radius, color, poly_count});
 }
 
-Capsule_Draw_Request :: struct {
-    segment_point_a: Vector3;
-    segment_point_b: Vector3;
-    radius: float;
-    color: Color4b;
+draw_line_with_points :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, start_point_color: Color4f, end_point_color: Color4f, point_radius := 0.4, omit_start_point := false, omit_end_point := false) {
+    draw_line(start, end, start_color, end_color);
+    if !omit_start_point {
+        draw_sphere(start, point_radius, start_point_color, .LOW);
+    }
+    if !omit_end_point {
+        draw_sphere(end, point_radius, end_point_color, .LOW);
+    }
 }
 
-capsules_to_draw: [..]Capsule_Draw_Request;
+draw_line_with_points :: inline (start: Vector3, end: Vector3, color: Color4f, point_radius := 0.4, omit_start_point := false, omit_end_point := false) {
+    draw_line_with_points(start, end, color, color, color, color, point_radius, omit_start_point, omit_end_point);
+}
+
+// draw_capsule :: (request: Capsule_Draw_Request) {
+//     array_add(*capsules_to_draw, request);
+// }
+
+// Capsule_Draw_Request :: struct {
+//     segment_point_a: Vector3;
+//     segment_point_b: Vector3;
+//     radius: float;
+//     color: Color4b;
+// }
+
+// capsules_to_draw: [..]Capsule_Draw_Request;
 
 Capsule_Draw_Push_Constants :: struct {
     segment_point_a_x: float;

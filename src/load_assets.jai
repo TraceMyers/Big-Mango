@@ -1,6 +1,6 @@
 
 // OBJ doesn't guarantee a winding order. just have to know.
-load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
+load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
     data := read_entire_file(file_path);
     defer free(data);
 
@@ -68,11 +68,13 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
     Temp_Mesh_Data :: struct {
         vertices: []Mesh_Vertex;
         indices: Index_Buffer;
+        vertex_position_max: Vector3;
         reorientation_quat: Quaternion;
         vertex_count: s64;
         index_count: s64;
         quads: bool;
         reorient: bool;
+        calc_vertex_position_max: bool;
     }
 
     temp_mesh_data: Temp_Mesh_Data;
@@ -89,6 +91,8 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
             indices.type = .U16;
             indices._u16 = alloc_array(u16, xx (counts.triangle_count * 3), allocator);
         }
+        calc_vertex_position_max = norm_translation_offsets != .{};
+        vertex_position_max = .{};
     }
 
     collector := (line: *string, line_index: s64, mesh_data_v: *void) {
@@ -112,6 +116,9 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
                     vertex.position.component[cmp_idx] = val;
                     cmp_idx += 1;
                 }
+            }
+            if mesh_data.calc_vertex_position_max {
+                mesh_data.vertex_position_max = max(mesh_data.vertex_position_max, vertex.position);
             }
             if mesh_data.reorient {
                 vertex.position = rotate(vertex.position, mesh_data.reorientation_quat);
@@ -190,6 +197,13 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
                     indices._u32[i], indices._u32[i+1] = indices._u32[i+1], indices._u32[i];
                     i += 3;
                 }
+            }
+        }
+
+        if temp_mesh_data.calc_vertex_position_max {
+            offset := norm_translation_offsets * temp_mesh_data.vertex_position_max;
+            for *temp_mesh_data.vertices {
+                it.position += offset;
             }
         }
     }

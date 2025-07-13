@@ -10,7 +10,7 @@ main :: () {
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
     #if OS == .WINDOWS {
         Win32.SetProcessDPIAware();
-        // Windows is very bad at thread-switching by default unless you do this. Thad.
+        // Windows is very bad at thread-switching by default unless you do this. buh-buh-buh-buh-bad. buh-buh-buh-buh-bad
         Win32.timeBeginPeriod(1);
     }
 
@@ -29,6 +29,9 @@ main :: () {
     scope_system_init(boot_entities,    *startup_success);
     if !startup_success then return;
 
+    // moving window to top monitor only *after* swapchain creation. something in that process creates a very jittery framerate if the swapchain is created when the window is positioned within that monitor's rect.
+    move_window(.{90, -1300});
+
     scratch_init_game();
 
     per_frame_time = seconds_since_init();
@@ -39,6 +42,20 @@ main :: () {
         imgui_draw();
 
         scratch_think();
+
+        dbg_pt := up_direction(*player_character) * player_character.physics_properties.body_collider.half_height * 0.7;
+        dbg_dir := rotate(WORLD_RIGHT, WORLD_UP, xx seconds_since_init());
+        ray_len := 1000.0;
+        result: Collider_Raycast_Result;
+        if raycast(.{ray=.{dbg_pt, dbg_dir}, max_distance=ray_len, origin_inside_collider_rules=.{hit_where=.INNER_INTERSECTION}}, *result) {
+            draw_line_with_points(dbg_pt, result.hit_location, COLOR4F_BLUE, omit_start_point=true);
+        } else {
+            draw_line_with_points(dbg_pt, dbg_pt + dbg_dir * ray_len, COLOR4F_RED, COLOR4F_RED, .{rgb=COLOR4F_RED.rgb,a=0.5}, .{rgb=COLOR4F_RED.rgb,a=0.5}, omit_start_point=true, omit_end_point=true);
+        }
+
+        // draw_sphere(dbg_pt, 1.0, COLOR4F_RED, .LOW);
+
+        // draw_line_with_points(dbg_pt, dbg_pt + WORLD_DOWN * 3.0, COLOR4F_RED, COLOR4F_BLUE, .{rgb=COLOR4F_RED.rgb,a=0.5}, .{rgb=COLOR4F_BLUE.rgb,a=0.5});
 
         if game_frame_count > 0 {
             solve_potential_contacts();
@@ -165,3 +182,4 @@ Zlib :: #import "zlib";
 #load "collision.jai";
 #load "draw.jai";
 #load "entity_control.jai";
+#load "raycast.jai";

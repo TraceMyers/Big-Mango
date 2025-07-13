@@ -31,6 +31,11 @@ Sphere_Collider :: struct {
     radius: float;
 }
 
+AABB :: struct {
+    center: Vector3;
+    extent: Vector3;
+}
+
 Entity_Collider :: struct {
     type: enum u32 {
         SPHERE;
@@ -47,6 +52,40 @@ Entity_Collider :: struct {
     };
 }
 
+get_aabb_extent :: (collider: Entity_Collider, orientation: Quaternion) -> Vector3 {
+    if #complete collider.type == {
+    case .SPHERE;
+        using collider.sphere;
+        return .{radius, radius, radius};
+    case .CAPSULE;
+        using collider.capsule;
+        axis_up := up_direction(*orientation);
+        segment_half_len := half_height - radius;
+        segment_point := axis_up * segment_half_len;
+        return abs(segment_point) + Vector3.{radius,radius,radius};
+    case .PLANE;
+        using collider.plane;
+        axis_up     := up_direction(*orientation);
+        axis_right  := right_direction(*orientation);
+        abs_point_1 := abs(axis_up * half_height + axis_right * width);
+        abs_point_2 := abs(axis_up * half_height - axis_right * width);
+        return max(abs_point_1, abs_point_2);
+    case .BOX;
+        using collider.box;
+        axis_up, axis_fore, axis_right: Vector3 = ---;    
+        get_axes(*orientation, *axis_up, *axis_fore, *axis_right);
+        height_vec := abs(axis_up * half_height);
+        length_vec := abs(axis_fore * (length * 0.5));
+        width_vec  := abs(axis_right * (width * 0.5));
+        return max(height_vec, max(length_vec, width_vec));
+    }
+}
+
+get_aabb :: inline (collider: Entity_Collider, position: Vector3, orientation: Quaternion, out_aabb: *AABB)  {
+    out_aabb.center = position;
+    out_aabb.extent = get_aabb_extent(collider, orientation);
+}
+
 Collision_Result :: struct {
     contact_norm_time: float;
     contact_depth: float;
@@ -54,24 +93,6 @@ Collision_Result :: struct {
     contact_normal: Vector3;
     is_contact: bool;
     do_move: bool;
-}
-
-min_dimension :: (c: *Entity_Collider) -> float {
-    if c.type == {
-    case .SPHERE;
-        return c.sphere.radius;
-    case .CAPSULE;
-        return c.capsule.radius;
-    case .PLANE;
-        return min(c.plane.half_height, c.plane.width * 0.5);
-    case .BOX;
-        return min(max(c.box.half_height, c.box.width*0.5), c.box.length*0.5);
-    }
-    return 0.0;
-}
-
-to_collider_center :: inline (using c: *Entity_Collider, bottom_center: Vector3) -> Vector3 {
-    return .{xy=bottom_center.xy, z=bottom_center.z + c.half_height};
 }
 
 Collision_Intermediate_Data :: struct {
@@ -145,7 +166,7 @@ Collision_Intermediate_Data :: struct {
 
 COLLISION_SOLVE_ITERATION_COUNT :: 1;
 INV_COLLISION_SOLVE_ITERATION_COUNT :: 1.0 / COLLISION_SOLVE_ITERATION_COUNT.(float);
-FIXED_TIME_STEP :: 1.0 / 60.0;
+FIXED_TIME_STEP :: 1.0 / 120.0;
 
 #if RUN_PHYSICS_DEBUGGER {
     entity_index := 1;
@@ -221,6 +242,8 @@ prep_ccd_substeps :: () #expand {
 }
 
 solve_potential_contacts :: () {
+    auto_release_temp();
+
     last_entity := find_last_set_bit(*entities.in_use);
 
     #if RUN_PHYSICS_DEBUGGER {
@@ -256,9 +279,15 @@ solve_potential_contacts :: () {
 
     for 0..last_entity {
         e_phys := *entity_physics_core[it];
-        e_phys.flags = 0;
+        // todo: persistent flag set
+        e_phys.physics_flags &= .JUMP_QUEUED;
         precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
         precalculated_up_directions[it] = up_direction(*e_phys.orientation);
+
+        entity_physics_constraints[it].allocator = temp;
+        entity_physics_constraints[it].data = null;
+        entity_physics_constraints[it].count = 0;
+        array_reserve(*entity_physics_constraints[it], 4);
     }
 
     // continuous collision detection - based physics solving
@@ -276,7 +305,7 @@ solve_potential_contacts :: () {
                     phys_debugger_outer_loop_continue();
                 } else continue;
             }
-            if entities[entity_index].id == camera.id {
+            if entities[entity_index].type == .CAMERA {
                 #if RUN_PHYSICS_DEBUGGER {
                     phys_debugger_outer_loop_continue();
                 } else continue;
@@ -349,14 +378,24 @@ solve_potential_contacts :: () {
                     collision_result: Collision_Result;
                     is_contact := solve_potential_collision(sweep_beg, sweep_end, fore_a, up_a, e_props, center_b, fore_b, up_b, props_b, *collision_result);
 
-                    if is_contact && collision_result.contact_norm_time < closest_collision_result.contact_norm_time {
-                        closest_collision_result = collision_result;
-                        closest_phys_b = phys_b;
-                        closest_props_b = props_b;
-                        closest_entity_index = inner_index_2;
-                        #if RUN_PHYSICS_DEBUGGER {
-                            closest_collision_intermediate = collision_intermediate;
-                            closest_entity_id = entities[inner_index_2].id;
+                    if is_contact {
+                        contact_is_closer := collision_result.contact_norm_time < closest_collision_result.contact_norm_time;
+                        replace_closest := contact_is_closer;
+                        if !replace_closest {
+                            contact_is_immovable := props_b.mass <= IMMOVABLE_ENTITY_MASS;
+                            closest_is_immovable := closest_props_b.mass <= IMMOVABLE_ENTITY_MASS;
+                            replace_closest = contact_is_immovable && !closest_is_immovable;
+                        }
+
+                        if replace_closest {
+                            closest_collision_result = collision_result;
+                            closest_phys_b = phys_b;
+                            closest_props_b = props_b;
+                            closest_entity_index = inner_index_2;
+                            #if RUN_PHYSICS_DEBUGGER {
+                                closest_collision_intermediate = collision_intermediate;
+                                closest_entity_id = entities[inner_index_2].id;
+                            }
                         }
                     }
                 }
@@ -413,7 +452,7 @@ solve_potential_contacts :: () {
                         e_phys.linear_velocity -= contact_normal * speed_in_direction_of_hit_normal;
                     }
                     if dot(contact_normal, WORLD_UP) >= COS_PI_OVER_3 {
-                        e_phys.flags |= .ON_GROUND;
+                        e_phys.physics_flags |= .ON_GROUND;
                     }
 
                     // multiply by 0.5 because this vector would be added to the velocity in order to perfectly bounce. but, half of this is already dealt with in the part where we kill the velocity's component along the collision normal
@@ -529,7 +568,7 @@ solve_potential_contacts :: () {
 
             if solve_iteration == COLLISION_SOLVE_ITERATION_COUNT - 1 {
                 // friction
-                if (e_phys.flags & .ON_GROUND) != 0 {
+                if (e_phys.physics_flags & .ON_GROUND) != 0 {
                     linear_speed_xy_sq := length_squared(e_phys.linear_velocity.xy);
                     if linear_speed_xy_sq > 0 {
                         linear_speed_xy := sqrt(linear_speed_xy_sq);
@@ -550,12 +589,12 @@ solve_potential_contacts :: () {
                     }
                 }
                 
-                if e_phys.linear_input != .{} {
+                if e_phys.linear_input.xy != .{} {
                     // linear move
                     prev_speed_sq := length_squared(e_phys.linear_velocity.xy);
                     linear_accel := e_props.linear_acceleration;
 
-                    if prev_speed_sq > 0.0001 {
+                    if prev_speed_sq > SMALL_NUMBER {
                         prev_speed := sqrt(prev_speed_sq);
                         prev_velocity_dir := e_phys.linear_velocity.xy / prev_speed;
                         cos_t := dot(e_phys.linear_input.xy, prev_velocity_dir);
@@ -575,13 +614,23 @@ solve_potential_contacts :: () {
                         e_phys.linear_velocity.xy *= e_props.linear_speed_max / new_speed;
                     }
 
+                    // commented out because it doesn't gel with first person
                     // rotate
-                    rot_speed := 6.5 * PI;
-                    axis := normalize(WORLD_UP + WORLD_RIGHT);
-                    target := make_quat(e_phys.linear_input, WORLD_UP);
-                    interp_rotate(*e_phys.orientation, target, rot_speed, FIXED_TIME_STEP);
+                    // rot_speed := 6.5 * PI;
+                    // axis := normalize(WORLD_UP + WORLD_RIGHT);
+                    // target := make_quat(e_phys.linear_input, WORLD_UP);
+                    // interp_rotate(*e_phys.orientation, target, rot_speed, FIXED_TIME_STEP);
 
                     e_phys.linear_input = .{};
+                }
+
+                if (e_phys.physics_flags & .JUMP_QUEUED) != 0 {
+                    time_since_queued := seconds_since_init().(float) - e_phys.jump_queued_at_time;
+                    if time_since_queued < delta_time {
+                        e_phys.linear_velocity.z += e_props.jump_delta_velocity;
+                    }
+                    e_phys.physics_flags &= ~.JUMP_QUEUED;
+                    e_phys.jump_queued_at_time = -999.0;
                 }
             }
             #if RUN_PHYSICS_DEBUGGER {
@@ -745,7 +794,7 @@ solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward
         _dist_sq = dist_sq;
     }
 
-    result.is_contact = result.contact_depth > 0;
+    result.is_contact = result.contact_depth > 0 && result.contact_norm_time < 1;
     return result.is_contact;
 }
 
@@ -817,7 +866,7 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
         _a_radius_portion = a_radius_portion;
     }
 
-    return true;
+    return result.contact_norm_time < 1;
 }
 
 /*

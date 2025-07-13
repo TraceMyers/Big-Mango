@@ -2,7 +2,7 @@
 // config
 
 ENABLE_VALIDATION_LAYERS :: true;
-UNLIT :: true;
+UNLIT :: false;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -52,6 +52,7 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
         if init_success then create_descriptors();
         if init_success then create_pipelines();
         if init_success then create_buffers();
+        if init_success then create_primitives();
         return init_success;
     } else {
         // ---------------------------------------------------------------------------------------------------- shutdown
@@ -150,7 +151,12 @@ render_frame :: () {
     draw_extent.height = draw_image.extent.height;
 
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
-    vp_mat := view_projection_matrix(*camera, viewport);
+    vp_mat: Matrix4 = ---;
+    if control_mode == .FIRST_PERSON {
+        vp_mat = view_projection_matrix(*first_person_camera, viewport);
+    } else {
+        vp_mat = view_projection_matrix(*camera, viewport);
+    }
 
     prepare_lights();
 
@@ -172,84 +178,19 @@ render_frame :: () {
     begin_rendering(cmd);
 
     draw_lines(cmd, *vp_mat);
+    draw_spheres(cmd, *vp_mat);
 
-    // for 0..5 {
-    //     orientation: Quaternion;
-    //     offset := ifx it & 1 == 0 then 0.0 else 10.0;
-    //     model := make_translation_matrix4(.{offset,10.0*it,ground.position.z-0.5});
-    //     rot := Matrix4_Identity;
-    //     model *= rot;
-    //     scale := make_scale_matrix4(.{10,10,1});
-    //     model *= scale;
-    //     cube_mesh.albedo.tint = test_color_1;
-    //     draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
-    // }
-    // for 0..5 {
-    //     offset := ifx it & 1 != 0 then 0.0 else 10.0;
-    //     orientation: Quaternion;
-    //     model := make_translation_matrix4(.{offset,10.0*it,ground.position.z-0.5});
-    //     rot := Matrix4_Identity;
-    //     model *= rot;
-    //     scale := make_scale_matrix4(.{10,10,1});
-    //     model *= scale;
-    //     cube_mesh.albedo.tint = test_color_2;
-    //     draw_mesh(cmd, cube_mesh, *model, *orientation, *vp_mat, 20);
-    // }
-
-    // draw ground plane
-    for emesh : ground.meshes {
-        mesh := emesh.data;
-        model := make_translation_matrix4(ground.position);
-        rot := rotation_matrix(Matrix4, ground.orientation);
-        model *= rot;
-        scale: Matrix4 = ---;
-        if emesh.type == .PLANE_COLLIDER {
-            plane := *ground.physics_properties.body_collider.plane;
-            scale = make_scale_matrix4(.{plane.width, 1.0, plane.half_height*2.0});
-        } else {
-            scale = make_scale_matrix4(.{1, 1, 1});
-        }
-        model *= scale;
-        draw_mesh(cmd, mesh, *model, *ground.orientation, *vp_mat, 1);
+    for *emesh : ground.meshes {
+        draw_mesh(cmd, *ground, emesh, *vp_mat);
     }
-
-    for emesh : player_character.meshes {
-        // if emesh.type != .COLLIDER then continue;
-        // if it_index == 1 then continue;
-        mesh := emesh.data;
-        // mesh.albedo.tint.w = 1.0;
-        model: Matrix4 = ---;
-        model = make_translation_matrix4(player_character.position);
-        rot := rotation_matrix(Matrix4, player_character.orientation);
-        model *= rot;
-        scale: Matrix4 = ---;
-        if emesh.type == .BOX_COLLIDER {
-            box := *player_character.physics_properties.body_collider.box;
-            scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
-        } else {
-            scale = make_scale_matrix4(.{1, 1, 1});
+    if control_mode != .FIRST_PERSON {
+        for *emesh : player_character.meshes {
+            draw_mesh(cmd, *player_character, emesh, *vp_mat);
         }
-        model *= scale;
-        draw_mesh(cmd, mesh, *model, *player_character.orientation, *vp_mat, 1);
     }
-    for npc : npcs {
-        for emesh : npc.meshes {
-            // if emesh.type != .COLLIDER then continue;
-            mesh := emesh.data;
-            // mesh.albedo.tint.w = 1.0;
-            model: Matrix4 = ---;
-            model = make_translation_matrix4(npc.position);
-            rot := rotation_matrix(Matrix4, npc.orientation);
-            model *= rot;
-            scale: Matrix4 = ---;
-            if emesh.type == .BOX_COLLIDER {
-                box := *npc.physics_properties.body_collider.box;
-                scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
-            } else {
-                scale = make_scale_matrix4(.{1, 1, 1});
-            }
-            model *= scale;
-            draw_mesh(cmd, mesh, *model, *npc.orientation, *vp_mat, 1);
+    for *npc : npcs {
+        for *emesh : npc.meshes {
+            draw_mesh(cmd, npc, emesh, *vp_mat);
         }
     }
 
@@ -993,6 +934,26 @@ create_buffers :: () {
     }
 }
 
+create_primitives :: () {
+    {
+        plane_mesh = create_mesh("_plane", plane_vertices, plane_indices);
+        plane_mesh.primitive_type = .PLANE;
+    }
+    {
+        cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
+        cube_mesh.primitive_type = .CUBE;
+    }
+    {
+        SPHERE_RADIUS :: 1.0;
+        sphere_mesh_low_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.8);
+        sphere_mesh_low_poly.primitive_type = .SPHERE;
+        sphere_mesh_mid_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.2);
+        sphere_mesh_mid_poly.primitive_type = .SPHERE;
+        sphere_mesh_high_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.05);
+        sphere_mesh_high_poly.primitive_type = .SPHERE;
+    }
+}
+
 create_rect_pipeline :: () {
     push_constant_description := VkPushConstantRange.{
         stageFlags = .COMPUTE_BIT,
@@ -1722,7 +1683,7 @@ get_or_create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) ->
     return create_mesh(name, vertices, indices);
 }
 
-create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh {
+create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Mesh_Primitive_Type = 0) -> *Mesh {
     // just a convention to make sure the preloads are consistent and intentional. all preload names start with an underscore.
     assert(starts_with(name, "_"));
 
@@ -1745,7 +1706,8 @@ create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh 
     return *meshes[meshes.count-1].mesh;
 }
 
-get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
+// norm translation offsets: x,y,z in -inf, inf where 0,0,0 is no vertex offset, and 0,0,0.5 is a half-mesh-height vertex offset in z
+get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, norm_translation_offsets := Vector3.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
     hash := native_XXH64(filename.data, xx filename.count, 0);
     for meshes {
         if it.hash == hash {
@@ -1756,7 +1718,7 @@ get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quater
 
     mesh: Mesh;
     file_path := tprint("../content/%", filename);
-    success := load_mesh_from_file(*mesh, file_path, flip_winding, reorient);
+    success := load_mesh_from_file(*mesh, file_path, flip_winding, reorient, norm_translation_offsets);
     if !success {
         return null;
     }
@@ -1769,7 +1731,7 @@ get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quater
     return *meshes[meshes.count-1].mesh;
 }
 
-load_mesh_from_file :: (out_mesh: *Mesh, file_path: string, flip_winding: bool, reorient := Quaternion.{}) -> bool {
+load_mesh_from_file :: (out_mesh: *Mesh, file_path: string, flip_winding: bool, reorient := Quaternion.{}, norm_translation_offsets := Vector3.{}) -> bool {
     auto_release_temp();
     out_mesh.* = .{};
 
@@ -1777,7 +1739,7 @@ load_mesh_from_file :: (out_mesh: *Mesh, file_path: string, flip_winding: bool, 
     indices: Index_Buffer;
 
     if ends_with(file_path, ".obj") {
-        vertices, indices = load_obj_file(file_path, flip_winding, reorient, temp);
+        vertices, indices = load_obj_file(file_path, flip_winding, reorient, norm_translation_offsets, temp);
     } else {
         return false;
     }
@@ -2447,28 +2409,29 @@ immediate_texture: Texture;
 
 // #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
-draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
-    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+// draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
+//     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
-    vkCmdBindPipeline(cmd, .COMPUTE, sphere_pipeline);
-    vkCmdBindDescriptorSets(cmd, .COMPUTE, sphere_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
-    Sphere_Constants :: struct {
-        pos_x: float;
-        pos_y: float;
-        pos_z: float;
-        radius: float;
-        norm_t: float;
-        norm_rand: float;
-    };
-    rnd := clamp(random_get(), 0, U64_MAX-256).(float) / U64_MAX.(float);
-    sphere := Sphere_Constants.{300, 300, 0, 200, sin(seconds_since_init().(float)), rnd};
-    vkCmdPushConstants(cmd, sphere_pipeline_layout, .COMPUTE_BIT, 0, size_of(float) * 6, *sphere);
-    diameter := 2.0 * sphere.radius;
-    dispatch_extent := ceil(diameter / 32.0);
-    vkCmdDispatch(cmd, xx dispatch_extent, xx dispatch_extent, 1);
-}
+//     vkCmdBindPipeline(cmd, .COMPUTE, sphere_pipeline);
+//     vkCmdBindDescriptorSets(cmd, .COMPUTE, sphere_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
+//     Sphere_Constants :: struct {
+//         pos_x: float;
+//         pos_y: float;
+//         pos_z: float;
+//         radius: float;
+//         norm_t: float;
+//         norm_rand: float;
+//     };
+//     rnd := clamp(random_get(), 0, U64_MAX-256).(float) / U64_MAX.(float);
+//     sphere := Sphere_Constants.{300, 300, 0, 200, sin(seconds_since_init().(float)), rnd};
+//     vkCmdPushConstants(cmd, sphere_pipeline_layout, .COMPUTE_BIT, 0, size_of(float) * 6, *sphere);
+//     diameter := 2.0 * sphere.radius;
+//     dispatch_extent := ceil(diameter / 32.0);
+//     vkCmdDispatch(cmd, xx dispatch_extent, xx dispatch_extent, 1);
+// }
 
 draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, mvp_matrix: *Matrix4, vp_matrix: *Matrix4, capsule_bottom_center: Vector3) {
+    // defer array_reset_keeping_memory(*capsules_to_draw);
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
     vkCmdBindPipeline(cmd, .COMPUTE, capsule_pipeline);
@@ -2479,56 +2442,55 @@ draw_capsules :: (cmd: VkCommandBuffer, target: VkImage, mvp_matrix: *Matrix4, v
     // preparing data for compute shaders feels messy as hell
     // cameras are simple and cheap to repeatedly store, so they can be saved with the draw requests that need them to reference at draw time.
 
-    for capsules_to_draw {
-        cam_to_pos := normalize(capsule_bottom_center - camera.position);
-        relevant_right := right_direction(*camera);
-        radius_vec_0 := Vector4.{xyz=.{}, w=1}; 
-        radius_vec_1 := Vector4.{xyz=relevant_right * it.radius, w=1};
+    // for capsules_to_draw {
+    //     cam_to_pos := normalize(capsule_bottom_center - camera.position);
+    //     relevant_right := right_direction(*camera);
+    //     radius_vec_0 := Vector4.{xyz=.{}, w=1}; 
+    //     radius_vec_1 := Vector4.{xyz=relevant_right * it.radius, w=1};
 
-        point_a := Vector4.{xyz=it.segment_point_a, w=1};
-        point_b := Vector4.{xyz=it.segment_point_b, w=1};
-        point_a_clip := mvp_matrix.* * point_a;
-        point_b_clip := mvp_matrix.* * point_b;
-        point_a_norm := point_a_clip / point_a_clip.w;
-        point_b_norm := point_b_clip / point_b_clip.w;
+    //     point_a := Vector4.{xyz=it.segment_point_a, w=1};
+    //     point_b := Vector4.{xyz=it.segment_point_b, w=1};
+    //     point_a_clip := mvp_matrix.* * point_a;
+    //     point_b_clip := mvp_matrix.* * point_b;
+    //     point_a_norm := point_a_clip / point_a_clip.w;
+    //     point_b_norm := point_b_clip / point_b_clip.w;
         
-        radius_norm: float;
-        if camera.projection == .ORTHOGRAPHIC {
-            radius_norm = it.radius * camera.orthographic.scale / draw_extent.width.(float);
-        } else {
-            radius_clip_vec_0 := mvp_matrix.* * radius_vec_0;
-            radius_norm_vec_0 := radius_clip_vec_0 / radius_clip_vec_0.w;
-            radius_clip_vec_1 := mvp_matrix.* * radius_vec_1;
-            radius_norm_vec_1 := radius_clip_vec_1 / radius_clip_vec_1.w;
-            radius_norm_vec := radius_norm_vec_0 - radius_norm_vec_1;
-            radius_norm = length(radius_norm_vec * 0.5);
-        }
+    //     radius_norm: float;
+    //     if camera.projection == .ORTHOGRAPHIC {
+    //         radius_norm = it.radius * camera.orthographic.scale / draw_extent.width.(float);
+    //     } else {
+    //         radius_clip_vec_0 := mvp_matrix.* * radius_vec_0;
+    //         radius_norm_vec_0 := radius_clip_vec_0 / radius_clip_vec_0.w;
+    //         radius_clip_vec_1 := mvp_matrix.* * radius_vec_1;
+    //         radius_norm_vec_1 := radius_clip_vec_1 / radius_clip_vec_1.w;
+    //         radius_norm_vec := radius_norm_vec_0 - radius_norm_vec_1;
+    //         radius_norm = length(radius_norm_vec * 0.5);
+    //     }
 
-        push_constants := Capsule_Draw_Push_Constants.{
-            segment_point_a_x = respace(point_a_norm.x, .{-1, 1}, .{0, 1}, false),
-            segment_point_a_y = respace(point_a_norm.y, .{-1, 1}, .{0, 1}, false),
-            segment_point_a_z = respace(point_a_norm.z, .{-1, 1}, .{0, 1}, false),
-            segment_point_b_x = respace(point_b_norm.x, .{-1, 1}, .{0, 1}, false),
-            segment_point_b_y = respace(point_b_norm.y, .{-1, 1}, .{0, 1}, false),
-            segment_point_b_z = respace(point_b_norm.z, .{-1, 1}, .{0, 1}, false),
-            norm_radius = radius_norm,
-            color_r = alter_cast(it.color.r, float, true),
-            color_g = alter_cast(it.color.g, float, true),
-            color_b = alter_cast(it.color.b, float, true),
-            color_a = alter_cast(it.color.a, float, true),
-        };
-        screen_ul := Vector2.{min(push_constants.segment_point_a_x, push_constants.segment_point_b_x), min(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
-        screen_lr := Vector2.{max(push_constants.segment_point_a_x, push_constants.segment_point_b_x), max(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
+    //     push_constants := Capsule_Draw_Push_Constants.{
+    //         segment_point_a_x = respace(point_a_norm.x, .{-1, 1}, .{0, 1}, false),
+    //         segment_point_a_y = respace(point_a_norm.y, .{-1, 1}, .{0, 1}, false),
+    //         segment_point_a_z = respace(point_a_norm.z, .{-1, 1}, .{0, 1}, false),
+    //         segment_point_b_x = respace(point_b_norm.x, .{-1, 1}, .{0, 1}, false),
+    //         segment_point_b_y = respace(point_b_norm.y, .{-1, 1}, .{0, 1}, false),
+    //         segment_point_b_z = respace(point_b_norm.z, .{-1, 1}, .{0, 1}, false),
+    //         norm_radius = radius_norm,
+    //         color_r = alter_cast(it.color.r, float, true),
+    //         color_g = alter_cast(it.color.g, float, true),
+    //         color_b = alter_cast(it.color.b, float, true),
+    //         color_a = alter_cast(it.color.a, float, true),
+    //     };
+    //     screen_ul := Vector2.{min(push_constants.segment_point_a_x, push_constants.segment_point_b_x), min(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
+    //     screen_lr := Vector2.{max(push_constants.segment_point_a_x, push_constants.segment_point_b_x), max(push_constants.segment_point_a_y, push_constants.segment_point_b_y)} * Vector2.{draw_extent.width.(float), draw_extent.height.(float)};
 
-        vkCmdPushConstants(cmd, capsule_pipeline_layout, .COMPUTE_BIT, 0, size_of(Capsule_Draw_Push_Constants), *push_constants);
+    //     vkCmdPushConstants(cmd, capsule_pipeline_layout, .COMPUTE_BIT, 0, size_of(Capsule_Draw_Push_Constants), *push_constants);
 
-        // dispatch_width := max(ceil((screen_lr.x - screen_ul.x + 100.0 * 2) / 32.0), 1.0);
-        // dispatch_height := max(ceil((screen_lr.y - screen_ul.y + 100.0 * 2) / 32.0), 1.0);
-        // vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
-        vkCmdDispatch(cmd, 70, 70, 1);
-    }
+    //     // dispatch_width := max(ceil((screen_lr.x - screen_ul.x + 100.0 * 2) / 32.0), 1.0);
+    //     // dispatch_height := max(ceil((screen_lr.y - screen_ul.y + 100.0 * 2) / 32.0), 1.0);
+    //     // vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
+    //     vkCmdDispatch(cmd, 70, 70, 1);
+    // }
 
-    array_reset_keeping_memory(*capsules_to_draw);
 }
 
 draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
@@ -2538,15 +2500,44 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4, instance_count: u32 = 1) {
+draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_projection: *Matrix4) {
+    mesh := emesh.data;
+    model := make_translation_matrix4(entity.position);
+    rot := rotation_matrix(Matrix4, entity.orientation);
+    model *= rot;
+
+    if mesh.primitive_type == 0 {
+        // todo: entity 3d scale
+        draw_mesh(cmd, mesh, *model, *entity.orientation, view_projection, emesh.albedo, 1);
+        return;
+    }
+
+    scale: Matrix4 = ---;
+    if mesh.primitive_type == {
+    case .CUBE;
+        box := *entity.physics_properties.body_collider.box;
+        scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
+    case .SPHERE;
+        sphere := *entity.physics_properties.body_collider.sphere;
+        scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
+    case .PLANE;
+        plane := *entity.physics_properties.body_collider.plane;
+        scale = make_scale_matrix4(.{plane.width, 1.0, plane.half_height*2.0});
+    }
+    // todo: add draw request to array and draw instanced
+    model *= scale;
+    draw_mesh(cmd, mesh, *model, *entity.orientation, view_projection, emesh.albedo, 1);
+}
+
+draw_mesh :: (cmd: VkCommandBuffer, mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4, albedo: Mesh_Albedo, instance_count: u32 = 1) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
     vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
     offset : u64 = 0;
     vkCmdBindDescriptorSets(cmd, .GRAPHICS, graphics_pipeline_layout, 0, 1, *mesh_descriptors, 0, null);
 
-    vkCmdBindVertexBuffers(cmd, 0, 1, *vbo.buffer, *offset);
-    vkCmdBindIndexBuffer(cmd, ibo.buffer, 0, xx ibo.index_type);
+    vkCmdBindVertexBuffers(cmd, 0, 1, *mesh.vbo.buffer, *offset);
+    vkCmdBindIndexBuffer(cmd, mesh.ibo.buffer, 0, xx mesh.ibo.index_type);
 
     constants: [24]float32;
     mvp := view_projection.* * model.*;
@@ -2555,7 +2546,7 @@ draw_mesh :: (cmd: VkCommandBuffer, using mesh: *Mesh, model: *Matrix4, orientat
     memcpy(constants.data + 20, orientation, size_of(Quaternion));
 
     vkCmdPushConstants(cmd, graphics_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 24, constants.data);
-    vkCmdDrawIndexed(cmd, ibo.count, instance_count, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, mesh.ibo.count, instance_count, 0, 0, 0);
 }
 
 draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
@@ -2563,7 +2554,7 @@ draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
     if lines.count == 0 then return;
 
     vkCmdBindPipeline(cmd, .GRAPHICS, line_pipeline);
-    vkCmdSetLineWidth(cmd, 2.0);
+    vkCmdSetLineWidth(cmd, 4.0);
 
     offset : u64 = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, *line_vbo.buffer, *offset);
@@ -2573,6 +2564,53 @@ draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
 
     vkCmdPushConstants(cmd, line_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, constants.data);
     vkCmdDraw(cmd, xx (lines.count * 2), 1, 0, 0);
+}
+
+draw_spheres :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
+    defer array_reset_keeping_memory(*sphere_draws);
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
+    vkCmdBindDescriptorSets(cmd, .GRAPHICS, graphics_pipeline_layout, 0, 1, *mesh_descriptors, 0, null);
+
+    quick_sort(sphere_draws, (a,b) => a.poly_count - b.poly_count);
+
+    group_poly_count: Sphere_Poly_Count = 0;
+    group_index_count: s64;
+    offset: u64 = 0;
+    mesh_ptr: *Mesh;
+    for sphere_draws {
+        if it.poly_count != group_poly_count {
+            group_poly_count = it.poly_count;
+            if group_poly_count == {
+            case .LOW;
+                mesh_ptr = sphere_mesh_low_poly;
+                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_low_poly.vbo.buffer, *offset);
+                vkCmdBindIndexBuffer(cmd, sphere_mesh_low_poly.ibo.buffer, 0, xx sphere_mesh_low_poly.ibo.index_type);
+                group_index_count = sphere_mesh_low_poly.ibo.count;
+            case .MEDIUM;
+                mesh_ptr = sphere_mesh_mid_poly;
+                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_mid_poly.vbo.buffer, *offset);
+                vkCmdBindIndexBuffer(cmd, sphere_mesh_mid_poly.ibo.buffer, 0, xx sphere_mesh_mid_poly.ibo.index_type);
+                group_index_count = sphere_mesh_mid_poly.ibo.count;
+            case .HIGH;
+                mesh_ptr = sphere_mesh_high_poly;
+                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_high_poly.vbo.buffer, *offset);
+                vkCmdBindIndexBuffer(cmd, sphere_mesh_high_poly.ibo.buffer, 0, xx sphere_mesh_high_poly.ibo.index_type);
+                group_index_count = sphere_mesh_high_poly.ibo.count;
+            case;
+                rm_error("invalid group poly count");
+                return;
+            }
+        }
+
+        model := make_translation_matrix4(it.position);
+        scale := make_scale_matrix4(.{it.radius, it.radius, it.radius});
+        // todo: add draw request to array and draw instanced
+        model *= scale;
+        quat_identity := QUATERNION_IDENTITY;
+        draw_mesh(cmd, mesh_ptr, *model, *quat_identity, view_projection, Mesh_Albedo.{tint=it.color}, 1);
+    }
 }
 
 prepare_lights :: () {
@@ -2966,14 +3004,19 @@ Mesh_Albedo_Type :: enum u8 {
 
 Mesh_Albedo :: struct {
     type: Mesh_Albedo_Type;
-    tint := Vector4.{1,1,1,1};
-    texture: *void;
+    tint := Color4f.{1,1,1,1};
 }
+
+Mesh_Primitive_Type :: enum u8 {
+    SPHERE :: 1;
+    CUBE;
+    PLANE;
+};
 
 Mesh :: struct {
     vbo: Mesh_Data_Buffer;
     ibo: Mesh_Data_Buffer;
-    albedo: Mesh_Albedo;
+    primitive_type: Mesh_Primitive_Type = 0;
 }
 
 Hashed_Mesh :: struct {
@@ -3020,7 +3063,22 @@ Line_Data :: struct {
     b: Line_Vertex;
 }
 
+Sphere_Poly_Count :: enum u8 {
+    LOW::1;
+    MEDIUM;
+    HIGH;
+}
+
+
+Sphere_Draw_Data :: struct {
+    position: Vector3;
+    radius: float;
+    color: Color4f;
+    poly_count: Sphere_Poly_Count;
+}
+
 lines: [..]Line_Data;
+sphere_draws: [..]Sphere_Draw_Data;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods
@@ -3352,6 +3410,9 @@ meshes: [..]Hashed_Mesh;
 
 cube_mesh: *Mesh;
 plane_mesh: *Mesh;
+sphere_mesh_low_poly: *Mesh;
+sphere_mesh_mid_poly: *Mesh;
+sphere_mesh_high_poly: *Mesh;
 
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
