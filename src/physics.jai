@@ -67,8 +67,8 @@ get_aabb_extent :: (collider: Entity_Collider, orientation: Quaternion) -> Vecto
         using collider.plane;
         axis_up     := up_direction(*orientation);
         axis_right  := right_direction(*orientation);
-        abs_point_1 := abs(axis_up * half_height + axis_right * width);
-        abs_point_2 := abs(axis_up * half_height - axis_right * width);
+        abs_point_1 := abs(axis_up * half_height + axis_right * width * 0.5);
+        abs_point_2 := abs(axis_up * half_height - axis_right * width * 0.5);
         return max(abs_point_1, abs_point_2);
     case .BOX;
         using collider.box;
@@ -80,6 +80,49 @@ get_aabb_extent :: (collider: Entity_Collider, orientation: Quaternion) -> Vecto
         return max(height_vec, max(length_vec, width_vec));
     }
 }
+
+AABB_Point :: enum u8 {
+    LOW_LOWER_LEFT;
+    LOW_LOWER_RIGHT;
+    LOW_UPPER_LEFT;
+    LOW_UPPER_RIGHT;
+    HIGH_LOWER_LEFT;
+    HIGH_LOWER_RIGHT;
+    HIGH_UPPER_LEFT;
+    HIGH_UPPER_RIGHT;
+}
+
+AABB_Edge :: struct {
+    a: AABB_Point;
+    b: AABB_Point;
+}
+
+AABB_Edges :: AABB_Edge.[
+    .{.LOW_LOWER_LEFT, .LOW_LOWER_RIGHT},
+    .{.LOW_LOWER_LEFT, .LOW_UPPER_LEFT},
+    .{.LOW_UPPER_RIGHT, .LOW_LOWER_RIGHT},
+    .{.LOW_UPPER_RIGHT, .LOW_UPPER_LEFT},
+    .{.LOW_LOWER_LEFT, .HIGH_LOWER_LEFT},
+    .{.LOW_LOWER_RIGHT, .HIGH_LOWER_RIGHT},
+    .{.LOW_UPPER_LEFT, .HIGH_UPPER_LEFT},
+    .{.LOW_UPPER_RIGHT, .HIGH_UPPER_RIGHT},
+    .{.HIGH_LOWER_LEFT, .HIGH_LOWER_RIGHT},
+    .{.HIGH_LOWER_LEFT, .HIGH_UPPER_LEFT},
+    .{.HIGH_UPPER_RIGHT, .HIGH_LOWER_RIGHT},
+    .{.HIGH_UPPER_RIGHT, .HIGH_UPPER_LEFT}
+];
+
+get_aabb_points :: (aabb: AABB, out_points: *[8]Vector3) {
+    out_points.*[AABB_Point.LOW_LOWER_LEFT]     = aabb.center - aabb.extent;
+    out_points.*[AABB_Point.LOW_LOWER_RIGHT]    = aabb.center + Vector3.{ aabb.extent.x, -aabb.extent.y, -aabb.extent.z}; 
+    out_points.*[AABB_Point.LOW_UPPER_LEFT]     = aabb.center + Vector3.{-aabb.extent.x,  aabb.extent.y, -aabb.extent.z}; 
+    out_points.*[AABB_Point.LOW_UPPER_RIGHT]    = aabb.center + Vector3.{ aabb.extent.x,  aabb.extent.y, -aabb.extent.z}; 
+
+    out_points.*[AABB_Point.HIGH_LOWER_LEFT]    = aabb.center + Vector3.{-aabb.extent.x, -aabb.extent.y,  aabb.extent.z};
+    out_points.*[AABB_Point.HIGH_LOWER_RIGHT]   = aabb.center + Vector3.{ aabb.extent.x, -aabb.extent.y,  aabb.extent.z}; 
+    out_points.*[AABB_Point.HIGH_UPPER_LEFT]    = aabb.center + Vector3.{-aabb.extent.x,  aabb.extent.y,  aabb.extent.z};
+    out_points.*[AABB_Point.HIGH_UPPER_RIGHT]   = aabb.center + aabb.extent;
+} 
 
 get_aabb :: inline (collider: Entity_Collider, position: Vector3, orientation: Quaternion, out_aabb: *AABB)  {
     out_aabb.center = position;
@@ -169,19 +212,24 @@ INV_COLLISION_SOLVE_ITERATION_COUNT :: 1.0 / COLLISION_SOLVE_ITERATION_COUNT.(fl
 FIXED_TIME_STEP :: 1.0 / 120.0;
 
 #if RUN_PHYSICS_DEBUGGER {
-    entity_index := 1;
-    inner_index_1 := 0;
-    remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
-    prev_contacted_entity_index := -1;
-    prev_contacted_entity_id := -1;
-    e_props: *Physics_Properties;
-    e_phys: *Entity_Physics_Core;
-    closest_collision_result: Collision_Result;
-    closest_phys_b: *Entity_Physics_Core;
-    closest_props_b: *Physics_Properties;
-    closest_entity_index: s64;
-    closest_entity_id: s64;
-    fucking_fuck: [..]s16;
+    physics_debug_global_data := struct{
+        collision_entity_index := 1;
+        collision_entity_id := 0;
+        inner_index_1 := 0;
+        remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
+        prev_contacted_entity_index := -1;
+        prev_contacted_entity_id := -1;
+        e_props: *Physics_Properties;
+        e_phys: *Entity_Physics_Core;
+        closest_collision_result: Collision_Result;
+        closest_phys_b: *Entity_Physics_Core;
+        closest_props_b: *Physics_Properties;
+        closest_entity_index: s64;
+        closest_entity_id: s64;
+        fucking_fuck: [..]s16;
+    }.{};
+} else {
+    physics_debug_global_data: struct{};
 }
 
 #if RUN_PHYSICS_DEBUGGER {
@@ -201,8 +249,9 @@ queue_phys_debugger_entity_turnover :: inline () {
 }
 
 phys_debugger_entity_turnover :: () #expand {
+    using physics_debug_global_data;
     inner_index_1 = 0;
-    entity_index += 1;
+    collision_entity_index += 1;
 
     remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
     array_reset_keeping_memory(*fucking_fuck);
@@ -219,32 +268,34 @@ phys_debugger_entity_turnover :: () #expand {
 
     collision_intermediate = .{};
 
-    if entity_index == `last_entity + 1 {
-        entity_index = 1;
+    if collision_entity_index == `last_entity + 1 {
+        collision_entity_index = 1;
     }
 }
 
 phys_debugger_outer_loop_continue :: () #expand {
+    using physics_debug_global_data;
     if physics_debugger_pause {
-        entity_index = increment_wrap(entity_index, 1, `last_entity);
+        collision_entity_index = increment_wrap(collision_entity_index, 1, `last_entity);
         return;
     } {
-        entity_index += 1;
+        collision_entity_index += 1;
         continue;
     }
 }
 
-
 prep_ccd_substeps :: () #expand {
+    using physics_debug_global_data;
     `remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
     `prev_contacted_entity_index = -1;
     array_reset_keeping_memory(*`fucking_fuck);
 }
 
-solve_potential_contacts :: () {
+solve_physics :: () {
+    using physics_debug_global_data;
     auto_release_temp();
 
-    last_entity := find_last_set_bit(*entities.in_use);
+    last_entity := entities.count-1;
 
     #if RUN_PHYSICS_DEBUGGER {
         if physics_debugger_pause {
@@ -257,13 +308,13 @@ solve_potential_contacts :: () {
                 do_phys_debugger_turnover = false;
             }
         } else {
-            entity_index = 1;
+            collision_entity_index = 1;
             inner_index_1 = 0;
             remaining_time = FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
             prev_contacted_entity_index = -1;
         }
     } else {
-        entity_index := 1;
+        collision_entity_index := 1;
         inner_index_1 := 0;
         remaining_time := FIXED_TIME_STEP * INV_COLLISION_SOLVE_ITERATION_COUNT;
         prev_contacted_entity_index := -1;
@@ -280,14 +331,9 @@ solve_potential_contacts :: () {
     for 0..last_entity {
         e_phys := *entity_physics_core[it];
         // todo: persistent flag set
-        e_phys.physics_flags &= .JUMP_QUEUED;
+        e_phys.physics_flags &= ~ENTITY_PHYSICS_PER_FRAME_FLAGS;
         precalculated_fore_directions[it] = fore_direction(*e_phys.orientation);
         precalculated_up_directions[it] = up_direction(*e_phys.orientation);
-
-        entity_physics_constraints[it].allocator = temp;
-        entity_physics_constraints[it].data = null;
-        entity_physics_constraints[it].count = 0;
-        array_reserve(*entity_physics_constraints[it], 4);
     }
 
     // continuous collision detection - based physics solving
@@ -297,21 +343,21 @@ solve_potential_contacts :: () {
 
     // for solve_iteration : 0..COLLISION_SOLVE_ITERATION_COUNT-1 {
     {
-        while entity_index <= last_entity {
-            #if !RUN_PHYSICS_DEBUGGER then defer entity_index += 1;
+        while collision_entity_index <= last_entity {
+            #if !RUN_PHYSICS_DEBUGGER then defer collision_entity_index += 1;
 
-            if entity_index == INVALID_ENTITY_INDEX {
+            if collision_entity_index == INVALID_ENTITY_INDEX {
                 #if RUN_PHYSICS_DEBUGGER {
                     phys_debugger_outer_loop_continue();
                 } else continue;
             }
-            if entities[entity_index].type == .CAMERA {
+            if entities[collision_entity_index].type == .CAMERA {
                 #if RUN_PHYSICS_DEBUGGER {
                     phys_debugger_outer_loop_continue();
                 } else continue;
             }
 
-            e_props = get_entity_physics_properties(xx entity_index);
+            e_props = get_entity_physics_properties_at(collision_entity_index);
             if e_props.mass <= IMMOVABLE_ENTITY_MASS {
                 #if RUN_PHYSICS_DEBUGGER {
                     phys_debugger_outer_loop_continue();
@@ -325,7 +371,7 @@ solve_potential_contacts :: () {
 
             // apply gravity
 
-            e_phys = *entity_physics_core[entity_index];
+            e_phys = *entity_physics_core[collision_entity_index];
             if solve_iteration == 0 {
                 e_phys.linear_velocity.z -= e_props.gravity_accel * FIXED_TIME_STEP;
             }
@@ -344,8 +390,8 @@ solve_potential_contacts :: () {
                 sweep_beg := e_phys.position;
                 sweep_end := sweep_beg + e_phys.linear_velocity * remaining_time;
 
-                fore_a := precalculated_fore_directions[entity_index];
-                up_a := precalculated_up_directions[entity_index];
+                fore_a := precalculated_fore_directions[collision_entity_index];
+                up_a := precalculated_up_directions[collision_entity_index];
 
                 closest_collision_result = .{contact_norm_time=1.0};
                 closest_phys_b = null;
@@ -361,13 +407,11 @@ solve_potential_contacts :: () {
                 while inner_index_2 <= last_entity {
                     defer inner_index_2 += 1;
 
-                    if inner_index_2 == entity_index then continue;
-                    if entities[inner_index_2].id == camera.id then continue;
+                    if inner_index_2 == collision_entity_index then continue;
                     if inner_index_2 == prev_contacted_entity_index then continue;
-                    if array_find(fucking_fuck, inner_index_2.(s16)) then continue;
-
-                    props_b := get_entity_physics_properties(xx inner_index_2);
+                    props_b := get_entity_physics_properties_at(inner_index_2);
                     if (props_b.body_collision_channels & e_props.body_collision_channels) == 0 then continue;
+                    if array_find(fucking_fuck, inner_index_2.(s16)) then continue;
 
                     phys_b := *entity_physics_core[inner_index_2];
 
@@ -417,7 +461,7 @@ solve_potential_contacts :: () {
 
                 #if RUN_PHYSICS_DEBUGGER {
                     if !physics_debugger_ignore_immovable || closest_props_b.mass > IMMOVABLE_ENTITY_MASS {
-                        physics_debugger_pause = array_find(physics_debugger_entity_ids, xx closest_entity_id) || array_find(physics_debugger_entity_ids, entities[entity_index].id);
+                        physics_debugger_pause = array_find(physics_debugger_entity_ids, xx closest_entity_id) || array_find(physics_debugger_entity_ids, entities[collision_entity_index].id);
                         if physics_debugger_pause {
                             collision_intermediate = closest_collision_intermediate;
                         }
@@ -589,8 +633,8 @@ solve_potential_contacts :: () {
                     }
                 }
                 
+                // linear move
                 if e_phys.linear_input.xy != .{} {
-                    // linear move
                     prev_speed_sq := length_squared(e_phys.linear_velocity.xy);
                     linear_accel := e_props.linear_acceleration;
 
@@ -624,10 +668,19 @@ solve_potential_contacts :: () {
                     e_phys.linear_input = .{};
                 }
 
+                // jump
                 if (e_phys.physics_flags & .JUMP_QUEUED) != 0 {
-                    time_since_queued := seconds_since_init().(float) - e_phys.jump_queued_at_time;
-                    if time_since_queued < delta_time {
-                        e_phys.linear_velocity.z += e_props.jump_delta_velocity;
+                    if (e_phys.physics_flags & .ON_GROUND) != 0 {
+                        do_jump := true;
+                        #if !RUN_PHYSICS_DEBUGGER {
+                            time_since_queued := seconds_since_init().(float) - e_phys.jump_queued_at_time;
+                            if time_since_queued > delta_time {
+                                do_jump = false;
+                            }
+                        }
+                        if do_jump {
+                            e_phys.linear_velocity.z += e_props.jump_delta_velocity;
+                        }
                     }
                     e_phys.physics_flags &= ~.JUMP_QUEUED;
                     e_phys.jump_queued_at_time = -999.0;
@@ -635,7 +688,7 @@ solve_potential_contacts :: () {
             }
             #if RUN_PHYSICS_DEBUGGER {
                 if physics_debugger_pause then return;
-                else entity_index += 1;
+                else collision_entity_index += 1;
             }
         }
     }
@@ -710,7 +763,7 @@ solve_collision_sphere_plane :: (pos_a_beg: Vector3, pos_a_end: Vector3, forward
     // get the plane-relative up and right components of the differences from b center to the capsule segment's projections onto the plane. clamp the projection of a's points onto b's rectangle.
 
     right_b := cross(forward_b, up_b);
-    assert(is_normalized(right_b, SMALL_NUMBER));
+    assert(is_normalized(right_b, SMALLISH_NUMBER));
 
     b_to_a_proj         := a_proj       - pos_b;
     b_to_a_proj_next    := a_proj_next  - pos_b;
@@ -868,265 +921,3 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
 
     return result.contact_norm_time < 1;
 }
-
-/*
-solve_potential_collision :: inline (entity_a: *Entity, entity_b: *Entity) -> bool {
-    unused_dir: Vector3 = ---;
-    unused_gap: float = ---;
-    return solve_potential_collision(entity_a, entity_b, *unused_dir, *unused_gap);
-}
-
-solve_potential_collision :: inline (entity_a: *Entity, entity_b: *Entity, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    return solve_potential_collision(*entity_a.position, *entity_a.linear_velocity, *precalculated_fore_directions[entity_a.index], *precalculated_up_directions[entity_a.index], entity_a.physics_properties, *entity_b.position, *entity_b.linear_velocity, *precalculated_fore_directions[entity_b.index], *precalculated_up_directions[entity_b.index], entity_b.physics_properties, out_collision_dir, out_gap);
-}
-
- solve_potential_collision :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    collider_a := *properties_a.body_collider;
-    collider_b := *properties_b.body_collider;
-    if #complete collider_a.type == {
-    case .SPHERE;
-        if #complete collider_b.type == {
-        case .SPHERE;
-            return solve_collision_sphere_sphere(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .CAPSULE;
-        case .PLANE;
-            return solve_collision_sphere_plane(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .BOX;
-        }
-    case .CAPSULE;
-        if #complete collider_b.type == {
-        case .SPHERE;
-        case .CAPSULE;
-            return solve_collision_capsule_capsule(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .PLANE;
-            return solve_collision_capsule_plane(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .BOX;
-        }
-    case .BOX;
-        if #complete collider_b.type == {
-        case .SPHERE;
-        case .CAPSULE;
-        case .PLANE;
-        case .BOX;
-            // return solve_collision_box_box(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        }
-    case .PLANE;
-        if #complete collider_b.type == {
-        case .SPHERE;
-            return solve_collision_plane_sphere(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .CAPSULE;
-            return solve_collision_plane_capsule(position_a, velocity_a, forward_a, up_a, properties_a, position_b, velocity_b, forward_b, up_b, properties_b, out_collision_dir, out_gap);
-        case .PLANE;
-        case .BOX;
-        }
-    }
-    return false;
-}
-
-solve_collision_sphere_sphere :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    sphere_a := *properties_a.body_collider.sphere;
-    sphere_b := *properties_b.body_collider.sphere;
-
-    a_pos_next := position_a.* + velocity_a.* * delta_time;
-    b_pos_next := position_b.* + velocity_b.* * delta_time;
-
-    a_closest_point, b_closest_point: Vector3 = ---;
-    dist_sq := distance_squared_between_line_segments(position_a, *a_pos_next, position_b, *b_pos_next, *a_closest_point, *b_closest_point);
-
-    buffer_distance := sphere_a.radius + sphere_b.radius;
-
-    if dist_sq < VERY_SMALL_NUMBER {
-        out_gap.* = -buffer_distance;
-        out_collision_dir.* = .{x=1}; // pick any direction...
-    } else {
-        dist := sqrt(dist_sq);
-        out_gap.* = dist - buffer_distance;
-        out_collision_dir.* = (a_closest_point - b_closest_point) * (1.0 / dist); 
-    }
-
-    return out_gap.* < 0;   
-}
-
-solve_collision_sphere_plane :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    sphere_a := *properties_a.body_collider.sphere;
-    plane_b := *properties_b.body_collider.plane;
-
-    toward_a := position_a.* - position_b.*;
-    cos_t := dot(toward_a, forward_b.*);
-    if cos_t < 0 {
-        // ignore collisions starting behind the plane
-        return false;
-    }
-
-    a_pos_next := position_a.* + velocity_a.* * delta_time;
-    b_pos_next := position_b.* + velocity_b.* * delta_time;
-
-    a_proj      := project_point_onto_plane(position_a.*, position_b.*, forward_b.*);
-    a_proj_next := project_point_onto_plane(a_pos_next, b_pos_next, forward_b.*);
-    
-    // get the plane-relative up and right components of the differences from b center to the capsule segment's projections onto the plane. clamp the projection of a's points onto b's rectangle.
-
-    right_b := cross(forward_b.*, up_b.*);
-    assert(is_normalized(right_b, SMALL_NUMBER));
-
-    b_to_a_proj         := a_proj       - position_b.*;
-    b_to_a_proj_next    := a_proj_next  - b_pos_next;
-
-    a_proj_up_component_clamped := min(dot(b_to_a_proj, up_b.*), plane_b.half_height*2.0);
-    a_proj_right_component_clamped := min(dot(b_to_a_proj, right_b), plane_b.width);
-
-    a_proj_next_up_component_clamped := min(dot(b_to_a_proj_next, up_b.*), plane_b.half_height*2.0);
-    a_proj_next_right_component_clamped := min(dot(b_to_a_proj_next, right_b), plane_b.width);
-
-    // this is both points of a's shadow on b's plane, but clamped to b's rectangle.
-
-    a_projected_and_clamped := position_b.* + up_b.* * a_proj_up_component_clamped + right_b * a_proj_right_component_clamped;
-    a_next_projected_and_clamped := b_pos_next + up_b.* * a_proj_next_up_component_clamped + right_b * a_proj_next_right_component_clamped;
-
-    a_closest_point, b_closest_point: Vector3 = ---;
-    dist_sq := distance_squared_between_line_segments(position_a, *a_pos_next, *a_projected_and_clamped, *a_next_projected_and_clamped, *a_closest_point, *b_closest_point);
-
-    if dist_sq < VERY_SMALL_NUMBER {
-        // since we ignore collisions starting behind the plane, an intersection with the plane must mean the sphere intends to move through the plane this think.
-        target_position := b_closest_point + forward_b.* * sphere_a.radius;
-        diff := a_pos_next - target_position;
-        out_gap.* = dot(diff, forward_b.*);
-        out_collision_dir.* = forward_b.*;
-    } else {
-        dist := sqrt(dist_sq);
-        out_gap.* = dist - (sphere_a.radius + dot(velocity_a.*, -forward_b.*));
-        out_collision_dir.* = (a_closest_point - b_closest_point) * (1.0 / dist); 
-    }
-
-    return out_gap.* < 0;
-}
-
-solve_collision_plane_sphere :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    is_overlap := solve_collision_sphere_plane(position_b, velocity_b, forward_b, up_b, properties_b, position_a, velocity_a, forward_a, up_a, properties_a, out_collision_dir, out_gap);
-    out_collision_dir.* *= -1.0;
-    return is_overlap;
-}
-
-solve_collision_capsule_capsule :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    capsule_a := *properties_a.body_collider.capsule;
-    capsule_b := *properties_b.body_collider.capsule;
-
-    a_pos_next := position_a.* + velocity_a.* * delta_time;
-    b_pos_next := position_b.* + velocity_b.* * delta_time;
-
-    a_bot := a_pos_next;
-    a_bot.z = a_bot.z + capsule_a.radius;
-    a_top := a_pos_next;
-    a_top.z = a_top.z + (capsule_a.half_height*2.0 - capsule_a.radius);
-
-    b_bot := b_pos_next;
-    b_bot.z = b_bot.z + capsule_b.radius;
-    b_top := b_pos_next;
-    b_top.z = b_top.z + (capsule_b.half_height*2.0 - capsule_b.radius);
-
-    a_closest_point, b_closest_point: Vector3 = ---;
-    dist_sq := distance_squared_between_line_segments(*a_bot, *a_top, *b_bot, *b_top, *a_closest_point, *b_closest_point);
-
-    if is_nan_is_inf(dist_sq) || dist_sq < VERY_SMALL_NUMBER {
-        return false;
-    }
-
-    dist := sqrt(dist_sq);
-    buffer_distance := capsule_a.radius + capsule_b.radius;
-    out_gap.* = dist - buffer_distance;
-    out_collision_dir.* = (a_closest_point - b_closest_point) * (1.0 / dist); 
-
-    return out_gap.* < 0;
-}
-
-// solve_collision_box_box :: #insert collision_solver_proc; {
-
-//     return false;
-// }
-
-// todo: this assumes b remains fixed
-// solve_collision_capsule_plane :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-//     capsule_a := *properties_a.body_collider.capsule;
-//     plane_b := *properties_b.body_collider.plane;
-
-//     ACCEPTABLE_ERROR :: 0.001;
-
-
-// }
-
-// todo: this assumes b remains fixed
-solve_collision_capsule_plane :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool {
-    capsule_a := *properties_a.body_collider.capsule;
-    plane_b := *properties_b.body_collider.plane;
-
-    a_bot := position_a.* + up_a.* * capsule_a.radius;
-    a_top := position_a.* + up_a.* * (capsule_a.half_height*2.0 - capsule_a.radius);
-
-    // get a's shadow on the infinite plane that b's rectangle is on
-
-    a_projected_bot_on_plane := project_point_onto_plane(a_bot, position_b.*, forward_b.*);
-    a_projected_top_on_plane := project_point_onto_plane(a_top, position_b.*, forward_b.*);
-    
-    // get the plane-relative up and right components of the differences from b center to the capsule segment's projections onto the plane. clamp the projection of a's points onto b's rectangle.
-
-    right_b := cross(forward_b.*, up_b.*);
-    assert(is_normalized(right_b, SMALL_NUMBER));
-
-    b_to_a_proj_bot := a_projected_bot_on_plane - position_a.*;
-    b_to_a_proj_top := a_projected_top_on_plane - position_b.*;
-
-    a_proj_bot_up_component_clamped := min(dot(b_to_a_proj_bot, up_b.*), plane_b.half_height*2.0);
-    a_proj_bot_right_component_clamped := min(dot(b_to_a_proj_bot, right_b), plane_b.width);
-
-    a_proj_top_up_component_clamped := min(dot(b_to_a_proj_top, up_b.*), plane_b.half_height*2.0);
-    a_proj_top_right_component_clamped := min(dot(b_to_a_proj_top, right_b), plane_b.width);
-
-    // this is both points of a's shadow on b's plane, but clamped to b's rectangle.
-
-    a_bot_projected_and_clamped := position_b.* + up_b.* * a_proj_bot_up_component_clamped + right_b * a_proj_bot_right_component_clamped;
-    a_top_projected_and_clamped := position_b.* + up_b.* * a_proj_top_up_component_clamped + right_b * a_proj_top_right_component_clamped;
-
-    // the clamped shadow of a's line segment can be used much like another capsule collider's line segment. we want to know the closest point on each line segment here.
-
-    a_closest_point, b_closest_point: Vector3 = ---;
-    dist_sq := distance_squared_between_line_segments(*a_bot, *a_top, *a_bot_projected_and_clamped, *a_top_projected_and_clamped, *a_closest_point, *b_closest_point);
-
-    a_pos_next := position_a.* + velocity_a.* * delta_time;
-    b_pos_next := position_b.* + velocity_b.* * delta_time;
-
-    a_bot_next := a_pos_next + up_a.* * capsule_a.radius;
-    a_top_next := a_pos_next + up_a.* * (capsule_a.half_height*2.0 - capsule_a.radius);
-
-    a_closest_point_next, b_closest_point_next: Vector3 = ---;
-    dist_sq_next := distance_squared_between_line_segments(*a_bot_next, *a_top_next, *a_bot_projected_and_clamped, *a_top_projected_and_clamped, *a_closest_point_next, *b_closest_point_next);
-
-    if is_nan_is_inf(dist_sq) || is_nan_is_inf(dist_sq_next) {
-        return false;
-    }
-
-    toward_a := a_closest_point - b_closest_point;
-    toward_a_next := a_closest_point_next - b_closest_point_next;
-
-    // cur dist along plane normal
-    cos_theta   := dot(forward_b.*, toward_a); 
-    // next dist along neg plane normal
-    cos_phi     := dot(forward_b.*, toward_a_next); 
-    cos_phi = ifx cos_theta > 0 && cos_phi < 0 then -cos_phi else 0;
-
-    dist := ifx dist_sq <= VERY_SMALL_NUMBER then 0.0 else sqrt(dist_sq);
-    dist_next := ifx dist_sq_next <= VERY_SMALL_NUMBER then 0.0 else sqrt(dist_sq_next);
-
-    buffer_dist := capsule_a.radius;
-    out_gap.* = cos_theta - (cos_phi + buffer_dist);
-    out_collision_dir.* = forward_b.*;
-
-    return out_gap.* < 0;
-}
-
-solve_collision_plane_capsule :: (position_a: *Vector3, velocity_a: *Vector3, forward_a: *Vector3, up_a: *Vector3, properties_a: *Physics_Properties, position_b: *Vector3, velocity_b: *Vector3, forward_b: *Vector3, up_b: *Vector3, properties_b: *Physics_Properties, out_collision_dir: *Vector3, out_gap: *float) -> bool  {
-    is_overlap := solve_collision_capsule_plane(position_b, velocity_b, forward_b, up_b, properties_b, position_a, velocity_a, forward_a, up_a, properties_a, out_collision_dir, out_gap);
-    out_collision_dir.* *= -1.0;
-    return is_overlap;
-}
-
-*/

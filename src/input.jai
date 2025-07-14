@@ -68,7 +68,7 @@ revert_input_focus :: () {
     previous_input_focus = .GAME;
 }
 
-update_window_events :: (delta_time: float) {
+update_input :: () {
     Input.update_window_events();
 
     prev_control_mode = control_mode;

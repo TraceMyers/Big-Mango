@@ -38,29 +38,10 @@ main :: () {
     non_render_time = seconds_since_init();
 
     while !quit {
-        update_window_events(delta_time);
-        imgui_draw();
-
+        update_input();
         scratch_think();
-
-        dbg_pt := up_direction(*player_character) * player_character.physics_properties.body_collider.half_height * 0.7;
-        dbg_dir := rotate(WORLD_RIGHT, WORLD_UP, xx seconds_since_init());
-        ray_len := 1000.0;
-        result: Collider_Raycast_Result;
-        if raycast(.{ray=.{dbg_pt, dbg_dir}, max_distance=ray_len, origin_inside_collider_rules=.{hit_where=.INNER_INTERSECTION}}, *result) {
-            draw_line_with_points(dbg_pt, result.hit_location, COLOR4F_BLUE, omit_start_point=true);
-        } else {
-            draw_line_with_points(dbg_pt, dbg_pt + dbg_dir * ray_len, COLOR4F_RED, COLOR4F_RED, .{rgb=COLOR4F_RED.rgb,a=0.5}, .{rgb=COLOR4F_RED.rgb,a=0.5}, omit_start_point=true, omit_end_point=true);
-        }
-
-        // draw_sphere(dbg_pt, 1.0, COLOR4F_RED, .LOW);
-
-        // draw_line_with_points(dbg_pt, dbg_pt + WORLD_DOWN * 3.0, COLOR4F_RED, COLOR4F_BLUE, .{rgb=COLOR4F_RED.rgb,a=0.5}, .{rgb=COLOR4F_BLUE.rgb,a=0.5});
-
-        if game_frame_count > 0 {
-            solve_potential_contacts();
-        }
-
+        solve_physics();
+        draw_dev_ui();
         end_frame();
     }
 }
@@ -83,6 +64,9 @@ end_frame :: () {
     render_times[dt_index] = render_dt;
     simulation_times[dt_index] = simulation_dt;
     dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
+
+    flush_entity_deletion_queue();
+    set_global_entities();
 
     reset_temporary_storage();
     game_frame_count += 1;
@@ -132,10 +116,16 @@ per_frame_time: float64;
 non_render_time: float64;
 quit := false;
 
-camera: Entity;
-player_character: Entity;
-ground: Entity;
-npcs: [..]Entity;
+camera_1: Entity;
+camera_1_ref: Entity_Ref;
+
+camera_2: Entity;
+camera_2_ref: Entity_Ref;
+
+player_entity: Entity;
+player_entity_ref: Entity_Ref;
+
+test_entities: [..]Entity_Ref;
 
 simulation_dt: float;
 render_dt: float;
@@ -150,6 +140,7 @@ dt_index: s32;
 #import "String";
 #import "Red_Mango_Core";
 #import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=true, USE_LOCAL_VULKAN_DYNAMIC_LIB=true);
+// #import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=false, USE_LOCAL_VULKAN_DYNAMIC_LIB=true);
 #import "Window_Creation";
 #import "Math";
 #import "File";
@@ -173,13 +164,15 @@ Zlib :: #import "zlib";
 #load "input.jai";
 #load "vulkan.jai";
 #load "imgui/imgui_impl.jai";
+#load "entity_types.jai";
 #load "entity.jai";
+#load "entity_creature.jai";
 #load "camera.jai";
 #load "load_assets.jai";
 #load "world.jai";
 #load "scratch.jai";
 #load "allocators.jai";
-#load "collision.jai";
+#load "physics.jai";
 #load "draw.jai";
 #load "entity_control.jai";
 #load "raycast.jai";

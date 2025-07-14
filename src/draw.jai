@@ -20,6 +20,30 @@ draw_sphere :: (center: Vector3, radius: float, color: Color4f, poly_count := Sp
     array_add(*sphere_draws, .{center, radius, color, poly_count});
 }
 
+draw_aabb :: (collider: Entity_Collider, position: Vector3, orientation: Quaternion, color: Color4f) {
+    aabb: AABB = ---;
+    get_aabb(collider, position, orientation, *aabb);
+    draw_aabb(aabb, color);
+}
+
+draw_aabb :: (aabb: AABB, color: Color4f) {
+    points: [8]Vector3;
+    get_aabb_points(aabb, *points);
+    for AABB_Edges {
+        draw_line(points[it.a], points[it.b], color);
+    }
+}
+
+draw_all_body_collider_aabbs :: () {
+    for 1..entities.count-1 {
+        if entities[it].type_flags & .STATIC_MESH {
+            e: Entity = ---;
+            get_entity_at(*e, it);
+            draw_aabb(e.physics_properties.body_collider, e.position, e.orientation, COLOR4F_RED);
+        }
+    }
+}
+
 draw_line_with_points :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, start_point_color: Color4f, end_point_color: Color4f, point_radius := 0.4, omit_start_point := false, omit_end_point := false) {
     draw_line(start, end, start_color, end_color);
     if !omit_start_point {

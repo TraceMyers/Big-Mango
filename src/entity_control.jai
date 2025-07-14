@@ -1,10 +1,5 @@
 // todo: input mapping
 
-first_person_camera: Entity;
-camera_entity: *Entity;
-free_fly_entity: *Entity;
-character_entity: *Entity;
-
 free_fly_linear_speed := 80.0;
 free_fly_mouse_look_speed := 0.2;
 first_person_mouse_look_speed := 0.2;
@@ -18,32 +13,30 @@ dbg_character_move_input: Vector2;
 
 process_entity_input :: () {
     if control_mode == .FREE_FLY {
-        handle_free_fly_input(free_fly_entity);
+        handle_free_fly_input(*camera_2);
     } else if control_mode == .FIRST_PERSON {
-        handle_first_person_input(character_entity, *first_person_camera);
+        handle_first_person_input(*player_entity, *camera_1);
     } else {
-        if camera_entity {
-            camera_entity.projection = .ORTHOGRAPHIC;
-            camera_entity.orthographic.scale = ortho_scale;
-            if control_mode == {
-            case .ORTHO_YZ_45_DOWN;
-                sin_t, cos_t := sin_cos(PI/4);
-                set_orientation(camera_entity, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
-            case .ORTHO_YZ;
-                set_orientation(camera_entity, .{y=1}, .{z=1});
-            case .ORTHO_XZ;
-                set_orientation(camera_entity, .{x=1}, .{z=1});
-            case .ORTHO_XY;
-                set_orientation(camera_entity, .{z=-1}, .{y=1});
-            }
+        camera_2.projection = .ORTHOGRAPHIC;
+        camera_2.orthographic.scale = ortho_scale;
+        if control_mode == {
+        case .ORTHO_YZ_45_DOWN;
+            sin_t, cos_t := sin_cos(PI/4);
+            set_orientation(*camera_2, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
+        case .ORTHO_YZ;
+            set_orientation(*camera_2, .{y=1}, .{z=1});
+        case .ORTHO_XZ;
+            set_orientation(*camera_2, .{x=1}, .{z=1});
+        case .ORTHO_XY;
+            set_orientation(*camera_2, .{z=-1}, .{y=1});
+        }
 
-            handle_ortho_input(character_entity, camera_entity);
-            target_camera_pos := character_entity.position - fore_direction(camera_entity) * 100.0;
-            if control_mode == prev_control_mode {
-                camera_entity.position = exponential_interp(camera_entity.position, target_camera_pos, 10.0, delta_time);
-            } else {
-                camera_entity.position = target_camera_pos;
-            }
+        handle_ortho_input(*player_entity, *camera_2);
+        target_camera_pos := player_entity.position - fore_direction(*camera_2) * 100.0;
+        if control_mode == prev_control_mode {
+            camera_2.position = exponential_interp(camera_2.position, target_camera_pos, 10.0, delta_time);
+        } else {
+            camera_2.position = target_camera_pos;
         }
     }
 }
@@ -117,9 +110,13 @@ handle_first_person_input :: (entity: *Entity, fp_camera: *Entity) {
         vert_angle_delta := -rot_dt_speed * Input.mouse_delta_y.(float);
         cam_forward := fore_direction(fp_camera);
         cam_forward_2d := fore_direction_xy(*fp_camera.orientation);
-        cos_t := dot(cam_forward, cam_forward_2d);
+
+        // if cos_t < -1 or > 1, then acos(cos_t) is nan.
+        // not sure what is going on with normalization s.t. it has noticeable error. maybe that's normal and I'm used to systems that handle it well for me.
+        cos_t := clamp(dot(cam_forward, cam_forward_2d), -1, 1);
         t := acos(cos_t);
-        VERT_ANGLE_PROPORTION :: 0.95;
+
+        VERT_ANGLE_PROPORTION :: 0.9;
         MAX_ANGLE :: PI * 0.5 * VERT_ANGLE_PROPORTION;
         MIN_ANGLE :: -MAX_ANGLE;
         ANGLE_DIFFERENCE :: MAX_ANGLE - MIN_ANGLE;

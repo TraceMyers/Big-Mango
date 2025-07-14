@@ -49,13 +49,17 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
             mass = IMMOVABLE_ENTITY_MASS,
             body_elasticity = 0
         }
+    },
+    .{
+        "CAMERA", .{
+            body_collision_channels=0
+        }
     }
 ];
 
 Collision_Channels :: enum_flags u64 {
     DEFAULT :: 0x1;
 }
-
 
 Physics_Properties :: struct {
     mass := 1.0;

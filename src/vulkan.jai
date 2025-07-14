@@ -153,9 +153,9 @@ render_frame :: () {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat: Matrix4 = ---;
     if control_mode == .FIRST_PERSON {
-        vp_mat = view_projection_matrix(*first_person_camera, viewport);
+        vp_mat = view_projection_matrix(*camera_1, viewport);
     } else {
-        vp_mat = view_projection_matrix(*camera, viewport);
+        vp_mat = view_projection_matrix(*camera_2, viewport);
     }
 
     prepare_lights();
@@ -180,17 +180,14 @@ render_frame :: () {
     draw_lines(cmd, *vp_mat);
     draw_spheres(cmd, *vp_mat);
 
-    for *emesh : ground.meshes {
-        draw_mesh(cmd, *ground, emesh, *vp_mat);
-    }
-    if control_mode != .FIRST_PERSON {
-        for *emesh : player_character.meshes {
-            draw_mesh(cmd, *player_character, emesh, *vp_mat);
-        }
-    }
-    for *npc : npcs {
-        for *emesh : npc.meshes {
-            draw_mesh(cmd, npc, emesh, *vp_mat);
+    for 1..entities.count-1 {
+        meshes := get_entity_meshes_at(it);
+        if meshes.count == 0 then continue;
+        for *emesh : meshes {
+            entity: Entity = ---;
+            get_entity_at(*entity, it);
+            if entity.id == player_entity.id && control_mode == .FIRST_PERSON then continue;
+            draw_mesh(cmd, *entity, emesh, *vp_mat);
         }
     }
 

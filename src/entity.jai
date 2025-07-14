@@ -7,10 +7,12 @@ INVALID_ENTITY_ID : u32 : 0;
 INVALID_ENTITY_INDEX : u32 : 0;
 INVALID_CAMERA_INDEX : u8 : 0;
 INVALID_CREATURE_INDEX : u16 : 0;
+INVALID_DEVICE_INDEX : u16 : 0;
 // Entity_Physics_Properties :: Physics_Properties_Dynamic;
 
 ENTITY_MAX_COUNT :: 32767;
 CREATURE_MAX_COUNT :: 32767;
+DEVICE_MAX_COUNT :: 32767;
 CAMERA_MAX_COUNT :: 256;
 ENTITY_MESHES_MAX_COUNT :: 8;
 ENTITY_NAME_MAX_COUNT :: 32;
@@ -20,26 +22,26 @@ boot_entities :: (stage: Boot_Stage) -> bool {
         {
             scope_set_allocator(program_runtime_allocator);
 
-            entity_patch_layer = alloc_array(*Entity_Patch_Info, ENTITY_MAX_COUNT);
+            array_reserve(*entities, ENTITY_MAX_COUNT);
+            array_reserve(*entity_deletion_queue, ENTITY_MAX_COUNT);
+            entity_patch_layer = alloc_array(u16, ENTITY_MAX_COUNT);
             entity_physics_core = alloc_array(Entity_Physics_Core, ENTITY_MAX_COUNT);
             entity_mesh_collections = alloc_array(Entity_Mesh_Collection, ENTITY_MAX_COUNT);
-            creature_interface = alloc_array(*Entity_Creature, CREATURE_MAX_COUNT);
             precalculated_fore_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
             precalculated_up_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
             name_allocations = alloc_array(Entity_Name_Allocation, ENTITY_MAX_COUNT);
-            entity_physics_constraints = alloc_array([..]Entity_Physics_Contraint, ENTITY_MAX_COUNT);
 
-            set_capacity(*entities, ENTITY_MAX_COUNT);
+            set_capacity(*devices, DEVICE_MAX_COUNT);
             set_capacity(*creatures, CREATURE_MAX_COUNT);
             set_capacity(*cameras, CAMERA_MAX_COUNT);
             set_capacity(*dynamic_entity_physics_properties, ENTITY_MAX_COUNT);
-            set_capacity(*colliders, ENTITY_MAX_COUNT);
         }
-        lock_allocation(*entities);
+        lock_allocation(*devices);
         lock_allocation(*cameras);
         lock_allocation(*creatures);
         lock_allocation(*dynamic_entity_physics_properties);
-        lock_allocation(*colliders);
+        entities.allocator = no_allocator;
+        entity_deletion_queue.allocator = no_allocator;
 
         {
             all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
@@ -61,6 +63,9 @@ boot_entities :: (stage: Boot_Stage) -> bool {
 
         // 0 is invalid index
         null_entity := spawn_entity(ALL_ENTITY_TYPE_FLAGS.(Entity_Type));
+        request_item(*creatures);
+        request_item(*cameras);
+        request_item(*devices);
 
         return true;
     } else {
@@ -68,119 +73,18 @@ boot_entities :: (stage: Boot_Stage) -> bool {
     }
 }
 
-Entity_Type_Flags :: enum_flags u32 {
-    CAMERA::1;
-    STATIC_MESH;
-    CREATURE;
-}
-
-Entity_Type :: enum u32 {
-    CAMERA :: Entity_Type_Flags.CAMERA;
-    STATIC_MESH :: Entity_Type_Flags.STATIC_MESH;
-    STATIC_MESH_CREATURE :: (Entity_Type_Flags.STATIC_MESH | Entity_Type_Flags.CREATURE);
-}
-
-ALL_ENTITY_TYPE_FLAGS :: #run -> Entity_Type_Flags {
-    ti := type_info(Entity_Type_Flags);
-    all: Entity_Type_Flags;
-    for ti.names {
-        all |= xx ti.values[it_index];
-    }
-    return all;
-}
-
-Entity_Subtype :: union {
-    byte: u8 = 0;
-    static_mesh_creature_type: Static_Mesh_Creature_Type = ---;
-}
-
-Static_Mesh_Creature_Type :: enum u8 {
-    DEFAULT::1;
-}
-
-Entity_Physics_Core :: struct {
-    position: Vector3;
-    linear_velocity: Vector3;
-    angular_velocity: Vector3;
-    orientation: Quaternion;
-    linear_input: Vector3;
-    physics_flags: enum_flags u32 {
-        ON_GROUND :: 1;
-        JUMP_QUEUED;
-    };
-    jump_queued_at_time: float;
-}
-
-Entity_Patch_Flags :: enum_flags u32 {
-    DYNAMIC_PHYSICS_PROPERTIES::1;
-}
-
-Entity_Type_Flags_Union :: union {
-    type: Entity_Type = 0;
-    type_flags: Entity_Type_Flags = ---;
-}
-
-Entity_Mesh_Collection :: struct {
-    allocation_ref: Nested_Allocation_Ref;
-    mesh_count: s32;
-}
-
-Entity_Name_Allocation :: struct {
-    allocation_ref: Nested_Allocation_Ref;
-    count: s32;
-}
-
-Entity_Patch_Info :: struct {
-    using type_union: Entity_Type_Flags_Union;
-    using subtype: Entity_Subtype;
-    camera: u8 = INVALID_CAMERA_INDEX;
-    using ref: Entity_Ref;
-    physics_properties: u16;
-    body_collider: u16;
-    meshes: u16;
-    creature: u16 = INVALID_CREATURE_INDEX;
-    flags: Entity_Patch_Flags;
-}
-
-Entity :: struct {
-    using type_union: Entity_Type_Flags_Union;
-    using subtype: Entity_Subtype;
-    using camera: *Entity_Camera;
-    using ref: Entity_Ref;
-    using physics_core: *Entity_Physics_Core;
-    physics_properties: *Physics_Properties;
-    body_collider: *Entity_Collider;
-    meshes: []Entity_Mesh;
-    creature: *Entity_Creature;
-    name: string;
-}
-
-Entity_Mesh :: struct {
-    data: *Mesh;
-    albedo: Mesh_Albedo;
-}
-
-Creature_Type :: enum u16 {
-    CREATURE::1;
-}
-
-// One-Big-Struct approach to creatures
-Entity_Creature :: struct {
-    type: Creature_Type;
-}
-
 get_entity :: inline (e: *Entity, ref: Entity_Ref) {
-    _ := get_entity_patch_info(ref);
-    get_entity_at(e, ref.index);
+    i := entity_patch_layer[ref.index];
+    assert(entities[i].id == ref.id);
+    get_entity_at(e, i);
 }
 
+// when using this procedure outside this file, it's important to observe the lifetime of an index w.r.t entities. to access entities in a way that is always safe, store and get with an Entity_Ref.
 get_entity_at :: (using e: *Entity, i: s64) {
     patch_info := *entities[i];
     entity_index := i;
-    assert(is_item_in_use(*entities, entity_index));
     e.* = .{
         type = patch_info.type,
-        subtype = patch_info.subtype,
         ref = patch_info.ref,
         physics_core = *entity_physics_core[i],
         meshes = get_entity_meshes(patch_info),
@@ -188,7 +92,7 @@ get_entity_at :: (using e: *Entity, i: s64) {
     };
     if (patch_info.type_flags & .CREATURE) != 0 {
         assert(patch_info.creature != INVALID_CREATURE_INDEX);
-        creature = creature_interface[patch_info.creature];
+        creature = *creatures[patch_info.creature];
     } else {
         assert(patch_info.creature == INVALID_CREATURE_INDEX);
     }
@@ -198,6 +102,12 @@ get_entity_at :: (using e: *Entity, i: s64) {
     } else {
         assert(patch_info.camera == INVALID_CAMERA_INDEX);
     }
+    if (patch_info.type_flags & .DEVICE) != 0 {
+        assert(patch_info.device != INVALID_DEVICE_INDEX);
+        device = *devices.items[patch_info.device];
+    } else {
+        assert(patch_info.device == INVALID_DEVICE_INDEX);
+    }
 
     if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
         physics_properties = *dynamic_entity_physics_properties[patch_info.physics_properties];
@@ -206,29 +116,13 @@ get_entity_at :: (using e: *Entity, i: s64) {
     }
 }
 
-get_entity_physics_properties :: (e: u16) -> *Physics_Properties {
-    patch_info := *entities[e];
-    if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
-        return *dynamic_entity_physics_properties[patch_info.physics_properties];
-    } else {
-        return *PHYSICS_PROPERTIES_TEMPLATES[patch_info.physics_properties];
-    }
-}
-
-is_creature_type :: (t: Entity_Type) -> bool {
-    // if t == {
-    // case .STATIC_MESH_CREATURE;
-    //     return true;
-    // }
-    return false;
-}
-
-
-spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
+spawn_entity :: (t: Entity_Type, name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
     // scope_lock_mutex(*spawn_entity_mutex);
-    i := request_item(*entities);
+    i := entities.count.(u16);
+    e := array_add(*entities);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
 
+    entity_patch_layer[i] = i;
     entity_physics_core[i] = physics;
 
     mesh_collection := *entity_mesh_collections[i];
@@ -238,10 +132,8 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, name := "", physi
     new_id := entity_id_counter;
     entity_id_counter += 1;
 
-    e := get_item(*entities, i);
     e.* = .{
         type = t,
-        subtype = subtype,
         ref = .{xx i, xx new_id},
     };
 
@@ -261,6 +153,21 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, name := "", physi
         index := request_item(*cameras);
         assert(index >= 0 && index < CAMERA_MAX_COUNT);
         e.camera = xx index;
+        cameras[e.camera] = .{};
+    }
+
+    if (e.type_flags & .CREATURE) != 0 {
+        index := request_item(*creatures);
+        assert(index >= 0 && index < CREATURE_MAX_COUNT);
+        e.creature = xx index;
+        creatures[e.creature] = .{};
+    }
+
+    if (e.type_flags & .DEVICE) != 0 {
+        index := request_item(*devices);
+        assert(index >= 0 && index < DEVICE_MAX_COUNT);
+        e.device = xx index;
+        devices[e.device] = .{};
     }
 
     set_entity_name(e.ref, name);
@@ -268,97 +175,74 @@ spawn_entity :: (t: Entity_Type, subtype := Entity_Subtype.{}, name := "", physi
     return e.ref;
 }
 
-set_entity_name :: (ref: Entity_Ref, name: string) {
-    i := ref.index;
-    if basic_validity_check(*name_allocations[i].allocation_ref) {
-        na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
-    } else {
-        assert(name_allocations[i].count == 0);
+flush_entity_deletion_queue :: () {
+    if entity_deletion_queue.count == 0 {
+        return;
     }
-
-    use_name: string;
-    if name.count > 0 {
-        use_name = tprint("eid % / %", ref.id, name);
-    } else {
-        use_name = tprint("eid %", ref.id, name);
+    for entity_deletion_queue {
+        delete_entity(it);
     }
-    assert(use_name.count <= ENTITY_NAME_MAX_COUNT);
-
-    name_allocations[i].allocation_ref = na_alloc(*entity_name_allocator, use_name.count);
-    name_allocations[i].count = xx use_name.count;
-    e_name := get_entity_name(*entities[i]);
-    assert(e_name.count == use_name.count);
-    memcpy(e_name.data, use_name.data, e_name.count);
+    array_reset_keeping_memory(*entity_deletion_queue);
 }
 
-set_entity_meshes :: (ref: Entity_Ref, meshes: ..Entity_Mesh) {
-    assert(meshes.count > 0 && meshes.count <= ENTITY_MESHES_MAX_COUNT);
-    patch_info := get_entity_patch_info(ref);
+set_global_entities :: () {
+    get_entity(*camera_1, camera_1_ref);
+    get_entity(*camera_2, camera_2_ref);
+    get_entity(*player_entity, player_entity_ref);
+}
 
-    mesh_collection := *entity_mesh_collections[ref.index];
-    if mesh_collection.mesh_count < meshes.count {
-        if basic_validity_check(*mesh_collection.allocation_ref) {
-            na_free(*entity_mesh_array_allocator, *mesh_collection.allocation_ref);
-        } else {
-            assert(mesh_collection.mesh_count == 0);
-        }
-        mesh_collection.allocation_ref = na_alloc(*entity_mesh_array_allocator, meshes.count * size_of(Entity_Mesh));
-        assert(basic_validity_check(*mesh_collection.allocation_ref));
+delete_entity :: (ref: Entity_Ref) {
+    i := entity_patch_layer[ref.index];
+    assert(entities[i].id == ref.id);
+    delete_entity(i);
+}
+
+// this should only be called a certain point in the frame. probably in exactly one place, inside a loop.
+delete_entity :: (i: s64) {
+    defer entities.count -= 1;
+    e := *entities[i];
+
+    // todo: ideally find a good way to patch up holes in the pools on the spot.
+    if (e.type_flags & .CAMERA) != 0 {
+        assert(e.camera >= 0 && e.camera < CAMERA_MAX_COUNT);
+        return_item(*cameras, e.camera);
+    }
+    if (e.type_flags & .CREATURE) != 0 {
+        assert(e.creature >= 0 && e.creature < CREATURE_MAX_COUNT);
+        return_item(*creatures, e.creature);
+    }
+    if (e.type_flags & .DEVICE) != 0 {
+        assert(e.device >= 0 && e.device < DEVICE_MAX_COUNT);
+        return_item(*devices, e.device);
+    }
+    if (e.flags & .DYNAMIC_PHYSICS_PROPERTIES) {
+        assert(e.physics_properties >= 0 && e.physics_properties <= ENTITY_MAX_COUNT);
+        return_item(*dynamic_entity_physics_properties, e.physics_properties);
     }
 
-    mesh_collection.mesh_count = xx meshes.count;
-    new_meshes := get_entity_meshes(patch_info);
-    assert(new_meshes.count == meshes.count);    
-    for meshes {
-        new_meshes[it_index] = it;
+    assert(basic_validity_check(*name_allocations[i].allocation_ref));
+    na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
+    name_allocations[i] = .{};
+
+    last_entity_index := entities.count-1;
+    if i == last_entity_index {
+        return;
     }
+
+    entity_patch_layer[last_entity_index] = xx i;
+    entities[i] = entities[last_entity_index];
+    entity_physics_core[i] = entity_physics_core[last_entity_index];
+    entity_mesh_collections[i] = entity_mesh_collections[last_entity_index];
+    name_allocations[i] = name_allocations[last_entity_index];
 }
 
-get_entity_meshes :: (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
-    mesh_collection := *entity_mesh_collections[patch_info.index];
-    if mesh_collection.mesh_count == 0 {
-        return .[];
-    }
-    assert(basic_validity_check(mesh_collection.allocation_ref));
-    meshes: []Entity_Mesh;
-    meshes.data = mesh_collection.allocation_ref.data;
-    meshes.count = mesh_collection.mesh_count;
-    return meshes;
+// spawn helpers
+
+spawn_entity_human :: (name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> Entity_Ref {
+    ref := spawn_entity(.STATIC_MESH_CREATURE, name, physics, physics_properties_template, make_physics_properties_dynamic);
+    entity_physics_core[ref.index].physics_flags |= .MOVED_BY_PHYSICS;
+    return ref;
 }
-
-get_entity_name :: (patch_info: *Entity_Patch_Info) -> string {
-    assert(basic_validity_check(name_allocations[patch_info.index].allocation_ref));
-    allocation: string;
-    allocation.data = name_allocations[patch_info.index].allocation_ref.data;
-    allocation.count = name_allocations[patch_info.index].count;
-    return allocation;
-}
-
-Entity_Physics_Contraint :: struct {
-    kill_normal: Vector3;
-}
-
-entities: Pool(Entity_Patch_Info);
-entity_patch_layer: []*Entity_Patch_Info;
-// default entity data
-entity_physics_core: []Entity_Physics_Core;
-entity_mesh_collections: []Entity_Mesh_Collection;
-precalculated_fore_directions: []Vector3;
-precalculated_up_directions: []Vector3;
-entity_physics_constraints: [][..]Entity_Physics_Contraint;
-name_allocations: []Entity_Name_Allocation;
-entity_mesh_array_allocator: Nesting_Allocator(8);
-entity_name_allocator: Nesting_Allocator(8);
-// type-specific entity data
-creature_interface: []*Entity_Creature;
-
-creatures: Pool(Entity_Creature);
-cameras: Pool(Entity_Camera);
-colliders: Pool(Entity_Collider);
-dynamic_entity_physics_properties: Pool(Physics_Properties_Dynamic);
-
-spawn_entity_mutex: Mutex;
-entity_id_counter: u32;
 
 // patchwork entity system:
 // - all entities just use the base Entity as their type. use runtime typing.
@@ -413,7 +297,131 @@ interp_rotate :: inline (e: *Entity, target: Quaternion, speed: float32, delta_t
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 get_entity_patch_info :: inline (ref: Entity_Ref) -> *Entity_Patch_Info {
-    patch_info := *entities[ref.index];
+    i := entity_patch_layer[ref.index];
+    patch_info := *entities[i];
     assert(ref.id == patch_info.id);
+
     return patch_info;
 }
+
+get_entity_physics_properties :: inline (ref: Entity_Ref) -> *Physics_Properties {
+    i := entity_patch_layer[ref.index];
+    assert(entities[i].id == ref.id);
+
+    return get_entity_physics_properties_at(i);
+}
+
+set_entity_name :: (ref: Entity_Ref, name: string) {
+    i := entity_patch_layer[ref.index];
+    assert(ref.id == entities[i].id);
+
+    if basic_validity_check(*name_allocations[i].allocation_ref) {
+        na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
+    } else {
+        assert(name_allocations[i].count == 0);
+    }
+
+    use_name: string;
+    if name.count > 0 {
+        use_name = tprint("eid % / %", ref.id, name);
+    } else {
+        use_name = tprint("eid %", ref.id, name);
+    }
+    assert(use_name.count <= ENTITY_NAME_MAX_COUNT);
+
+    name_allocations[i].allocation_ref = na_alloc(*entity_name_allocator, use_name.count);
+    name_allocations[i].count = xx use_name.count;
+    e_name := get_entity_name(*entities[i]);
+    assert(e_name.count == use_name.count);
+    memcpy(e_name.data, use_name.data, e_name.count);
+}
+
+get_entity_name :: (patch_info: *Entity_Patch_Info) -> string {
+    i := entity_patch_layer[patch_info.index];
+    assert(basic_validity_check(name_allocations[i].allocation_ref));
+    allocation: string;
+    allocation.data = name_allocations[i].allocation_ref.data;
+    allocation.count = name_allocations[i].count;
+    return allocation;
+}
+
+set_entity_meshes :: (ref: Entity_Ref, meshes: ..Entity_Mesh) {
+    assert(meshes.count > 0 && meshes.count <= ENTITY_MESHES_MAX_COUNT);
+    patch_info := get_entity_patch_info(ref);
+
+    mesh_collection := *entity_mesh_collections[ref.index];
+    if mesh_collection.mesh_count < meshes.count {
+        if basic_validity_check(*mesh_collection.allocation_ref) {
+            na_free(*entity_mesh_array_allocator, *mesh_collection.allocation_ref);
+        } else {
+            assert(mesh_collection.mesh_count == 0);
+        }
+        mesh_collection.allocation_ref = na_alloc(*entity_mesh_array_allocator, meshes.count * size_of(Entity_Mesh));
+        assert(basic_validity_check(*mesh_collection.allocation_ref));
+    }
+
+    mesh_collection.mesh_count = xx meshes.count;
+    new_meshes := get_entity_meshes(patch_info);
+    assert(new_meshes.count == meshes.count);    
+    for meshes {
+        new_meshes[it_index] = it;
+    }
+}
+
+get_entity_meshes :: inline (patch_info: *Entity_Patch_Info) -> []Entity_Mesh {
+    i := entity_patch_layer[patch_info.index];
+    return get_entity_meshes_at(i);
+}
+
+get_entity_meshes_at :: inline (i: s64) -> []Entity_Mesh {
+    mesh_collection := *entity_mesh_collections[i];
+    if mesh_collection.mesh_count == 0 {
+        return .[];
+    }
+    assert(basic_validity_check(mesh_collection.allocation_ref));
+    meshes: []Entity_Mesh;
+    meshes.data = mesh_collection.allocation_ref.data;
+    meshes.count = mesh_collection.mesh_count;
+    return meshes;
+}
+
+// ---------------------------------------------------------------------------------------------------
+
+get_entity_physics_properties_at :: (e: s64) -> *Physics_Properties {
+    i := entity_patch_layer[e];
+    patch_info := *entities[i];
+    if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
+        return *dynamic_entity_physics_properties[patch_info.physics_properties];
+    } else {
+        return *PHYSICS_PROPERTIES_TEMPLATES[patch_info.physics_properties];
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+
+// all arrays parallel to entities array
+
+entities: [..]Entity_Patch_Info;
+entity_patch_layer: []u16;
+// default entity data
+entity_physics_core: []Entity_Physics_Core;
+entity_mesh_collections: []Entity_Mesh_Collection;
+precalculated_fore_directions: []Vector3;
+precalculated_up_directions: []Vector3;
+name_allocations: []Entity_Name_Allocation;
+entity_deletion_queue: [..]Entity_Ref;
+
+entity_mesh_array_allocator: Nesting_Allocator(8);
+entity_name_allocator: Nesting_Allocator(8);
+
+// type-specific entity data
+
+creatures: Pool(Entity_Creature);
+cameras: Pool(Entity_Camera);
+devices: Pool(Entity_Device);
+dynamic_entity_physics_properties: Pool(Physics_Properties_Dynamic);
+
+spawn_entity_mutex: Mutex;
+entity_id_counter: u32;
+
+#scope_file // ------------------------------------------------------------------------------------------------ { FILE }

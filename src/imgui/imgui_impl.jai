@@ -100,7 +100,7 @@ boot_imgui :: (stage: Boot_Stage) -> bool {
 
 }
 
-imgui_draw :: () {
+draw_dev_ui :: () {
     if quit then return;
     ImplVulkan_NewFrame();
     ImplWin32_NewFrame();
@@ -465,6 +465,7 @@ add_physics_debugger :: () {
         `defer Unindent(INDENT_WIDTH);
     }
 
+    using physics_debug_global_data;
 
     if CollapsingHeader("physics debugger") {
         #if RUN_PHYSICS_DEBUGGER {
@@ -484,11 +485,11 @@ add_physics_debugger :: () {
             }
 
             entity: Entity;
-            if entity_index != 0 {
-                get_entity_at(*entity, entity_index);
+            if collision_entity_index != 0 {
+                get_entity_at(*entity, collision_entity_index);
             }
             Text("entity:           %", entity.name);
-            Text("entity index:     %", entity_index);
+            Text("entity index:     %", collision_entity_index);
             Text("resolve step:     %", inner_index_1);
             Text("remaining time:   %", remaining_time);
 
