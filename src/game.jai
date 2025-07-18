@@ -14,23 +14,13 @@ main :: () {
         Win32.timeBeginPeriod(1);
     }
 
-    // pre-boot config
-    command_line_procedures = COMMAND_LINE_PROCEDURES;
-    rm_log_passthrough_callback = rm_log_callback;
-    call_rm_log_passthrough_only = true;
-    rm_log_messages = alloc_array(RM_Log_Message, 256, program_runtime_allocator);
-    initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
-
     startup_success := true;
-    scope_system_init(boot_allocators,  *startup_success);
+    scope_system_init(boot_misc,        *startup_success);
     scope_system_init(boot_input,       *startup_success);
     scope_system_init(boot_vulkan,      *startup_success);
     scope_system_init(boot_imgui,       *startup_success);
     scope_system_init(boot_entities,    *startup_success);
     if !startup_success then return;
-
-    // moving window to top monitor only *after* swapchain creation. something in that process creates a very jittery framerate if the swapchain is created when the window is positioned within that monitor's rect.
-    move_window(.{90, -1300});
 
     scratch_init_game();
 
@@ -44,6 +34,30 @@ main :: () {
         draw_dev_ui();
         end_frame();
     }
+}
+
+boot_misc :: (stage: Boot_Stage) -> bool {
+    if stage == .STARTUP {
+        // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
+        bump_allocator_initialize(*program_runtime_allocator);
+
+        // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
+        command_line_procedures = COMMAND_LINE_PROCEDURES;
+        
+        // give the logger a proc to call after forming the log message
+        rm_log_passthrough_callback = rm_log_callback;
+        // don't push the log messages to stdout
+        call_rm_log_passthrough_only = true;
+
+        // circular buffer, n messages, for the gui log
+        // todo: bring this up to 1000+. all it needs is a way to cull messages that won't be rendered
+        LOG_MESSAGE_COUNT :: 256;
+        rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
+        initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
+    } else {
+
+    }
+    return true;
 }
 
 end_frame :: () {
@@ -116,16 +130,6 @@ per_frame_time: float64;
 non_render_time: float64;
 quit := false;
 
-camera_1: Entity;
-camera_1_ref: Entity_Ref;
-
-camera_2: Entity;
-camera_2_ref: Entity_Ref;
-
-player_entity: Entity;
-player_entity_ref: Entity_Ref;
-
-test_entities: [..]Entity_Ref;
 
 simulation_dt: float;
 render_dt: float;
@@ -136,7 +140,7 @@ simulation_times: [DELTA_TIME_COUNT]float32;
 render_times: [DELTA_TIME_COUNT]float32;
 dt_index: s32;
 
-#import "Basic";
+#import "Basic"()();
 #import "String";
 #import "Red_Mango_Core";
 #import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=true, USE_LOCAL_VULKAN_DYNAMIC_LIB=true);
@@ -176,3 +180,5 @@ Zlib :: #import "zlib";
 #load "draw.jai";
 #load "entity_control.jai";
 #load "raycast.jai";
+#load "entities/entity_button.jai";
+#load "add_to_context.jai";

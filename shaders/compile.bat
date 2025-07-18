@@ -12,3 +12,4 @@ set compiler="%VULKAN_SDK%/Bin/glslc.exe"
 %compiler% src/line.vert -o intermediate/line_vert.spv
 %compiler% src/line.frag -o intermediate/line_frag.spv
 %compiler% -fshader-stage=compute src/compute_draw_capsule.glsl -o intermediate/compute_draw_capsule.spv
+%compiler% -fshader-stage=compute src/copy_depth_image.glsl -o intermediate/copy_depth_image.spv

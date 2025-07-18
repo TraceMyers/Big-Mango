@@ -62,6 +62,7 @@ Entity_Type_Flags_Union :: union {
 
 Entity_Device_Type :: enum u16 {
     DEVICE :: 1;
+    BUTTON;
 }
 
 Entity_Creature_Type :: enum u16 {
@@ -98,6 +99,11 @@ Entity_Name_Allocation :: struct {
     count: s32;
 }
 
+Trigger_Volume_Allocation :: struct {
+    allocation_ref: Nested_Allocation_Ref;
+    count: s32;
+}
+
 Entity_Mesh :: struct {
     data: *Mesh;
     albedo: Mesh_Albedo;
@@ -106,6 +112,27 @@ Entity_Mesh :: struct {
 // One-Big-Struct approach to creatures
 Entity_Creature :: struct {
     type: Entity_Creature_Type;
+    // a ton of shit will go here
+}
+
+Trigger_Volume_Proc :: #type (owner: *Entity, guest: *Entity);
+
+Trigger_Volume :: struct {
+    position: Vector3;
+    orientation: Quaternion;
+    volume: Entity_Collider;
+    on_enter: Trigger_Volume_Proc;
+    on_exit: Trigger_Volume_Proc;
+    overlap_mode: enum u8 {
+        VOLUME_WITH_AABB;
+        VOLUME_WITH_VOLUME;
+    };
+    flags: enum_flags u8 {
+        POSITION_IS_ABSOLUTE :: 0x1; // else relative
+        ORIENTATION_IS_ABSOLUTE; // else relative
+    };
+    // just for whatever. might as well make use of the padding.
+    extra_data: [6]u8;
 }
 
 Entity_Device :: struct {

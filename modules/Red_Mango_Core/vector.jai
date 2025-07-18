@@ -122,3 +122,11 @@ to_vector3 :: inline (v: Int_Vector3) -> Vector3 {
 to_int_vector3 :: inline (v: Vector3) -> Int_Vector3 {
     return .{xx v.x, xx v.y, xx v.z};
 }
+
+abs :: inline (a: Int_Vector3) -> Int_Vector3 {
+    return .{abs(a.x), abs(a.y), abs(a.z)};
+}
+
+sum :: inline (a: Int_Vector3) -> s32 {
+    return a.x + a.y + a.z;
+}

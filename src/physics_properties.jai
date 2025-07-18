@@ -24,8 +24,8 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Physics_Property_Template_Create_Info.
                 data = .{
                     box = .{
                         half_height = 21.4*0.5,
-                        width = 5.15,
-                        length = 2.15
+                        half_width = 5.15*0.5,
+                        half_length = 2.15*0.5
                     }
                 }
             }

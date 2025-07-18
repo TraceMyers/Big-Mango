@@ -181,7 +181,7 @@ raycast_plane :: (using request: Collider_Raycast_Request, collider_data: Packed
     out_result.* = .{};
 
     plane_center        := collider_data.position;
-    plane_half_width    := collider_data.collider.plane.width * 0.5; 
+    plane_half_width    := collider_data.collider.plane.half_width;
     plane_half_height   := collider_data.collider.plane.half_height;
     plane_normal        := precalculated_fore_directions[entity_index];
     plane_height_vec    := precalculated_up_directions[entity_index];

@@ -19,47 +19,31 @@ ENTITY_NAME_MAX_COUNT :: 32;
 
 boot_entities :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        {
-            scope_set_allocator(program_runtime_allocator);
+        program_runtime_reserve(*entities, ENTITY_MAX_COUNT);
+        program_runtime_reserve(*entity_deletion_queue, ENTITY_MAX_COUNT);
 
-            array_reserve(*entities, ENTITY_MAX_COUNT);
-            array_reserve(*entity_deletion_queue, ENTITY_MAX_COUNT);
-            entity_patch_layer = alloc_array(u16, ENTITY_MAX_COUNT);
-            entity_physics_core = alloc_array(Entity_Physics_Core, ENTITY_MAX_COUNT);
-            entity_mesh_collections = alloc_array(Entity_Mesh_Collection, ENTITY_MAX_COUNT);
-            precalculated_fore_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
-            precalculated_up_directions = alloc_array(Vector3, CREATURE_MAX_COUNT);
-            name_allocations = alloc_array(Entity_Name_Allocation, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_patch_layer, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_physics_core, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_mesh_collections, ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT);
+        program_runtime_allocate(*precalculated_fore_directions, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*precalculated_up_directions, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*name_allocations, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_trigger_volume_allocations, ENTITY_MAX_COUNT);
 
-            set_capacity(*devices, DEVICE_MAX_COUNT);
-            set_capacity(*creatures, CREATURE_MAX_COUNT);
-            set_capacity(*cameras, CAMERA_MAX_COUNT);
-            set_capacity(*dynamic_entity_physics_properties, ENTITY_MAX_COUNT);
-        }
-        lock_allocation(*devices);
-        lock_allocation(*cameras);
-        lock_allocation(*creatures);
-        lock_allocation(*dynamic_entity_physics_properties);
-        entities.allocator = no_allocator;
-        entity_deletion_queue.allocator = no_allocator;
+        program_runtime_initialize(*devices, DEVICE_MAX_COUNT);
+        program_runtime_initialize(*creatures, CREATURE_MAX_COUNT);
+        program_runtime_initialize(*cameras, CAMERA_MAX_COUNT);
+        program_runtime_initialize(*dynamic_entity_physics_properties, ENTITY_MAX_COUNT);
 
-        {
-            all_mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
-            maybe_optimal_chunk_list_size := 4096 * 16;
-            maybe_optimal_chunk_list_count := div_ceil(all_mesh_ptrs_array_data_size, maybe_optimal_chunk_list_size);
+        na_chunk_list_size := 4096 * 16;
+        na_chunk_list_size_large := 4096 * 32;
 
-            initialize_nesting_allocator(*entity_mesh_array_allocator, program_runtime_allocator, maybe_optimal_chunk_list_size, maybe_optimal_chunk_list_count);
-            entity_mesh_array_allocator.parent_allocator = no_allocator;
-        }
-
-        {
-            all_entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_COUNT;
-            maybe_optimal_chunk_list_size := 4096 * 16;
-            maybe_optimal_chunk_list_count := div_ceil(all_entity_name_data_size, maybe_optimal_chunk_list_size);
-
-            initialize_nesting_allocator(*entity_name_allocator, program_runtime_allocator, maybe_optimal_chunk_list_size, maybe_optimal_chunk_list_count);
-            entity_name_allocator.parent_allocator = no_allocator;
-        }
+        mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
+        program_runtime_initialize(*entity_mesh_array_allocator, na_chunk_list_size, mesh_ptrs_array_data_size);
+        entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_COUNT;
+        program_runtime_initialize(*entity_name_allocator, na_chunk_list_size, entity_name_data_size);
+        entity_trigger_volumes_data_size := ENTITY_MAX_COUNT * size_of(Trigger_Volume);
+        program_runtime_initialize(*entity_trigger_volumes_allocator, na_chunk_list_size_large, entity_trigger_volumes_data_size);
 
         // 0 is invalid index
         null_entity := spawn_entity(ALL_ENTITY_TYPE_FLAGS.(Entity_Type));
@@ -186,9 +170,9 @@ flush_entity_deletion_queue :: () {
 }
 
 set_global_entities :: () {
-    get_entity(*camera_1, camera_1_ref);
-    get_entity(*camera_2, camera_2_ref);
-    get_entity(*player_entity, player_entity_ref);
+    get_entity(*context.camera_1, context.camera_1.ref);
+    get_entity(*context.camera_2, context.camera_2.ref);
+    get_entity(*context.player_entity, context.player_entity.ref);
 }
 
 delete_entity :: (ref: Entity_Ref) {
@@ -406,6 +390,7 @@ entity_patch_layer: []u16;
 // default entity data
 entity_physics_core: []Entity_Physics_Core;
 entity_mesh_collections: []Entity_Mesh_Collection;
+entity_trigger_volume_allocations: []Trigger_Volume_Allocation;
 precalculated_fore_directions: []Vector3;
 precalculated_up_directions: []Vector3;
 name_allocations: []Entity_Name_Allocation;
@@ -413,6 +398,8 @@ entity_deletion_queue: [..]Entity_Ref;
 
 entity_mesh_array_allocator: Nesting_Allocator(8);
 entity_name_allocator: Nesting_Allocator(8);
+TRIGGER_VOLUMES_ALLOCATOR_MIN_ALLOC_SIZE :: #run ceil_to_pow2(size_of(Trigger_Volume)) >> 1;
+entity_trigger_volumes_allocator: Nesting_Allocator(TRIGGER_VOLUMES_ALLOCATOR_MIN_ALLOC_SIZE);
 
 // type-specific entity data
 

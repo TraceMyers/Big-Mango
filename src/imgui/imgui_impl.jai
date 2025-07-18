@@ -8,6 +8,12 @@ log_paused: bool;
 DEEP_DARK_BLUE :: Color4f.{0.07, 0.07, 0.25, 1.0};
 DARK_GREY_BLUE :: Color4f.{0.14, 0.16, 0.3, 1.0};
 
+INDENT_WIDTH :: 20.0;
+scope_push_indent :: () #expand {
+    Indent(INDENT_WIDTH);
+    `defer Unindent(INDENT_WIDTH);
+}
+
 // todo: metaprogram or whatever
 dev_ui_opacities := float.[
     0.4,
@@ -327,6 +333,7 @@ add_left_sidebar :: (main_menu_height: float) -> float {
         add_player_character_readout();
         add_camera_controls();
         add_physics_debugger();
+        add_entity_pocket();
     }
 
     return window_width;
@@ -459,12 +466,6 @@ add_camera_controls :: () {
 }
 
 add_physics_debugger :: () {
-    INDENT_WIDTH :: 20.0;
-    scope_push_indent :: () #expand {
-        Indent(INDENT_WIDTH);
-        `defer Unindent(INDENT_WIDTH);
-    }
-
     using physics_debug_global_data;
 
     if CollapsingHeader("physics debugger") {
@@ -558,6 +559,30 @@ add_physics_debugger :: () {
             }
         } else {
             Text("physics debugger is compiled out. set RUN_PHYSICS_DEBUGGER to true.");
+        }
+    }
+}
+
+// eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.
+add_entity_pocket :: () {
+    if CollapsingHeader("entity pocket") {
+        if Button("capsule") {
+            ref := spawn_entity(.STATIC_MESH, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
+            test_ref = ref;
+            entity_phys_props := get_entity_physics_properties(ref);
+            {
+                using entity_phys_props;
+                body_elasticity = 1.0;
+                body_collider.type = .CAPSULE;
+                body_collider.capsule.half_height = 10.0;
+                body_collider.capsule.radius = 7.0;
+            }
+            // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
+            capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
+            set_entity_meshes(ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
+            e: Entity;
+            get_entity(*e, ref);
+            e.position.z = 100.0;
         }
     }
 }

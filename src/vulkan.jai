@@ -67,7 +67,7 @@ boot_vulkan :: (stage: Boot_Stage) -> bool {
             flush_deletion_queue(it.deletion_queue, true);
         }
         array_reset(*command_frames);
-        array_reset(*shader_hash_table);
+        array_reset_keeping_memory(*shader_hash_table);
 
         if draw_image_descriptor_layout {
             vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null);
@@ -153,9 +153,9 @@ render_frame :: () {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat: Matrix4 = ---;
     if control_mode == .FIRST_PERSON {
-        vp_mat = view_projection_matrix(*camera_1, viewport);
+        vp_mat = view_projection_matrix(*context.camera_1, viewport);
     } else {
-        vp_mat = view_projection_matrix(*camera_2, viewport);
+        vp_mat = view_projection_matrix(*context.camera_2, viewport);
     }
 
     prepare_lights();
@@ -186,7 +186,7 @@ render_frame :: () {
         for *emesh : meshes {
             entity: Entity = ---;
             get_entity_at(*entity, it);
-            if entity.id == player_entity.id && control_mode == .FIRST_PERSON then continue;
+            if entity.id == context.player_entity.id && control_mode == .FIRST_PERSON then continue;
             draw_mesh(cmd, *entity, emesh, *vp_mat);
         }
     }
@@ -198,24 +198,19 @@ render_frame :: () {
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .COLOR_ATTACHMENT_OPTIMAL, .GENERAL);
 
-    // {
-    //     using mesh := player_character.meshes[0].data;
-    //     mesh.albedo.tint.w = 1.0;
-    //     model := make_translation_matrix4(player_character.position);
-    //     rot := rotation_matrix(Matrix4, player_character.orientation);
-    //     model *= rot;
-    //     scale := make_scale_matrix4(.{1, 1, 1});
-    //     model *= scale;
-    //     mvp := vp_mat * model;
-    //     draw_capsules(cmd, draw_image.vk_obj, *mvp, *vp_mat, player_character.position);
-    // }
+    // -----------------------------------------------------------------------------------------------------------------
+    // copy depth stencil to draw image (how????)
+    // -----------------------------------------------------------------------------------------------------------------
+    // transition_depth_image_for_compute_copy(cmd, depth_image.vk_obj, .UNDEFINED, .SHADER_READ_ONLY_OPTIMAL, .DEPTH_BIT | .STENCIL_BIT);
+    // copy_depth_image_to_draw_image(cmd);
+    // transition_image(cmd, depth_image.vk_obj, .SHADER_READ_ONLY_OPTIMAL, .DEPTH_STENCIL_READ_ONLY_OPTIMAL, .DEPTH_BIT | .STENCIL_BIT);
 
     // -----------------------------------------------------------------------------------------------------------------
     // copy graphics to swapchain
     // -----------------------------------------------------------------------------------------------------------------
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .TRANSFER_SRC_OPTIMAL);
     transition_image(cmd, render_target, .UNDEFINED, .TRANSFER_DST_OPTIMAL);
-    copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*draw_image.extent).(*VkExtent2D).*);
+    copy_image(cmd, render_target, draw_image.vk_obj, swapchain.extent, (*depth_image.extent).(*VkExtent2D).*);
 
     // -----------------------------------------------------------------------------------------------------------------
     // imgui draws directly to the swapchain
@@ -289,7 +284,7 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         imageView = depth_image.image_view,
         imageLayout = .DEPTH_ATTACHMENT_OPTIMAL,
         loadOp = .CLEAR,
-        storeOp = .DONT_CARE,
+        storeOp = .STORE,
         clearValue.depthStencil = .{1.0, 0}
     };
 
@@ -324,7 +319,7 @@ begin_rendering :: (cmd: VkCommandBuffer) {
     vkCmdBeginRendering(cmd, *rendering_info);
 }
 
-transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLayout, new_layout: VkImageLayout) {
+transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLayout, new_layout: VkImageLayout, force_aspect_mask: VkImageAspectFlags = 0) {
     image_barrier := VkImageMemoryBarrier2.{
         srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
@@ -341,6 +336,40 @@ transition_image :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLa
         },
         image = image
     };
+
+    if force_aspect_mask != 0 then {
+        image_barrier.subresourceRange.aspectMask = force_aspect_mask;
+    }
+
+    dependency_info := VkDependencyInfo.{
+        imageMemoryBarrierCount = 1,
+        pImageMemoryBarriers = *image_barrier
+    };
+
+    vkCmdPipelineBarrier2(cmd, *dependency_info);
+}
+
+transition_depth_image_for_compute_copy :: (cmd: VkCommandBuffer, image: VkImage, old_layout: VkImageLayout, new_layout: VkImageLayout, force_aspect_mask: VkImageAspectFlags = 0) {
+    image_barrier := VkImageMemoryBarrier2.{
+        srcStageMask = xx VkPipelineStageFlagBits.LATE_FRAGMENT_TESTS_BIT,
+        srcAccessMask = xx VkAccessFlagBits.DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        dstStageMask = xx VkPipelineStageFlagBits.COMPUTE_SHADER_BIT,
+        dstAccessMask = xx VkAccessFlagBits.SHADER_READ_BIT,
+        oldLayout = old_layout,
+        newLayout = new_layout,
+        subresourceRange = .{
+            aspectMask = ifx new_layout == .DEPTH_ATTACHMENT_OPTIMAL then .DEPTH_BIT else .COLOR_BIT, 
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 1
+        },
+        image = image
+    };
+
+    if force_aspect_mask != 0 then {
+        image_barrier.subresourceRange.aspectMask = force_aspect_mask;
+    }
 
     dependency_info := VkDependencyInfo.{
         imageMemoryBarrierCount = 1,
@@ -682,7 +711,7 @@ create_depth_image :: () {
 
     depth_image.format = depth_buffer_format(physical_device.vk_obj);
     depth_image_usages: VkImageUsageFlags;
-    depth_image_usages |= .DEPTH_STENCIL_ATTACHMENT_BIT;
+    depth_image_usages |= .DEPTH_STENCIL_ATTACHMENT_BIT | .SAMPLED_BIT;
 
     image_alloc_info := VmaAllocationCreateInfo.{
         usage = .GPU_ONLY,
@@ -902,6 +931,18 @@ create_experimental_data :: () {
         deletion_queue_add(*game_deletion_queue, vkDestroySampler(logical_device, test_tex_sampler, null));
     }
     {
+        create_info := VkSamplerCreateInfo.{
+            minFilter = .NEAREST,
+            magFilter = .NEAREST,
+            mipmapMode = .NEAREST,
+            addressModeU = .REPEAT,
+            addressModeV = .REPEAT,
+            addressModeW = .REPEAT,
+        };
+        vk_init_validate(vkCreateSampler(logical_device, *create_info, null, *depth_and_draw_sampler), "failed to create the depth and draw sampler");
+        deletion_queue_add(*game_deletion_queue, vkDestroySampler(logical_device, depth_and_draw_sampler, null));
+    }
+    {
         lights.sun_direction = normalize(Vector3.{0, 0, -1});
         lights.sun_tint = .{1,1,1,1};
         create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
@@ -921,6 +962,7 @@ create_pipelines :: () {
     // create_tex_pipeline();
     create_graphics_pipeline();
     create_line_pipeline();
+    create_copy_depth_image_pipeline();
     if !init_success then return;
 }
 
@@ -981,6 +1023,34 @@ create_rect_pipeline :: () {
 
     vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *rect_pipeline), "failed to create the bg draw pipeline");
     deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, rect_pipeline, null));
+}
+
+create_copy_depth_image_pipeline :: () {
+    compute_layout := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = 1,
+        pSetLayouts = *depth_and_draw_descriptor_layout,
+        pushConstantRangeCount = 0,
+        pPushConstantRanges = null
+    };
+
+    vk_init_validate(vkCreatePipelineLayout(logical_device, *compute_layout, null, *copy_depth_image_pipeline_layout), "failed to create the bg rect pipeline layout");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, copy_depth_image_pipeline_layout, null));
+
+    compute_draw_shader := load_shader("copy_depth_image");
+
+    shader_stage_info := VkPipelineShaderStageCreateInfo.{
+        stage = .COMPUTE_BIT,
+        module = compute_draw_shader,
+        pName = "main"
+    };
+
+    compute_pipeline_info := VkComputePipelineCreateInfo.{
+        layout = copy_depth_image_pipeline_layout,
+        stage = shader_stage_info
+    };
+
+    vk_init_validate(vkCreateComputePipelines(logical_device, VK_NULL_HANDLE, 1, *compute_pipeline_info, null, *copy_depth_image_pipeline), "failed to create the bg draw pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, copy_depth_image_pipeline, null));
 }
 
 create_sphere_pipeline :: () {
@@ -1577,6 +1647,46 @@ create_descriptors :: () {
             pBufferInfo = *info
         };
         vkUpdateDescriptorSets(logical_device, 1, *write, 0, null);
+    }
+
+    depth_layout_bindings := VkDescriptorSetLayoutBinding.[
+        .{binding=0, descriptorType=.COMBINED_IMAGE_SAMPLER, descriptorCount=1},
+        .{binding=1, descriptorType=.STORAGE_IMAGE, descriptorCount=1},
+    ];
+    depth_and_draw_descriptor_layout = build_descriptor_set_layout(depth_layout_bindings, .COMPUTE_BIT);
+    depth_and_draw_descriptors = allocate_descriptor_set(game_descriptor_pool, depth_and_draw_descriptor_layout);
+
+    deletion_queue_add(*game_deletion_queue, *vkDestroyDescriptorSetLayout(logical_device, depth_and_draw_descriptor_layout, null));
+
+    {
+        infos := VkDescriptorImageInfo.[
+            .{
+                sampler = depth_and_draw_sampler,
+                imageLayout=.SHADER_READ_ONLY_OPTIMAL,
+                imageView=depth_image.image_view
+            }, 
+            .{
+                imageLayout=.GENERAL,
+                imageView=draw_image.image_view
+            }
+        ];
+        writes := VkWriteDescriptorSet.[
+            .{
+                dstSet=depth_and_draw_descriptors,
+                dstBinding=0,
+                descriptorCount=1,
+                descriptorType=.COMBINED_IMAGE_SAMPLER,
+                pImageInfo=*infos[0]
+            },
+            .{
+                dstSet=depth_and_draw_descriptors,
+                dstBinding=1,
+                descriptorCount=1,
+                descriptorType=.STORAGE_IMAGE,
+                pImageInfo=*infos[1]
+            }
+        ];
+        vkUpdateDescriptorSets(logical_device, 2, writes.data, 0, null);
     }
 }
 
@@ -2406,6 +2516,16 @@ immediate_texture: Texture;
 
 // #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
+copy_depth_image_to_draw_image :: (cmd: VkCommandBuffer) {
+    if draw_extent.width == 0 || draw_extent.height == 0 then return;
+
+    vkCmdBindPipeline(cmd, .COMPUTE, copy_depth_image_pipeline);
+    vkCmdBindDescriptorSets(cmd, .COMPUTE, copy_depth_image_pipeline_layout, 0, 1, *depth_and_draw_descriptors, 0, null);
+    dispatch_width := ceil(draw_extent.width / 32.0);
+    dispatch_height := ceil(draw_extent.height / 32.0);
+    vkCmdDispatch(cmd, xx dispatch_width, xx dispatch_height, 1);
+}
+
 // draw_sphere :: (cmd: VkCommandBuffer, target: VkImage) {
 //     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
@@ -2513,13 +2633,13 @@ draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_p
     if mesh.primitive_type == {
     case .CUBE;
         box := *entity.physics_properties.body_collider.box;
-        scale = make_scale_matrix4(.{box.width, box.length, box.half_height*2.0});
+        scale = make_scale_matrix4(.{box.half_width*2.0, box.half_length*2.0, box.half_height*2.0});
     case .SPHERE;
         sphere := *entity.physics_properties.body_collider.sphere;
         scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
     case .PLANE;
         plane := *entity.physics_properties.body_collider.plane;
-        scale = make_scale_matrix4(.{plane.width, 1.0, plane.half_height*2.0});
+        scale = make_scale_matrix4(.{plane.half_width*2.0, 1.0, plane.half_height*2.0});
     }
     // todo: add draw request to array and draw instanced
     model *= scale;
@@ -3347,8 +3467,13 @@ draw_image: Texture;
 depth_image: Texture;
 
 draw_extent: VkExtent2D;
+
 draw_image_descriptors: VkDescriptorSet;
 draw_image_descriptor_layout: VkDescriptorSetLayout;
+
+depth_and_draw_descriptors: VkDescriptorSet;
+depth_and_draw_descriptor_layout: VkDescriptorSetLayout;
+depth_and_draw_sampler: VkSampler;
 
 test_tex_descriptors: VkDescriptorSet;
 test_tex_descriptor_layout: VkDescriptorSetLayout;
@@ -3374,6 +3499,9 @@ line_vbo: Mesh_Data_Buffer;
 
 rect_pipeline: VkPipeline;
 rect_pipeline_layout: VkPipelineLayout;
+
+copy_depth_image_pipeline: VkPipeline;
+copy_depth_image_pipeline_layout: VkPipelineLayout;
 
 sphere_pipeline: VkPipeline;
 sphere_pipeline_layout: VkPipelineLayout;

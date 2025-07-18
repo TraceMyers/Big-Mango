@@ -29,7 +29,7 @@ draw_aabb :: (collider: Entity_Collider, position: Vector3, orientation: Quatern
 draw_aabb :: (aabb: AABB, color: Color4f) {
     points: [8]Vector3;
     get_aabb_points(aabb, *points);
-    for AABB_Edges {
+    for Box_Edges {
         draw_line(points[it.a], points[it.b], color);
     }
 }

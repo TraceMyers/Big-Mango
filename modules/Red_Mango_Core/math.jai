@@ -2,6 +2,7 @@
 SMALLISH_NUMBER     :: 0.003;
 SMALL_NUMBER        :: 0.0001;
 VERY_SMALL_NUMBER   :: 0.000001;
+SMALLEST_OF_NUMBERS :: 0.00000003; // (not really)
 
 INV_PI          :: 1.0 / PI;
 INV_2_PI        :: 1.0 / (2.0 * PI);
@@ -234,44 +235,60 @@ get_axes :: (orientation: Quaternion, forward: *Vector3, up: *Vector3, right: *V
 rotate :: (in_out_orientation: *Quaternion, axis: Vector3, angle: float32) {
     assert(is_normalized(axis));
     ht := angle * 0.5;
-    sin_ht := sin(ht);
-    cos_ht := cos(ht);
+    sin_ht, cos_ht := sin_cos(ht);
     rot_quat := Quaternion.{xyz=axis*sin_ht, w=cos_ht};
     in_out_orientation.* = rot_quat * in_out_orientation.*;
-    assert(!is_nan_is_inf(in_out_orientation.x) && !is_nan_is_inf(in_out_orientation.y) && !is_nan_is_inf(in_out_orientation.z) && !is_nan_is_inf(in_out_orientation.z));
+    normalize_or_identity(in_out_orientation);
+    // assert(!is_nan_is_inf(in_out_orientation.x) && !is_nan_is_inf(in_out_orientation.y) && !is_nan_is_inf(in_out_orientation.z) && !is_nan_is_inf(in_out_orientation.z));
 }
 
-rotate :: inline (v: Vector3, axis: Vector3, angle: float32) -> Vector3 {
+rotate :: inline (v: Vector3, axis: Vector3, angle: float32, $do_normalize := true) -> Vector3 {
     assert(is_normalized(axis));
     ht := angle * 0.5;
-    sin_ht := sin(ht);
-    cos_ht := cos(ht);
+    sin_ht, cos_ht := sin_cos(ht);
     rot_quat := Quaternion.{xyz=axis*sin_ht, w=cos_ht};
-    return normalize(rotate(v, rot_quat));
+    out_vec := rotate(v, rot_quat);
+    if do_normalize {
+        return normalize(out_vec);
+    } else {
+        return out_vec;
+    }
 }
 
-right_direction :: inline (q: *Quaternion) -> Vector3 {
-    return rotate(MANGO_RIGHT, q);
+right_direction :: inline (q: *Quaternion, $do_normalize := true) -> Vector3 {
+    vec := rotate(MANGO_RIGHT, q);
+    #if do_normalize {
+        normalize(*vec);
+    }
+    return vec;
+}
+
+up_direction :: inline (q: *Quaternion, $do_normalize := true) -> Vector3 {
+    vec := rotate(MANGO_UP, q);
+    #if do_normalize {
+        normalize(*vec);
+    }
+    return vec;
+}
+
+fore_direction :: inline (q: *Quaternion, $do_normalize := true) -> Vector3 {
+    vec := rotate(MANGO_FORE, q);
+    #if do_normalize {
+        normalize(*vec);
+    }
+    return vec;
 }
 
 right_direction_xy :: inline (q: *Quaternion) -> Vector3 {
-    right_3d := right_direction(q);
+    right_3d := right_direction(q, false);
     right_3d.z = 0;
     return normalize(right_3d);
 }
 
 fore_direction_xy :: inline (q: *Quaternion) -> Vector3 {
-    fore_3d := fore_direction(q);
+    fore_3d := fore_direction(q, false);
     fore_3d.z = 0;
     return normalize(fore_3d);
-}
-
-up_direction :: inline (q: *Quaternion) -> Vector3 {
-    return rotate(MANGO_UP, q);
-}
-
-fore_direction :: inline (q: *Quaternion) -> Vector3 {
-    return rotate(MANGO_FORE, q);
 }
 
 distance_squared :: inline (q1: Quaternion, q2: Quaternion) -> float {
@@ -300,7 +317,7 @@ interp_rotate :: (origin: Quaternion, target: Quaternion, norm: float32) -> Quat
     dp := dot(origin, target);
     use_target := ifx dp < 0 then -target else target;
     rot_dist_sq := distance_squared(origin, use_target);
-    if rot_dist_sq <= 0.0001 {
+    if rot_dist_sq <= VERY_SMALL_NUMBER {
         return target;
     }
     if rot_dist_sq < 0.15 {
@@ -315,8 +332,7 @@ interp_rotate :: (origin: Quaternion, target: Quaternion, speed: float32, delta_
     t := 2.0 * acos(cos_ht);
     if abs(rot_dist) >= t {
         return target;
-    } 
-    return interp_rotate(origin, target, rot_dist / t);
+    } else return interp_rotate(origin, target, rot_dist / t);
 }
 
 // todo do these work???
@@ -352,7 +368,7 @@ exponential_interp :: (a: $T/VectorAndFloatTypes, b: T, speed: float32, delta_ti
     return a + (b - a) * move_factor;
 }
 
-closest_point_on_each_line_segment :: (a1: *Vector3, a2: *Vector3, b1: *Vector3, b2: *Vector3, closest_point_a: *Vector3, closest_point_b: *Vector3) {
+closest_point_on_each_line_segment_old :: (a1: *Vector3, a2: *Vector3, b1: *Vector3, b2: *Vector3, closest_point_a: *Vector3, closest_point_b: *Vector3) {
     a_diff := a2.* - a1.*;
     b_diff := b2.* - b1.*;
     w := a1.* - b1.*;
@@ -423,6 +439,86 @@ closest_point_on_each_line_segment :: (a1: *Vector3, a2: *Vector3, b1: *Vector3,
 
     closest_point_a.* = a1 + (sc * a_diff);
     closest_point_b.* = b1 + (tc * b_diff);  
+}
+
+closest_point_on_each_line_segment :: (a1: Vector3, a2: Vector3, b1: Vector3, b2: Vector3, closest_pt_a: *Vector3, closest_pt_b: *Vector3) -> s: float, t: float {
+    // from Real Time Collision Detection, by Christer Ericson
+    a_diff          := a2 - a1;
+    b_diff          := b2 - b1;
+    b_to_a_diff     := a1 - b1;
+    a_len_sq        := length_squared(a_diff);
+    b_len_sq        := length_squared(b_diff);
+    cos_t           := dot(b_diff, b_to_a_diff);
+
+    // normalized distance along each segement where the respective closest points lie
+    s, t: float = ---;
+
+    MAX_ERROR :: SMALL_NUMBER;
+    if a_len_sq <= MAX_ERROR {
+        if b_len_sq <= MAX_ERROR {
+            s, t = 0;
+            closest_pt_a.* = a1;
+            closest_pt_b.* = b1;
+            return s, t;
+        } else {
+            s = 0;
+            t = clamp(cos_t / b_len_sq, 0, 1);
+        }
+    } else {
+        cos_p := dot(a_diff, b_to_a_diff);
+        if b_len_sq <= MAX_ERROR {
+            t = 0;
+            s = clamp(-cos_p / a_len_sq, 0, 1);
+        } else {
+            // |a| |b| cos(q)
+            scaled_cos_diffs := dot(a_diff, b_diff);
+            // |a|^2 |b|^2 - (|a| |b| cos(q))^2 = (1 - cos(q)^2) |a|^2 |b|^2)
+            denom := a_len_sq * b_len_sq - scaled_cos_diffs * scaled_cos_diffs; // book says always nonnegative
+
+            if denom > MAX_ERROR {
+                s = clamp((scaled_cos_diffs * cos_t - cos_p * b_len_sq) / denom, 0, 1);
+            } else {
+                // segments parallel
+                // not from book; actually, everybody seems to get this wrong. both the book and some guy on stack overflow seem to think that picking an arbitrary value for s (like 0) here is fine, but this doesn't give a valuable answer in cases where the segments are non-overlapping along their parallel axis.
+                // example: a1-------a2        b1--------b2
+                // these two are parallel, but s should be 1 because a2 is closer to both b1 and b2
+                // it's not pointless to make this distinction. i have found cases where it is important.
+                b_to_a_dist_sq_1 := length_squared(a1 - b1);
+                b_to_a_dist_sq_2 := length_squared(a2 - b2);    
+                b_to_a_dist_sq_3 := length_squared(a1 - b2);    
+                b_to_a_dist_sq_4 := length_squared(a2 - b1);
+                min_dist_sq: float = ---;
+                if b_to_a_dist_sq_1 < b_to_a_dist_sq_2 {
+                    min_dist_sq = b_to_a_dist_sq_1;
+                    s = 0;
+                } else {
+                    min_dist_sq = b_to_a_dist_sq_2;
+                    s = 1;
+                }
+                if b_to_a_dist_sq_3 < min_dist_sq {
+                    min_dist_sq = b_to_a_dist_sq_3;
+                    s = 0;
+                }
+                if b_to_a_dist_sq_4 < min_dist_sq {
+                    s = 1;
+                }
+            }
+
+            t = (scaled_cos_diffs * s + cos_t) / b_len_sq;
+
+            if t < 0 {
+                t = 0;
+                s = clamp(-cos_p / a_len_sq, 0, 1);
+            } else if t > 1 {
+                t = 1;
+                s = clamp((scaled_cos_diffs - cos_p) / a_len_sq, 0, 1);
+            }
+        }
+    }
+
+    closest_pt_a.* = a1 + a_diff * s;
+    closest_pt_b.* = b1 + b_diff * t;
+    return s, t;
 }
 
 // copied from https://stackoverflow.com/questions/66979936/closest-two-3d-point-between-two-line-segment-of-varied-magnitude-in-different-p so I'm not wasting time figuring out the 3d version
@@ -501,6 +597,163 @@ distance_from_line :: inline (point: *Vector3, ray: *Ray3) -> float {
 distance_squared_from_line :: inline (point: *Vector3, ray: *Ray3) -> float {
     closest_point := closest_point_on_line(point, ray);
     return distance_squared(closest_point, point.*);
+}
+
+closest_point_on_line_segment_from_aabb_at_origin_if_intersection :: (segment_a: Vector3, segment_b: Vector3, box_extent: Vector3) -> Vector3, bool {
+    segment_diff := segment_b - segment_a;
+    t_min := 0.0;
+    t_max := 1.0;
+
+    for 0..2 {
+        if abs(segment_diff.component[it]) < VERY_SMALL_NUMBER {
+            // if the segment is roughly or exactly parallel to this axis, the difference is tiny or 0
+            if segment_a.component[it] < -box_extent.component[it] || segment_a.component[it] > box_extent.component[it] {
+                // no overlap, no intersection
+                return .{}, false;
+            }
+        } else {
+            inv_segment_dist_along_axis := 1.0 / segment_diff.component[it];
+            // get the norm projections of the boxes' axis extent along the line of the segment
+            t1 := (-box_extent.component[it] - segment_a.component[it]) * inv_segment_dist_along_axis;
+            t2 := ( box_extent.component[it] - segment_a.component[it]) * inv_segment_dist_along_axis;
+
+            if t1 > t2 then t1, t2 = t2, t1;
+
+            // narrow the range where the segment could possibly be passing through the box
+            t_min = max(t_min, t1);
+            t_max = min(t_max, t2);
+
+            if t_min > t_max {
+                // it's a miss
+                return .{}, false;
+            }
+        }
+    }
+
+    intersection_segment_a := segment_a + segment_diff * t_min;
+    intersection_segment_b := segment_a + segment_diff * t_max;
+
+    origin := Vector3.{};
+    return closest_point_on_line_segment(*origin, *intersection_segment_a, *intersection_segment_b), true;
+}
+
+// my own super special home-cooked algorithm that might work. let's hope.
+closest_point_on_line_segment_from_aabb_at_origin :: (segment_a: Vector3, segment_b: Vector3, box_extent: Vector3) -> Vector3 {
+    a_clamped, b_clamped: Vector3 = ---;
+    a_clamp_record, b_clamp_record: Int_Vector3 = ---;
+
+    origin := Vector3.{};
+    closest_pt_on_seg_if_intersection, success := closest_point_on_line_segment_from_aabb_at_origin_if_intersection(segment_a, segment_b, box_extent);
+    if success {
+        return closest_pt_on_seg_if_intersection;
+    }
+
+    a_clamped.x, a_clamp_record.x = informed_clamp(segment_a.x, -box_extent.x, box_extent.x);
+    a_clamped.y, a_clamp_record.y = informed_clamp(segment_a.y, -box_extent.y, box_extent.y);
+    a_clamped.z, a_clamp_record.z = informed_clamp(segment_a.z, -box_extent.z, box_extent.z);
+
+    b_clamped.x, b_clamp_record.x = informed_clamp(segment_b.x, -box_extent.x, box_extent.x);
+    b_clamped.y, b_clamp_record.y = informed_clamp(segment_b.y, -box_extent.y, box_extent.y);
+    b_clamped.z, b_clamp_record.z = informed_clamp(segment_b.z, -box_extent.z, box_extent.z);   
+
+    // if no axes were clamped, the segment would be at least partly inside the box, and it should have already returned
+    assert(a_clamp_record != .{});
+    assert(b_clamp_record != .{});
+
+    return_point_closest_to_projection :: () #expand {
+        a_dist_sq := distance_squared(`a_clamped, `segment_a);
+        b_dist_sq := distance_squared(`b_clamped, `segment_b);
+        if a_dist_sq < b_dist_sq {
+            `return segment_a;
+        } else if b_dist_sq < a_dist_sq {
+            `return segment_b;
+        } else {
+            `return `segment_a + (`segment_b - `segment_a) * 0.5;
+        }
+    }
+
+    if a_clamp_record == b_clamp_record {
+        // clamped to same face, edge, or point. in this case, just pick the point closest to its projection
+        return_point_closest_to_projection();
+    }
+
+    // pathfind to the edge or face where the closest point must be
+    abs_a_clamp_record := abs(a_clamp_record);
+    abs_b_clamp_record := abs(b_clamp_record);
+
+    if abs_a_clamp_record.x == abs_b_clamp_record.x && abs_a_clamp_record.x == 1 {
+        // both on pos or neg x face
+        return_point_closest_to_projection();
+    } else if abs_a_clamp_record.y == abs_b_clamp_record.y && abs_a_clamp_record.y == 1 {
+        // both on pos or neg y face
+        return_point_closest_to_projection();
+    } else if abs_a_clamp_record.z == abs_b_clamp_record.z && abs_a_clamp_record.z == 1 {
+        // both on pos or neg z face
+        return_point_closest_to_projection();
+    } 
+
+    aabb_points: [8]Vector3 = ---;
+    get_aabb_points(.{.{}, box_extent}, *aabb_points);
+
+    a_clamped_to_a_diff := segment_a - a_clamped;
+    shortest_dist_sq := FLOAT32_MAX;
+    closest_point_on_segment: Vector3;
+
+    for Box_Edges {
+        edge_pt_0 := *aabb_points[it.a];
+        edge_pt_1 := *aabb_points[it.b];
+
+        edge_pt_0_diff := edge_pt_0 - a_clamped;
+        edge_pt_1_diff := edge_pt_1 - a_clamped;
+
+        cos_t := dot(a_clamped_to_a_diff, edge_pt_0_diff);
+        cos_p := dot(a_clamped_to_a_diff, edge_pt_1_diff);
+
+        // if clamped segment -> box edge is in the same direction as clamped segment -> segment
+        // essentially looking for the edge where if we made an oddly shaped plane with the four points being the two segment points and the two clamped segment points, where *might* that intersect a box edge?
+        if cos_t >= 0 && cos_p >= 0 {
+            closest_pt_seg, closest_pt_box: Vector3 = ---;
+            closest_point_on_each_line_segment(*segment_a, *segment_b, edge_pt_0, edge_pt_1, *closest_pt_seg, *closest_pt_box);
+            dist_sq := distance_squared(closest_pt_seg, closest_pt_box);
+            if dist_sq < shortest_dist_sq {
+                dist_sq = shortest_dist_sq;
+                closest_point_on_segment = closest_pt_seg;
+            }
+        }
+    }
+
+    // shouldn't happen I think, but I'm not an expert here
+    if shortest_dist_sq == FLOAT32_MAX {
+        closest_point_on_segment = segment_a + (segment_b - segment_a) * 0.5;
+    }
+
+    return closest_point_on_segment;
+}
+
+clamp :: inline (point: Vector3, extrema: Vector3) -> Vector3 {
+    return .{
+        clamp(point.x, -extrema.x, extrema.x),
+        clamp(point.y, -extrema.y, extrema.y),
+        clamp(point.z, -extrema.z, extrema.z),
+    };
+}
+
+clamp :: inline (point: Vector3, min: float, max: float) -> Vector3 {
+    return .{
+        clamp(point.x, min, max),
+        clamp(point.y, min, max),
+        clamp(point.z, min, max),
+    };
+}
+
+informed_clamp :: inline (x: float, min: float, max: float) -> float, s32 {
+    if x < min {
+        return min, -1;
+    } else if x > max {
+        return max, 1;
+    } else {
+        return x, 0;
+    }
 }
 
 // don't use this procedure if the input value is too large! makes large error.
@@ -596,6 +849,66 @@ rad2deg :: inline (rad: float) -> deg: float {
 
 toggle :: inline (b: *bool) {
     b.* = !b.*;
+}
+
+AABB :: struct {
+    center: Vector3;
+    extent: Vector3;
+#place center;
+    offset: Vector3;
+}
+
+Box_Point :: enum u8 {
+    LOW_LOWER_LEFT;
+    LOW_LOWER_RIGHT;
+    LOW_UPPER_LEFT;
+    LOW_UPPER_RIGHT;
+    HIGH_LOWER_LEFT;
+    HIGH_LOWER_RIGHT;
+    HIGH_UPPER_LEFT;
+    HIGH_UPPER_RIGHT;
+}
+
+Box_Edge :: struct {
+    a: Box_Point;
+    b: Box_Point;
+}
+
+Box_Edges :: Box_Edge.[
+    .{.LOW_LOWER_LEFT, .LOW_LOWER_RIGHT},
+    .{.LOW_LOWER_LEFT, .LOW_UPPER_LEFT},
+    .{.LOW_UPPER_RIGHT, .LOW_LOWER_RIGHT},
+    .{.LOW_UPPER_RIGHT, .LOW_UPPER_LEFT},
+    .{.LOW_LOWER_LEFT, .HIGH_LOWER_LEFT},
+    .{.LOW_LOWER_RIGHT, .HIGH_LOWER_RIGHT},
+    .{.LOW_UPPER_LEFT, .HIGH_UPPER_LEFT},
+    .{.LOW_UPPER_RIGHT, .HIGH_UPPER_RIGHT},
+    .{.HIGH_LOWER_LEFT, .HIGH_LOWER_RIGHT},
+    .{.HIGH_LOWER_LEFT, .HIGH_UPPER_LEFT},
+    .{.HIGH_UPPER_RIGHT, .HIGH_LOWER_RIGHT},
+    .{.HIGH_UPPER_RIGHT, .HIGH_UPPER_LEFT}
+];
+
+get_aabb_points :: (aabb: AABB, out_points: *[8]Vector3) {
+    out_points.*[Box_Point.LOW_LOWER_LEFT]     = aabb.center - aabb.extent;
+    out_points.*[Box_Point.LOW_LOWER_RIGHT]    = aabb.center + Vector3.{ aabb.extent.x, -aabb.extent.y, -aabb.extent.z}; 
+    out_points.*[Box_Point.LOW_UPPER_LEFT]     = aabb.center + Vector3.{-aabb.extent.x,  aabb.extent.y, -aabb.extent.z}; 
+    out_points.*[Box_Point.LOW_UPPER_RIGHT]    = aabb.center + Vector3.{ aabb.extent.x,  aabb.extent.y, -aabb.extent.z}; 
+    out_points.*[Box_Point.HIGH_LOWER_LEFT]    = aabb.center + Vector3.{-aabb.extent.x, -aabb.extent.y,  aabb.extent.z};
+    out_points.*[Box_Point.HIGH_LOWER_RIGHT]   = aabb.center + Vector3.{ aabb.extent.x, -aabb.extent.y,  aabb.extent.z}; 
+    out_points.*[Box_Point.HIGH_UPPER_LEFT]    = aabb.center + Vector3.{-aabb.extent.x,  aabb.extent.y,  aabb.extent.z};
+    out_points.*[Box_Point.HIGH_UPPER_RIGHT]   = aabb.center + aabb.extent;
+} 
+
+get_box_points :: inline (position: Vector3, length_vec: Vector3, height_vec: Vector3, width_vec: Vector3, out_points: *[8]Vector3) {
+    out_points.*[Box_Point.LOW_LOWER_LEFT]     = position - length_vec - height_vec - width_vec;
+    out_points.*[Box_Point.LOW_LOWER_RIGHT]    = position - length_vec - height_vec + width_vec;
+    out_points.*[Box_Point.LOW_UPPER_LEFT]     = position + length_vec - height_vec - width_vec;
+    out_points.*[Box_Point.LOW_UPPER_RIGHT]    = position + length_vec - height_vec + width_vec;
+    out_points.*[Box_Point.HIGH_LOWER_LEFT]    = position - length_vec + height_vec - width_vec;
+    out_points.*[Box_Point.HIGH_LOWER_RIGHT]   = position - length_vec + height_vec + width_vec;
+    out_points.*[Box_Point.HIGH_UPPER_LEFT]    = position + length_vec + height_vec - width_vec;
+    out_points.*[Box_Point.HIGH_UPPER_RIGHT]   = position + length_vec + height_vec + width_vec;
 }
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
