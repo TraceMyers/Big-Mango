@@ -61,6 +61,8 @@ Collision_Channels :: enum_flags u64 {
     DEFAULT :: 0x1;
 }
 
+MAX_MASS :: 8192.0;
+
 Physics_Properties :: struct {
     mass := 1.0;
     friction_bias := 0.0;

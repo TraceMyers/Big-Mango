@@ -13,26 +13,26 @@ dbg_character_move_input: Vector2;
 
 process_entity_input :: () {
     if control_mode == .FREE_FLY {
-        handle_free_fly_input(*context.camera_2);
+        handle_free_fly_input(context.camera_2);
     } else if control_mode == .FIRST_PERSON {
-        handle_first_person_input(*context.player_entity, *context.camera_1);
+        handle_first_person_input(context.player_entity, context.camera_1);
     } else {
         context.camera_2.projection = .ORTHOGRAPHIC;
         context.camera_2.orthographic.scale = ortho_scale;
         if control_mode == {
         case .ORTHO_YZ_45_DOWN;
             sin_t, cos_t := sin_cos(PI/4);
-            set_orientation(*context.camera_2, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
+            set_orientation(context.camera_2, .{0,sin_t,-cos_t}, .{0,cos_t,sin_t});
         case .ORTHO_YZ;
-            set_orientation(*context.camera_2, .{y=1}, .{z=1});
+            set_orientation(context.camera_2, .{y=1}, .{z=1});
         case .ORTHO_XZ;
-            set_orientation(*context.camera_2, .{x=1}, .{z=1});
+            set_orientation(context.camera_2, .{x=1}, .{z=1});
         case .ORTHO_XY;
-            set_orientation(*context.camera_2, .{z=-1}, .{y=1});
+            set_orientation(context.camera_2, .{z=-1}, .{y=1});
         }
 
-        handle_ortho_input(*context.player_entity, *context.camera_2);
-        target_camera_pos := context.player_entity.position - fore_direction(*context.camera_2) * 100.0;
+        handle_ortho_input(context.player_entity, context.camera_2);
+        target_camera_pos := context.player_entity.position - fore_direction(context.camera_2) * 100.0;
         if control_mode == prev_control_mode {
             context.camera_2.position = exponential_interp(context.camera_2.position, target_camera_pos, 10.0, delta_time);
         } else {

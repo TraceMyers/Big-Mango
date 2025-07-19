@@ -12,23 +12,21 @@ scratch_init_game :: () {
     }
     // ground entity
     {
-        entity_ref := spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
+        ground := spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
 
-        phys_props := get_entity_physics_properties(entity_ref);
+        phys_props := get_entity_physics_properties(ground.ref);
         {
             using phys_props;
-            body_collider.type = .PLANE;
-            body_collider.plane.half_height = 500.0;
-            body_collider.plane.half_width = 500.0;
+            body_collider.type = .RECT;
+            body_collider.rect.half_height = 500.0;
+            body_collider.rect.half_width = 500.0;
             body_elasticity = 0.01;
             gravity_accel = 0.0;
             mass = IMMOVABLE_ENTITY_MASS;
         }
 
-        set_entity_meshes(entity_ref, .{plane_mesh,.{}});
+        set_entity_meshes(ground.ref, .{plane_mesh,.{}});
 
-        ground: Entity;
-        get_entity(*ground, entity_ref);
         set_orientation(*ground.orientation, .{0,0,1}, .{1,0,0});
         // rotate(*ground, WORLD_RIGHT, 0.5);
         ground.position.z = 0.0;
@@ -36,13 +34,11 @@ scratch_init_game :: () {
     // camera init
     {
         // temp camera stuff;
-        context.camera_1.ref = spawn_entity(.CAMERA, name="camera 1", physics_properties_template=.CAMERA);
-        get_entity(*context.camera_1, context.camera_1.ref);
+        context.camera_1 = spawn_entity(.CAMERA, name="camera 1", physics_properties_template=.CAMERA);
     }
     // fp camera
     {
-        context.camera_2.ref = spawn_entity(.CAMERA, name="camera 2", physics_properties_template=.CAMERA);
-        get_entity(*context.camera_2, context.camera_2.ref);
+        context.camera_2 = spawn_entity(.CAMERA, name="camera 2", physics_properties_template=.CAMERA);
     }
     // npc 
     // for 0..0
@@ -73,7 +69,7 @@ scratch_init_game :: () {
     // }
     // character / character mesh
     {
-        context.player_entity.ref = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
+        context.player_entity = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
 
         entity_phys_props := get_entity_physics_properties(context.player_entity.ref);
         {
@@ -90,7 +86,6 @@ scratch_init_game :: () {
         mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
         set_entity_meshes(context.player_entity.ref, .{mesh, .{tint=.{0.7,0.7,0.9,1.0}}}, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
 
-        get_entity(*context.player_entity, context.player_entity.ref);
         context.player_entity.position.xy = .{40,40};
         context.player_entity.position.z = 50.0;
     }

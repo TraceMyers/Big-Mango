@@ -6,9 +6,8 @@ Entity_Patch_Info :: struct {
     physics_properties: u16;
     body_collider: u16;
     meshes: u16;
-    creature: u16 = INVALID_CREATURE_INDEX;
     device: u16 = INVALID_DEVICE_INDEX;
-    flags: Entity_Patch_Flags;
+    flags: Entity_Patch_Flags = 0;
 }
 
 Entity :: struct {
@@ -19,9 +18,9 @@ Entity :: struct {
     physics_properties: *Physics_Properties;
     body_collider: *Entity_Collider;
     meshes: []Entity_Mesh;
-    creature: *Entity_Creature;
     device: *Entity_Device;
     name: string;
+    generation: s32 = -1;
 }
 
 // ----------------------------------------------------------------------------------------------------------------- flags
@@ -29,14 +28,12 @@ Entity :: struct {
 Entity_Type_Flags :: enum_flags u32 {
     CAMERA::1;
     STATIC_MESH;
-    CREATURE;
     DEVICE;
 }
 
 Entity_Type :: enum u32 {
     CAMERA :: Entity_Type_Flags.CAMERA;
     STATIC_MESH :: Entity_Type_Flags.STATIC_MESH;
-    STATIC_MESH_CREATURE :: (Entity_Type_Flags.STATIC_MESH | Entity_Type_Flags.CREATURE);
     STATIC_MESH_DEVICE  :: (Entity_Type_Flags.STATIC_MESH | Entity_Type_Flags.DEVICE);
 }
 
@@ -50,7 +47,7 @@ ALL_ENTITY_TYPE_FLAGS :: #run -> Entity_Type_Flags {
 }
 
 Entity_Patch_Flags :: enum_flags u32 {
-    DYNAMIC_PHYSICS_PROPERTIES::1;
+    DYNAMIC_PHYSICS_PROPERTIES;
 }
 
 Entity_Type_Flags_Union :: union {
@@ -61,18 +58,14 @@ Entity_Type_Flags_Union :: union {
 // -------------------------------------------------------------------------------------------------------- component flags
 
 Entity_Device_Type :: enum u16 {
-    DEVICE :: 1;
+    DEVICE;
     BUTTON;
 }
-
-Entity_Creature_Type :: enum u16 {
-    CREATURE :: 1;
-} 
 
 // ------------------------------------------------------------------------------------------------------------- components
 
 Entity_Physics_Core_Flags :: enum_flags u32 {
-    MOVED_BY_PHYSICS :: 1;
+    MOVED_BY_PHYSICS;
     JUMP_QUEUED;
     ON_GROUND;
 }
@@ -107,12 +100,6 @@ Trigger_Volume_Allocation :: struct {
 Entity_Mesh :: struct {
     data: *Mesh;
     albedo: Mesh_Albedo;
-}
-
-// One-Big-Struct approach to creatures
-Entity_Creature :: struct {
-    type: Entity_Creature_Type;
-    // a ton of shit will go here
 }
 
 Trigger_Volume_Proc :: #type (owner: *Entity, guest: *Entity);

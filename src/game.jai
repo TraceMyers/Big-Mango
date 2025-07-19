@@ -6,6 +6,7 @@ fixed_delta_time := 0.0;
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
 main :: () {
+    rm_log("starting...", header="STARTUP");
     defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
     #if OS == .WINDOWS {
@@ -20,6 +21,7 @@ main :: () {
     scope_system_init(boot_vulkan,      *startup_success);
     scope_system_init(boot_imgui,       *startup_success);
     scope_system_init(boot_entities,    *startup_success);
+    scope_system_init(boot_collision,   *startup_success);
     if !startup_success then return;
 
     scratch_init_game();
@@ -30,7 +32,7 @@ main :: () {
     while !quit {
         update_input();
         scratch_think();
-        solve_physics();
+        // solve_physics();
         draw_dev_ui();
         end_frame();
     }
@@ -80,10 +82,12 @@ end_frame :: () {
     dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
 
     flush_entity_deletion_queue();
-    set_global_entities();
 
     reset_temporary_storage();
     game_frame_count += 1;
+
+    // doing this after game_frame_count advances so the data are correct for the next generation of entities
+    set_global_entities();
 }
 
 calc_fps :: () -> float32 {
@@ -125,7 +129,7 @@ Boot_Stage :: enum {
 
 window: Window_Type;
 delta_time := 0.01;
-game_frame_count: s64;
+game_frame_count: s32;
 per_frame_time: float64;
 non_render_time: float64;
 quit := false;
@@ -179,6 +183,8 @@ Zlib :: #import "zlib";
 #load "physics.jai";
 #load "draw.jai";
 #load "entity_control.jai";
-#load "raycast.jai";
+// #load "raycast.jai";
 #load "entities/entity_button.jai";
 #load "add_to_context.jai";
+#load "collision.jai";
+#load "overlap.jai";

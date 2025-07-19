@@ -567,9 +567,9 @@ add_physics_debugger :: () {
 add_entity_pocket :: () {
     if CollapsingHeader("entity pocket") {
         if Button("capsule") {
-            ref := spawn_entity(.STATIC_MESH, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
-            test_ref = ref;
-            entity_phys_props := get_entity_physics_properties(ref);
+            entity := spawn_entity(.STATIC_MESH, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
+            test_ref = entity.ref;
+            entity_phys_props := get_entity_physics_properties(test_ref);
             {
                 using entity_phys_props;
                 body_elasticity = 1.0;
@@ -579,10 +579,8 @@ add_entity_pocket :: () {
             }
             // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
             capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
-            set_entity_meshes(ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
-            e: Entity;
-            get_entity(*e, ref);
-            e.position.z = 100.0;
+            set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
+            entity.position.z = 100.0;
         }
     }
 }

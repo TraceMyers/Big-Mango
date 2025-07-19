@@ -153,9 +153,9 @@ render_frame :: () {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat: Matrix4 = ---;
     if control_mode == .FIRST_PERSON {
-        vp_mat = view_projection_matrix(*context.camera_1, viewport);
+        vp_mat = view_projection_matrix(context.camera_1, viewport);
     } else {
-        vp_mat = view_projection_matrix(*context.camera_2, viewport);
+        vp_mat = view_projection_matrix(context.camera_2, viewport);
     }
 
     prepare_lights();
@@ -184,10 +184,9 @@ render_frame :: () {
         meshes := get_entity_meshes_at(it);
         if meshes.count == 0 then continue;
         for *emesh : meshes {
-            entity: Entity = ---;
-            get_entity_at(*entity, it);
+            entity := get_entity_at(it);
             if entity.id == context.player_entity.id && control_mode == .FIRST_PERSON then continue;
-            draw_mesh(cmd, *entity, emesh, *vp_mat);
+            draw_mesh(cmd, entity, emesh, *vp_mat);
         }
     }
 
@@ -976,7 +975,7 @@ create_buffers :: () {
 create_primitives :: () {
     {
         plane_mesh = create_mesh("_plane", plane_vertices, plane_indices);
-        plane_mesh.primitive_type = .PLANE;
+        plane_mesh.primitive_type = .RECT;
     }
     {
         cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
@@ -2637,9 +2636,9 @@ draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_p
     case .SPHERE;
         sphere := *entity.physics_properties.body_collider.sphere;
         scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
-    case .PLANE;
-        plane := *entity.physics_properties.body_collider.plane;
-        scale = make_scale_matrix4(.{plane.half_width*2.0, 1.0, plane.half_height*2.0});
+    case .RECT;
+        rect := *entity.physics_properties.body_collider.rect;
+        scale = make_scale_matrix4(.{rect.half_width*2.0, 1.0, rect.half_height*2.0});
     }
     // todo: add draw request to array and draw instanced
     model *= scale;
@@ -3127,7 +3126,7 @@ Mesh_Albedo :: struct {
 Mesh_Primitive_Type :: enum u8 {
     SPHERE :: 1;
     CUBE;
-    PLANE;
+    RECT;
 };
 
 Mesh :: struct {

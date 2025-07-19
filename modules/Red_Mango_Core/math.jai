@@ -746,6 +746,21 @@ clamp :: inline (point: Vector3, min: float, max: float) -> Vector3 {
     };
 }
 
+clamp :: inline (v: Int_Vector3, min: Int_Vector3, max: Int_Vector3) -> Int_Vector3 {
+    return .{
+        clamp(v.x, min.x, max.x),
+        clamp(v.y, min.y, max.y),
+        clamp(v.z, min.z, max.z),
+    };
+}
+
+clamp :: inline (v: Int_Vector2, min: Int_Vector2, max: Int_Vector2) -> Int_Vector2 {
+    return .{
+        clamp(v.x, min.x, max.x),
+        clamp(v.y, min.y, max.y),
+    };
+}
+
 informed_clamp :: inline (x: float, min: float, max: float) -> float, s32 {
     if x < min {
         return min, -1;
@@ -823,12 +838,12 @@ sign :: inline (x: float32) -> float32 {
     return ifx x < 0 then -1.0 else 1.0;
 }
 
-project_point_onto_plane :: inline (point: Vector3, point_on_plane: Vector3, plane_normal: Vector3) -> Vector3, float {
-    assert(is_normalized(plane_normal, SMALLISH_NUMBER));
+project_point_onto_plane :: inline (point: Vector3, point_on_plane: Vector3, plane_normal: Vector3) -> pos: Vector3, signed_dist: float {
+    assert(is_normalized(plane_normal, SMALL_NUMBER));
     diff := point - point_on_plane;
     // distance along the plane normal
-    scaled_cos_t := dot_product(plane_normal, diff);
-    return point - plane_normal * scaled_cos_t, scaled_cos_t;
+    signed_dist_along_normal := dot_product(plane_normal, diff);
+    return point - plane_normal * signed_dist_along_normal, signed_dist_along_normal;
 }
 
 reflection_component :: inline (vector: Vector3, normal: Vector3) -> float {
@@ -854,8 +869,23 @@ toggle :: inline (b: *bool) {
 AABB :: struct {
     center: Vector3;
     extent: Vector3;
-#place center;
-    offset: Vector3;
+}
+
+is_overlap_aabb_aabb :: (aabb_a: AABB, aabb_b: AABB) -> bool {
+    abs_pos_diff := abs(aabb_a.center - aabb_b.center);
+    return abs_pos_diff.x < aabb_a.extent.x + aabb_b.extent.x
+        && abs_pos_diff.y < aabb_a.extent.y + aabb_b.extent.y
+        && abs_pos_diff.z < aabb_a.extent.z + aabb_b.extent.z;
+}
+
+Box :: struct {
+    center: Vector3;
+    extent: Vector3;
+    fore: Vector3;
+    up: Vector3;
+    right: Vector3;
+#place fore;
+    axes: [3]Vector3 = ---;
 }
 
 Box_Point :: enum u8 {
@@ -910,6 +940,93 @@ get_box_points :: inline (position: Vector3, length_vec: Vector3, height_vec: Ve
     out_points.*[Box_Point.HIGH_UPPER_LEFT]    = position + length_vec + height_vec - width_vec;
     out_points.*[Box_Point.HIGH_UPPER_RIGHT]   = position + length_vec + height_vec + width_vec;
 }
+
+closest_point_in_aabb :: inline (position: Vector3, aabb: AABB) -> Vector3 {
+    diff := position - aabb.center;
+    return aabb.center + clamp(diff, aabb.extent);
+}
+
+closest_point_in_box :: inline (position: Vector3, box: Box) -> Vector3 {
+    diff := position - box.center;
+    dist_along_axes := Vector3.{dot(diff, box.right), dot(diff, box.fore), dot(diff, box.up)};
+    return box.center + clamp(dist_along_axes, box.extent);
+}
+
+linear_compress_float_16bit :: inline (x: float, $min_value: float, $max_value: float, $do_clamp := true) -> u16 {
+    INV_RANGE :: 1.0 / (max_value - min_value);
+    #if do_clamp {
+        xc := clamp(x, min_value, max_value);
+    } else {
+        xc := x;
+    }
+    min_diff := xc - min_value;
+    norm := min_diff * INV_RANGE;
+    return round(U16_MAX.(float) * norm, u16);
+}
+
+linear_decompress_float_16bit :: inline (u: u16, $min_value: float, $max_value: float) -> float {
+    INV_U16_RANGE :: #run (1.0 / U16_MAX.(float));
+    FLOAT_RANGE :: #run (max_value - min_value);
+    norm := u.(float) * INV_U16_RANGE;
+    return min_value + norm * FLOAT_RANGE;
+}
+
+linear_compress_float_21bit :: inline (x: float, $min_value: float, $max_value: float, $do_clamp := true) -> u64 {
+    INV_RANGE :: 1.0 / (max_value - min_value);
+    #if do_clamp {
+        xc := clamp(x, min_value, max_value);
+    } else {
+        xc := x;
+    }
+    min_diff := xc - min_value;
+    norm := min_diff * INV_RANGE;
+    return round((((1).(u64) << 21)-1).(float) * norm, u16);
+}
+
+linear_decompress_float_21bit :: inline (u: u64, $min_value: float, $max_value: float) -> float {
+    INV_U16_RANGE :: #run (1.0 / U16_MAX.(float));
+    FLOAT_RANGE :: #run (max_value - min_value);
+    norm := u.(float) * (((1).(u64) << 21)-1).(float);
+    return min_value + norm * FLOAT_RANGE;
+}
+
+Compressed_Axes :: struct {
+    fore: u64;
+    up: u64;
+    right: u64;
+}
+
+linear_compress_vector3 :: inline (v: Vector3, $min_value: float, $max_value: float) -> u64 {
+    x := linear_compress_float_21bit(b.x, min_value, max_value);
+    y := linear_compress_float_21bit(b.y, min_value, max_value);
+    z := linear_compress_float_21bit(b.z, min_value, max_value);
+    return (z << 42) | (y << 21) | (x << 0);
+}
+
+linear_decompress_vector3 :: inline (v: u64, $min_value: float, $max_value: float) -> Vector3 {
+    x := (v >>  0) & 0x15;
+    y := (v >> 21) & 0x15;
+    z := (v >> 42) & 0x15;
+    return .{
+        linear_decompress_float_21bit(x, min_value, max_value),
+        linear_decompress_float_21bit(y, min_value, max_value),
+        linear_decompress_float_21bit(z, min_value, max_value),
+    };
+}
+
+sweep_aabb :: (aabb: AABB, displacement: Vector3) -> AABB {
+    min := aabb.center.xy - aabb.extent.xy;
+    max := aabb.center.xy + aabb.extent.xy;
+    // sweep the aabb to account for velocity
+    if displacement.x < 0 then min.x += displacement.x else max.x += displacement.x;
+    if displacement.y < 0 then min.y += displacement.y else max.y += displacement.y;
+    if displacement.z < 0 then min.z += displacement.z else max.z += displacement.z;
+    extent := (max - min) * 0.5;
+    return .{min + extent, extent};
+}
+
+linear_compress_norm_vector3        :: #bake_arguments linear_compress_vector3(min_value=-1, max_value=1);
+linear_decompress_norm_vector3      :: #bake_arguments linear_decompress_vector3(min_value=-1, max_value=1);
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 

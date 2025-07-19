@@ -4,11 +4,6 @@
 
 RAYCAST_DEFAULT_MAX_DISTANCE :: 999_999.9;
 
-Packed_Collider :: struct {
-    collider: Entity_Collider;
-    position: Vector3;
-    orientation: Quaternion;
-}
 
 Collider_Raycast_Result :: struct {
     hit_entity: Entity_Ref;
@@ -71,8 +66,8 @@ raycast :: (request: Collider_Raycast_Request, out_result: *Collider_Raycast_Res
         if e_props.body_collider.type == {
         case .SPHERE;
             raycast_sphere(request, packed_collider, *cur_result, it);
-        case .PLANE;
-            raycast_plane(request, packed_collider, *cur_result, it);
+        case .RECT;
+            raycast_rect(request, packed_collider, *cur_result, it);
         case;
             continue;
         }
@@ -176,25 +171,25 @@ raycast_sphere :: (using request: Collider_Raycast_Request, collider_data: Packe
     return out_result.is_hit;
 }
 
-raycast_plane :: (using request: Collider_Raycast_Request, collider_data: Packed_Collider, out_result: *Collider_Raycast_Result, entity_index: s64) -> bool {
+raycast_rect :: (using request: Collider_Raycast_Request, collider_data: Packed_Collider, out_result: *Collider_Raycast_Result, entity_index: s64) -> bool {
     assert(is_normalized(ray.direction, 0.0001));
     out_result.* = .{};
 
-    plane_center        := collider_data.position;
-    plane_half_width    := collider_data.collider.plane.half_width;
-    plane_half_height   := collider_data.collider.plane.half_height;
-    plane_normal        := precalculated_fore_directions[entity_index];
-    plane_height_vec    := precalculated_up_directions[entity_index];
-    plane_width_vec     := cross(plane_height_vec, plane_normal);
+    rect_center        := collider_data.position;
+    rect_half_width    := collider_data.collider.rect.half_width;
+    rect_half_height   := collider_data.collider.rect.half_height;
+    rect_normal        := precalculated_fore_directions[entity_index];
+    rect_height_vec    := precalculated_up_directions[entity_index];
+    rect_width_vec     := cross(rect_height_vec, rect_normal);
 
     ray_length := raycast_ray_length(request);
     can_hit_back_face := hit_back_face;
 
-    ray_direction_cos_t := dot(plane_normal, ray.direction);
+    ray_direction_cos_t := dot(rect_normal, ray.direction);
     aiming_for_backside := ray_direction_cos_t >= 0;
 
     if !aiming_for_backside || can_hit_back_face {
-        origin_projection, projection_t := project_point_onto_plane(ray.origin, plane_center, plane_normal);
+        origin_projection, projection_t := project_point_onto_plane(ray.origin, rect_center, rect_normal);
         // the two given dot products should have a product with a negative sign if a hit is possible. to see this, build out a table of the four possible combinations of [sign of dp of normals] and [sign of projection norm dist along plane normal]
         t_mix_test := ray_direction_cos_t * projection_t;
         if t_mix_test < 0 {
@@ -209,13 +204,13 @@ raycast_plane :: (using request: Collider_Raycast_Request, collider_data: Packed
             if distance_to_intersection <= ray_length {
                 // ray intersects the infinite plane
                 hit_location := ray.origin + ray.direction * distance_to_intersection;
-                plane_center_to_hit_diff := hit_location - plane_center;
-                hit_distance_along_height_axis := abs(dot(plane_center_to_hit_diff, plane_height_vec));
-                hit_distance_along_width_axis := abs(dot(plane_center_to_hit_diff, plane_width_vec));
-                if hit_distance_along_height_axis <= plane_half_height && hit_distance_along_width_axis <= plane_half_width {
+                plane_center_to_hit_diff := hit_location - rect_center;
+                hit_distance_along_height_axis := abs(dot(plane_center_to_hit_diff, rect_height_vec));
+                hit_distance_along_width_axis := abs(dot(plane_center_to_hit_diff, rect_width_vec));
+                if hit_distance_along_height_axis <= rect_half_height && hit_distance_along_width_axis <= rect_half_width {
                     // infinite plane intersection is within the bounds of the finite plane
                     out_result.hit_location = hit_location;
-                    out_result.hit_normal = plane_normal;
+                    out_result.hit_normal = rect_normal;
                     out_result.hit_distance = distance_to_intersection;
                     out_result.is_hit = true;
                     out_result.hit_back_face = aiming_for_backside;

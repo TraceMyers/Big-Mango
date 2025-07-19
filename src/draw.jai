@@ -37,8 +37,7 @@ draw_aabb :: (aabb: AABB, color: Color4f) {
 draw_all_body_collider_aabbs :: () {
     for 1..entities.count-1 {
         if entities[it].type_flags & .STATIC_MESH {
-            e: Entity = ---;
-            get_entity_at(*e, it);
+            e := get_entity_at(it);
             draw_aabb(e.physics_properties.body_collider, e.position, e.orientation, COLOR4F_RED);
         }
     }

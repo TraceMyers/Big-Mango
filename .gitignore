@@ -3,3 +3,4 @@ modules/Red_Mango_Core/gitignore
 modules/vulkan-jai/.gitignore
 .build/
 screens/
+src/test_stuff.*
