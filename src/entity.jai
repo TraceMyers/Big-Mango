@@ -4,30 +4,32 @@
 // but, maybe that could be sorted out with the id? not sure of the cost there.
 
 INVALID_ENTITY_ID : u32 : 0;
-INVALID_ENTITY_INDEX : u32 : 0;
-INVALID_CAMERA_INDEX : u8 : 0;
-INVALID_DEVICE_INDEX : u16 : 0;
+INVALID_ENTITY_INDEX : u32 : U32_MAX;
+INVALID_CAMERA_INDEX : u8  : U8_MAX;
+INVALID_DEVICE_INDEX : u16 : U16_MAX;
 // Entity_Physics_Properties :: Physics_Properties_Dynamic;
 
-ENTITY_MAX_COUNT :: 32767;
-DEVICE_MAX_COUNT :: 32767;
-CAMERA_MAX_COUNT :: 256;
+ENTITY_MAX_COUNT :: 20000;
+DEVICE_MAX_COUNT :: 20000;
+CAMERA_MAX_COUNT :: 64;
 ENTITY_MESHES_MAX_COUNT :: 8;
-ENTITY_NAME_MAX_COUNT :: 32;
+ENTITY_NAME_MAX_CHAR_COUNT :: 64;
 
-boot_entities :: (stage: Boot_Stage) -> bool {
+_entities :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        program_runtime_reserve(*entities, ENTITY_MAX_COUNT);
+        program_runtime_reserve(*entity_patch_infos, ENTITY_MAX_COUNT);
         program_runtime_reserve(*entity_deletion_queue, ENTITY_MAX_COUNT);
 
         program_runtime_allocate(*entity_patch_layer, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entities_patched, ENTITY_MAX_COUNT);
-        program_runtime_allocate(*entity_physics_core, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_collision_bodies, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_movements, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_angular_bodies, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_compressed_axes, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entity_mesh_collections, ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT);
-        program_runtime_allocate(*precalculated_fore_directions, ENTITY_MAX_COUNT);
-        program_runtime_allocate(*precalculated_up_directions, ENTITY_MAX_COUNT);
         program_runtime_allocate(*name_allocations, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entity_trigger_volume_allocations, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_collision_channels, ENTITY_MAX_COUNT);
 
         program_runtime_initialize(*devices, DEVICE_MAX_COUNT);
         program_runtime_initialize(*cameras, CAMERA_MAX_COUNT);
@@ -38,15 +40,10 @@ boot_entities :: (stage: Boot_Stage) -> bool {
 
         mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Entity_Mesh);
         program_runtime_initialize(*entity_mesh_array_allocator, na_chunk_list_size, mesh_ptrs_array_data_size);
-        entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_COUNT;
+        entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_CHAR_COUNT;
         program_runtime_initialize(*entity_name_allocator, na_chunk_list_size, entity_name_data_size);
         entity_trigger_volumes_data_size := ENTITY_MAX_COUNT * size_of(Trigger_Volume);
         program_runtime_initialize(*entity_trigger_volumes_allocator, na_chunk_list_size_large, entity_trigger_volumes_data_size);
-
-        // 0 is invalid index
-        null_entity := spawn_entity(0);
-        request_item(*cameras);
-        request_item(*devices);
 
         return true;
     } else {
@@ -56,7 +53,7 @@ boot_entities :: (stage: Boot_Stage) -> bool {
 
 get_entity :: inline (ref: Entity_Ref) -> *Entity {
     i := entity_patch_layer[ref.index];
-    assert(entities[i].id == ref.id);
+    assert(entity_patch_infos[i].id == ref.id);
     return get_entity_at(i);
 }
 
@@ -64,12 +61,15 @@ get_entity :: inline (ref: Entity_Ref) -> *Entity {
 get_entity_at :: (i: s64) -> *Entity {
     e := *entities_patched[i];
     if e.generation != game_frame_count {
-        patch_info := *entities[i];
+        patch_info := *entity_patch_infos[i];
 
         e.* = .{
             type = patch_info.type,
             ref = patch_info.ref,
-            physics_core = *entity_physics_core[i],
+            body = *entity_collision_bodies[i],
+            movement = *entity_movements[i],
+            angular_body = *entity_angular_bodies[i],
+            compressed_axes = *entity_compressed_axes[i],
             meshes = get_entity_meshes(patch_info),
             name = get_entity_name(patch_info)
         };
@@ -98,14 +98,17 @@ get_entity_at :: (i: s64) -> *Entity {
     return e;
 }
 
-spawn_entity :: (t: Entity_Type, name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
+spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
     // scope_lock_mutex(*spawn_entity_mutex);
-    i := entities.count.(u16);
-    e := array_add(*entities);
+    i := entity_patch_infos.count.(u16);
+    e := array_add(*entity_patch_infos);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
 
     entity_patch_layer[i] = i;
-    entity_physics_core[i] = physics;
+    entity_movements[i] = .{};
+    entity_collision_bodies[i] = .{center=location};
+    entity_angular_bodies[i] = .{orientation=orientation};
+    compress_axes(*entity_angular_bodies[i].orientation, *entity_compressed_axes[i]);
 
     mesh_collection := *entity_mesh_collections[i];
     assert(mesh_collection.mesh_count == 0 && mesh_collection.allocation_ref.data == null && mesh_collection.allocation_ref.info.bit_pattern == 0);
@@ -117,6 +120,7 @@ spawn_entity :: (t: Entity_Type, name := "", physics := Entity_Physics_Core.{}, 
     e.* = .{
         type = t,
         ref = .{xx i, xx new_id},
+        flags = .JUST_SPAWNED
     };
 
     if make_physics_properties_dynamic {
@@ -130,6 +134,9 @@ spawn_entity :: (t: Entity_Type, name := "", physics := Entity_Physics_Core.{}, 
     } else {
         e.physics_properties = xx physics_properties_template;
     }
+
+    phys_props := get_entity_physics_properties(e.ref);
+    entity_collision_channels[i] = phys_props.default_collision_channels;
 
     if (e.type_flags & .CAMERA) != 0 {
         index := request_item(*cameras);
@@ -152,6 +159,12 @@ spawn_entity :: (t: Entity_Type, name := "", physics := Entity_Physics_Core.{}, 
     return get_entity(e.ref);
 }
 
+entity_frame_turnover :: () {
+    flush_entity_deletion_queue();
+    compress_entity_axes();
+    frame_refresh_patch_infos();
+}
+
 flush_entity_deletion_queue :: () {
     if entity_deletion_queue.count == 0 {
         return;
@@ -162,6 +175,20 @@ flush_entity_deletion_queue :: () {
     array_reset_keeping_memory(*entity_deletion_queue);
 }
 
+compress_entity_axes :: () {
+    entity_count := get_entity_count();
+    for 0..entity_count-1 {
+        compress_axes(*entity_angular_bodies[it].orientation, *entity_compressed_axes[it]);
+    }
+}
+
+frame_refresh_patch_infos :: () {
+    entity_count := get_entity_count();
+    for *e : entity_patch_infos {
+        e.flags &= ~(.COLLIDING_WITH_SOMETHING | .JUST_SPAWNED);
+    }
+}
+
 set_global_entities :: () {
     context.camera_1 = get_entity(context.camera_1.ref);
     context.camera_2 = get_entity(context.camera_2.ref);
@@ -170,14 +197,14 @@ set_global_entities :: () {
 
 delete_entity :: (ref: Entity_Ref) {
     i := entity_patch_layer[ref.index];
-    assert(entities[i].id == ref.id);
+    assert(entity_patch_infos[i].id == ref.id);
     delete_entity(i);
 }
 
 // this should only be called a certain point in the frame. probably in exactly one place, inside a loop.
 delete_entity :: (i: s64) {
-    defer entities.count -= 1;
-    e := *entities[i];
+    defer entity_patch_infos.count -= 1;
+    e := *entity_patch_infos[i];
 
     // todo: ideally find a good way to patch up holes in the pools on the spot.
     if (e.type_flags & .CAMERA) != 0 {
@@ -197,23 +224,26 @@ delete_entity :: (i: s64) {
     na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
     name_allocations[i] = .{};
 
-    last_entity_index := entities.count-1;
+    last_entity_index := entity_patch_infos.count-1;
     if i == last_entity_index {
         return;
     }
 
     entity_patch_layer[last_entity_index] = xx i;
-    entities[i] = entities[last_entity_index];
-    entity_physics_core[i] = entity_physics_core[last_entity_index];
-    entity_mesh_collections[i] = entity_mesh_collections[last_entity_index];
-    name_allocations[i] = name_allocations[last_entity_index];
+    entity_patch_infos[i]       = entity_patch_infos[last_entity_index];
+    entity_collision_bodies[i]  = entity_collision_bodies[last_entity_index];
+    entity_movements[i]         = entity_movements[last_entity_index];
+    entity_angular_bodies[i]    = entity_angular_bodies[last_entity_index];
+    entity_compressed_axes[i]   = entity_compressed_axes[last_entity_index];
+    entity_mesh_collections[i]  = entity_mesh_collections[last_entity_index];
+    name_allocations[i]         = name_allocations[last_entity_index];
 }
 
 // spawn helpers
 
-spawn_entity_human :: (name := "", physics := Entity_Physics_Core.{}, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
-    entity := spawn_entity(.STATIC_MESH, name, physics, physics_properties_template, make_physics_properties_dynamic);
-    entity.physics_flags |= .MOVED_BY_PHYSICS;
+spawn_entity_human :: (name := "", location := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
+    entity := spawn_entity(.STATIC_MESH, name, location, orientation, physics_properties_template, make_physics_properties_dynamic);
+    entity.movement_flags |= .MOVED_BY_PHYSICS;
     return entity;
 }
 
@@ -233,16 +263,26 @@ spawn_entity_human :: (name := "", physics := Entity_Physics_Core.{}, physics_pr
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods
 
-set_orientation :: inline (e: *Entity, forward: Vector3, right: Vector3) {
+set_orientation :: (e: *Entity, forward: Vector3, right: Vector3) {
     set_orientation(*e.orientation, forward, right);
+    compress_axes(*e.orientation, e.compressed_axes);
 }
 
-rotate :: inline (e: *Entity, axis: Vector3, angle: float32) {
+rotate :: (e: *Entity, axis: Vector3, angle: float32) {
     rotate(*e.orientation, axis, angle);
+    compress_axes(*e.orientation, e.compressed_axes);
+}
+
+up_direction :: inline (e: *Entity) -> Vector3 {
+    return linear_decompress_norm_vector3(e.compressed_axes.up);
+}
+
+fore_direction :: inline (e: *Entity) -> Vector3 {
+    return linear_decompress_norm_vector3(e.compressed_axes.fore);
 }
 
 right_direction :: inline (e: *Entity) -> Vector3 {
-    return right_direction(*e.orientation);
+    return linear_decompress_norm_vector3(e.compressed_axes.right);
 }
 
 right_direction_xy :: inline (e: *Entity) -> Vector3 {
@@ -251,27 +291,25 @@ right_direction_xy :: inline (e: *Entity) -> Vector3 {
     return normalize(right_3d);
 }
 
-up_direction :: inline (e: *Entity) -> Vector3 {
-    return up_direction(*e.orientation);
-}
-
-fore_direction :: inline (e: *Entity) -> Vector3 {
-    return fore_direction(*e.orientation);
-}
-
-interp_rotate :: inline (e: *Entity, target: Quaternion, norm: float32) {
+interp_rotate :: (e: *Entity, target: Quaternion, norm: float32) {
     e.orientation = interp_rotate(e.orientation, target, norm);
+    compress_axes(*e.orientation, e.compressed_axes);
 }
 
-interp_rotate :: inline (e: *Entity, target: Quaternion, speed: float32, delta_time: float32) {
+interp_rotate :: (e: *Entity, target: Quaternion, speed: float32, delta_time: float32) {
     e.orientation = interp_rotate(e.orientation, target, speed, delta_time);
+    compress_axes(*e.orientation, e.compressed_axes);
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+get_entity_count :: inline () -> s64 {
+    return entity_patch_infos.count;
+}
+
 get_entity_patch_info :: inline (ref: Entity_Ref) -> *Entity_Patch_Info {
     i := entity_patch_layer[ref.index];
-    patch_info := *entities[i];
+    patch_info := *entity_patch_infos[i];
     assert(ref.id == patch_info.id);
 
     return patch_info;
@@ -279,14 +317,14 @@ get_entity_patch_info :: inline (ref: Entity_Ref) -> *Entity_Patch_Info {
 
 get_entity_physics_properties :: inline (ref: Entity_Ref) -> *Physics_Properties {
     i := entity_patch_layer[ref.index];
-    assert(entities[i].id == ref.id);
+    assert(entity_patch_infos[i].id == ref.id);
 
-    return get_entity_physics_properties_at(i);
+    return get_physics_properties_at(i);
 }
 
 set_entity_name :: (ref: Entity_Ref, name: string) {
     i := entity_patch_layer[ref.index];
-    assert(ref.id == entities[i].id);
+    assert(ref.id == entity_patch_infos[i].id);
 
     if basic_validity_check(*name_allocations[i].allocation_ref) {
         na_free(*entity_name_allocator, *name_allocations[i].allocation_ref);
@@ -300,11 +338,11 @@ set_entity_name :: (ref: Entity_Ref, name: string) {
     } else {
         use_name = tprint("eid %", ref.id, name);
     }
-    assert(use_name.count <= ENTITY_NAME_MAX_COUNT);
+    assert(use_name.count <= ENTITY_NAME_MAX_CHAR_COUNT);
 
     name_allocations[i].allocation_ref = na_alloc(*entity_name_allocator, use_name.count);
     name_allocations[i].count = xx use_name.count;
-    e_name := get_entity_name(*entities[i]);
+    e_name := get_entity_name(*entity_patch_infos[i]);
     assert(e_name.count == use_name.count);
     memcpy(e_name.data, use_name.data, e_name.count);
 }
@@ -360,9 +398,9 @@ get_entity_meshes_at :: inline (i: s64) -> []Entity_Mesh {
 
 // ---------------------------------------------------------------------------------------------------
 
-get_entity_physics_properties_at :: (e: s64) -> *Physics_Properties {
+get_physics_properties_at :: inline (e: s64) -> *Physics_Properties {
     i := entity_patch_layer[e];
-    patch_info := *entities[i];
+    patch_info := *entity_patch_infos[i];
     if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
         return *dynamic_entity_physics_properties[patch_info.physics_properties];
     } else {
@@ -370,20 +408,47 @@ get_entity_physics_properties_at :: (e: s64) -> *Physics_Properties {
     }
 }
 
+// I made these because I was accidentally copying instead of getting pointers to the array values too much
+
+get_movement_at :: inline (i: s64) -> *Entity_Movement {
+    return *entity_movements[i];
+}
+
+get_body_at :: inline (i: s64) -> *Collision_Body {
+    return *entity_collision_bodies[i];
+}
+
+get_compressed_axes_at :: inline (i: s64) -> *Compressed_Axes {
+    return *entity_compressed_axes[i];
+}
+
+get_axes_at :: inline (i: s64) -> Axes {
+    axes: Axes = ---;
+    decompress_axes(*entity_compressed_axes[i], *axes);
+    return axes;
+}
+
+get_position_offset_from_entity_at :: (i: s64, fore_offset := 0.0, up_offset := 0.0, right_offset := 0.0) -> Vector3 {
+    axes := get_axes_at(i);
+    return entity_collision_bodies[i].center + axes.fore * fore_offset + axes.up * up_offset + axes.right * right_offset;
+}
+
 // ---------------------------------------------------------------------------------------------------
 
-// all arrays parallel to entities array
-
-entities: [..]Entity_Patch_Info;
+// all arrays parallel to entity_patch_infos array
+entity_patch_infos: [..]Entity_Patch_Info;
 entities_patched: []Entity;
 entity_patch_layer: []u16;
 // default entity data
-entity_physics_core: []Entity_Physics_Core;
+entity_collision_bodies: []Collision_Body;
+entity_movements: []Entity_Movement;
+entity_angular_bodies: []Angular_Body;
+entity_compressed_axes: []Compressed_Axes;
 entity_mesh_collections: []Entity_Mesh_Collection;
 entity_trigger_volume_allocations: []Trigger_Volume_Allocation;
-precalculated_fore_directions: []Vector3;
-precalculated_up_directions: []Vector3;
+entity_collision_channels: []Collision_Channels;
 name_allocations: []Entity_Name_Allocation;
+
 entity_deletion_queue: [..]Entity_Ref;
 
 entity_mesh_array_allocator: Nesting_Allocator(8);

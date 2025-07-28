@@ -1,7 +1,7 @@
 
-DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON;
+DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
 control_mode := DEFAULT_CONTROL_MODE;
-prev_control_mode := Control_Mode.FREE_FLY;
+prev_control_mode := Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
 input_focus := Input_Focus.GAME;
 previous_input_focus: Input_Focus;
 mouse_look_locked: bool;
@@ -12,16 +12,20 @@ Input_Focus :: enum {
     LOG_FILTER;
 }
 
-Control_Mode :: enum {
-    FREE_FLY;
-    FIRST_PERSON;
+Control_Mode :: enum_flags {
+    FIRST_PERSON_CAMERA_ONLY;
+    FIRST_PERSON_PLAYER;
+    FIRST_PERSON_PLAYER_FREE_FLY;
     ORTHO_YZ_45_DOWN;
     ORTHO_YZ;
     ORTHO_XZ;
     ORTHO_XY;
 }
+FIRST_PERSON_CONTROL_MODE : Control_Mode : .FIRST_PERSON_CAMERA_ONLY | .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
+FIRST_PERSON_PLAYER_CONTROL_MODE : Control_Mode : .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
+ORTHO_CONTROL_MODE : Control_Mode : .ORTHO_YZ_45_DOWN | .ORTHO_YZ | .ORTHO_XZ | .ORTHO_XY;
 
-boot_input :: (stage: Boot_Stage) -> bool {
+_input :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // NOTE: the window is born into this world through the fires of whatever monitor it is initially displayed on. as a result, it appears that spawning the window on a monitor whose display adapter isn't your big beefy graphics card I think means the graphics card is being forced to communicate through the integrated gpu or I don't know but anyway it totally fucks up the stability of the moving images. like, it looked like I was getting some horrific per-pixel-row-blend of past and present images.
         // window = create_window(1920, 1200, "a butt", 90, -1300);
@@ -41,7 +45,9 @@ move_window :: (new_pos: Int_Vector2) {
     rect: Win32.RECT;
     Win32.GetClientRect(window, *rect);
     // Win32.SetWindowPos(window, null, 90, -1300, rect.right-rect.left+16, rect.bottom-rect.top+39, 0);
-    Win32.SetWindowPos(window, null, new_pos.x, new_pos.y, rect.right-rect.left+16, rect.bottom-rect.top+39, 0);
+    true_width := rect.right-rect.left+16;
+    true_height := rect.bottom-rect.top+39;
+    Win32.SetWindowPos(window,         null, new_pos.x,              new_pos.y, true_width, true_height, 0);
 }
 
 // returns true if focus was changed
@@ -91,15 +97,17 @@ update_input :: () {
                     case .F4;
                         control_mode = .ORTHO_XY;
                     case .F5;
-                        control_mode = .FIRST_PERSON;
+                        control_mode = .FIRST_PERSON_PLAYER;
                     case .F6;
-                        control_mode = .FREE_FLY;
+                        control_mode = .FIRST_PERSON_PLAYER_FREE_FLY;
+                    case .F7;
+                        control_mode = .FIRST_PERSON_CAMERA_ONLY;
                     case #char "M";
-                        if (control_mode == .FREE_FLY || control_mode == .FIRST_PERSON) {
+                        if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
                             toggle(*mouse_look_locked);
                         }
                     }
-                    if control_mode == .FIRST_PERSON {
+                    if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
                         if it.key_code == {
                         case .SPACEBAR;
                             jump_queued = true;

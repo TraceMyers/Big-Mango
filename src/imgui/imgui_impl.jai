@@ -39,7 +39,7 @@ set_dev_ui_opacity :: (args: []Command_Line_Argument) {
     dev_ui_opacities[module] = xx value;
 } @command_line
 
-boot_imgui :: (stage: Boot_Stage) -> bool {
+_imgui :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // ----------------------------------------------------------------------------------------------------- startup
         pool_sizes := VkDescriptorPoolSize.[
@@ -466,6 +466,7 @@ add_camera_controls :: () {
 }
 
 add_physics_debugger :: () {
+    /*
     using physics_debug_global_data;
 
     if CollapsingHeader("physics debugger") {
@@ -561,6 +562,7 @@ add_physics_debugger :: () {
             Text("physics debugger is compiled out. set RUN_PHYSICS_DEBUGGER to true.");
         }
     }
+    */
 }
 
 // eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.
@@ -568,19 +570,19 @@ add_entity_pocket :: () {
     if CollapsingHeader("entity pocket") {
         if Button("capsule") {
             entity := spawn_entity(.STATIC_MESH, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
-            test_ref = entity.ref;
+            test_ref := entity.ref;
             entity_phys_props := get_entity_physics_properties(test_ref);
             {
                 using entity_phys_props;
                 body_elasticity = 1.0;
-                body_collider.type = .CAPSULE;
-                body_collider.capsule.half_height = 10.0;
-                body_collider.capsule.radius = 7.0;
+                // body_collider.type = .CAPSULE;
+                // body_collider.capsule.half_height = 10.0;
+                // body_collider.capsule.radius = 7.0;
             }
             // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
             capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
             set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
-            entity.position.z = 100.0;
+            entity.center.z = 100.0;
         }
     }
 }

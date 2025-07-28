@@ -1,6 +1,8 @@
 
 
-scratch_init_game :: () {
+_scratch :: (stage: Boot_Stage) -> bool {
+    if stage == .SHUTDOWN then return true;
+
     {
         // moving window to top monitor only *after* swapchain creation. something in that process creates a very jittery framerate if the swapchain is created when the window is positioned within that monitor's rect.
         move_window(.{90, -1300});
@@ -12,24 +14,26 @@ scratch_init_game :: () {
     }
     // ground entity
     {
-        ground := spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
+        context.ground = spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
 
-        phys_props := get_entity_physics_properties(ground.ref);
+        context.ground.body.shape.type = .RECT;
+        context.ground.body.shape.rect.half_height = 50.0;
+        context.ground.body.shape.rect.half_width = 50.0;
+
+        phys_props := get_entity_physics_properties(context.ground.ref);
         {
             using phys_props;
-            body_collider.type = .RECT;
-            body_collider.rect.half_height = 500.0;
-            body_collider.rect.half_width = 500.0;
+
             body_elasticity = 0.01;
             gravity_accel = 0.0;
             mass = IMMOVABLE_ENTITY_MASS;
         }
 
-        set_entity_meshes(ground.ref, .{plane_mesh,.{}});
+        set_entity_meshes(context.ground.ref, .{plane_mesh,.{}});
 
-        set_orientation(*ground.orientation, .{0,0,1}, .{1,0,0});
+        set_orientation(*context.ground.orientation, .{0,0,1}, .{1,0,0});
         // rotate(*ground, WORLD_RIGHT, 0.5);
-        ground.position.z = 0.0;
+        context.ground.center.z = 0.0;
     }
     // camera init
     {
@@ -39,6 +43,7 @@ scratch_init_game :: () {
     // fp camera
     {
         context.camera_2 = spawn_entity(.CAMERA, name="camera 2", physics_properties_template=.CAMERA);
+        context.camera_2.center.z = 50;
     }
     // npc 
     // for 0..0
@@ -71,9 +76,14 @@ scratch_init_game :: () {
     {
         context.player_entity = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
 
-        entity_phys_props := get_entity_physics_properties(context.player_entity.ref);
         {
-            using entity_phys_props;
+            context.player_entity.body.shape.type = .SPHERE;
+            using context.player_entity.body.shape.sphere;
+            radius = 10;
+        }
+
+        {
+            using context.player_entity.physics_properties;
             mass = 1.0;
             body_elasticity = 0.0;
         }
@@ -83,18 +93,20 @@ scratch_init_game :: () {
         reorient_mesh_quat: Quaternion;
         set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
 
+
         mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
         set_entity_meshes(context.player_entity.ref, .{mesh, .{tint=.{0.7,0.7,0.9,1.0}}}, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
 
-        context.player_entity.position.xy = .{40,40};
-        context.player_entity.position.z = 50.0;
+        context.player_entity.center.xy = .{40,40};
+        context.player_entity.center.z = 50.0;
     }
+    return true;
 }
 
 scratch_think :: () {
-    player_half_height := context.player_entity.physics_properties.body_collider.half_height;
-    player_center := context.player_entity.position + Vector3.{z=player_half_height};
-    end_pt := project_point_onto_plane(context.player_entity.position, .{}, .{0,0,1});
+    player_half_height := context.player_entity.body.shape.half_height;
+    player_center := context.player_entity.center + Vector3.{z=player_half_height};
+    end_pt := project_point_onto_plane(context.player_entity.center, .{}, .{0,0,1});
 
     // rotate(*ground, WORLD_UP, delta_time*0.25);
 }

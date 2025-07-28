@@ -127,9 +127,76 @@ try_parse_command_line_arg :: (in_arg: *Command_Line_Argument, $T: Type) -> T, b
     return var, parse_success;
 }
 
-init_command_line_proc_or_return :: (args: []Command_Line_Argument, expected_count: s64) #expand {
-    if args.count != expected_count {
-        rm_error("expected % args. got %. arglist: %", expected_count, args.count, args);
+init_command_line_proc_or_return :: (args: []Command_Line_Argument, expected_min_count: s64, expected_max_count := S64_MAX) #expand {
+    use_max := expected_max_count;
+    if expected_max_count == S64_MAX {
+        use_max = expected_min_count;
+    }
+    if args.count < expected_min_count || args.count > use_max {
+        if expected_min_count == expected_max_count {
+            rm_error("expected % args. got %. arglist: %", expected_min_count, args.count, args);
+        } else {
+            rm_error("expected %-% args. got %. arglist: %", expected_min_count, expected_max_count, args.count, args);
+        }
         `return;
     }
 }
+
+// ----------------------------------------------------------------------------------------------------------
+// for generating an enum and array parallel to each other. I really don't like maintaining order between
+// the enum and the array. so, why not just declare them at the same time in a JSON-ish way? the example
+// below looks silly because it is; this is moreso for when the combined enum-array construct gets really
+// long.
+//
+// usage:
+//
+// Some_Struct :: struct { a: int; };
+//
+// EXAMPLE_CREATE_INFOS :: EnumArray_Create_Info.[
+//      "ENUM_VALUE_1", .{
+//          a=1
+//      },
+//      "ENUM_VALUE_2", .{
+//          a=500
+//      }
+// ];
+// 
+// #run define_enum(..EXAMPLE_CREATE_INFOS, "Some_Enum", u8);
+// #run define_array(..EXAMPLE_CREATE_INFOS, "Some_Structs", Some_Struct, true);
+//
+// this will generate...
+//
+// Some_Enum :: { ENUM_VALUE_1; ENUM_VALUE_2; }  
+// Some_Structs :: Some_Struct.[.{a=1}, .{a=500}];
+//
+
+Enumarray_Create_Info :: struct {
+    name: string;
+    props: Code;
+}
+
+define_enum :: ($create_infos: ..Enumarray_Create_Info, enum_name: string, $backing_type: Type) -> string {
+    builder: String_Builder;
+    print_to_builder(*builder, "% :: enum % {\n", enum_name, backing_type);
+    for create_infos {
+        print_to_builder(*builder, "\t%;\n", it.name);
+    }
+    print_to_builder(*builder, "};");
+    return builder_to_string(*builder);
+}
+
+define_array :: ($create_infos: ..Enumarray_Create_Info, array_name: string, $struct_type: Type, array_is_constant: bool) -> string {
+    builder: String_Builder;
+    assignment_operator := ifx array_is_constant then "::" else ":=";
+    print_to_builder(*builder, "% % %.[\n", array_name, assignment_operator, struct_type);
+
+    props_type_info := cast(*Type_Info_Struct)struct_type;
+    for create_infos {
+        print_to_builder(*builder, "\t%,\n", code_string(it.props));
+    }
+
+    print_to_builder(*builder, "];");
+    return builder_to_string(*builder);
+}
+
+// ----------------------------------------------------------------------------------------------------------

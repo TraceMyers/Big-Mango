@@ -33,8 +33,9 @@ UNLIT :: false;
 //      3. use the piecewise min and maxs to get a 2d box. this selects the work groups.
 //      4. checking whether or not to draw at a certain fragment is as easy as checking 2d distance from the screenspace line segment against the screenspace radius of the capsule
 //      5. depth test and alpha mix fragments during draw
+// TODO: angle-weighted normals is a way to apparently get better normals on the vertices for interpolating between them.
 
-boot_vulkan :: (stage: Boot_Stage) -> bool {
+_vulkan :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // ----------------------------------------------------------------------------------------------------- startup
         pre_init();
@@ -152,7 +153,7 @@ render_frame :: () {
 
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     vp_mat: Matrix4 = ---;
-    if control_mode == .FIRST_PERSON {
+    if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
         vp_mat = view_projection_matrix(context.camera_1, viewport);
     } else {
         vp_mat = view_projection_matrix(context.camera_2, viewport);
@@ -180,12 +181,13 @@ render_frame :: () {
     draw_lines(cmd, *vp_mat);
     draw_spheres(cmd, *vp_mat);
 
-    for 1..entities.count-1 {
+    entity_ct := get_entity_count();
+    for 0..entity_ct-1 {
         meshes := get_entity_meshes_at(it);
         if meshes.count == 0 then continue;
         for *emesh : meshes {
             entity := get_entity_at(it);
-            if entity.id == context.player_entity.id && control_mode == .FIRST_PERSON then continue;
+            if entity.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE then continue;
             draw_mesh(cmd, entity, emesh, *vp_mat);
         }
     }
@@ -2618,7 +2620,7 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
 
 draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_projection: *Matrix4) {
     mesh := emesh.data;
-    model := make_translation_matrix4(entity.position);
+    model := make_translation_matrix4(entity.center);
     rot := rotation_matrix(Matrix4, entity.orientation);
     model *= rot;
 
@@ -2631,13 +2633,13 @@ draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_p
     scale: Matrix4 = ---;
     if mesh.primitive_type == {
     case .CUBE;
-        box := *entity.physics_properties.body_collider.box;
+        box := *entity.body.shape.box;
         scale = make_scale_matrix4(.{box.half_width*2.0, box.half_length*2.0, box.half_height*2.0});
     case .SPHERE;
-        sphere := *entity.physics_properties.body_collider.sphere;
+        sphere := *entity.body.shape.sphere;
         scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
     case .RECT;
-        rect := *entity.physics_properties.body_collider.rect;
+        rect := *entity.body.shape.rect;
         scale = make_scale_matrix4(.{rect.half_width*2.0, 1.0, rect.half_height*2.0});
     }
     // todo: add draw request to array and draw instanced

@@ -4,8 +4,7 @@
 
 RAYCAST_DEFAULT_MAX_DISTANCE :: 999_999.9;
 
-
-Collider_Raycast_Result :: struct {
+Raycast_Result :: struct {
     hit_entity: Entity_Ref;
     hit_location: Vector3;
     hit_normal: Vector3;
@@ -18,7 +17,7 @@ Collider_Raycast_Result :: struct {
     normal_is_back_face: bool;
 }
 
-Collider_Raycast_Request :: struct {
+Raycast_Request :: struct {
     ray: Ray3;
     max_distance := -1.0;
     origin_inside_collider_rules: struct {
@@ -28,8 +27,6 @@ Collider_Raycast_Request :: struct {
             NO_HIT;
             // origin location is the hit location (can be projected to surface if that option is true)
             RAY_ORIGIN;
-            // allow a backface hit if can_hit_back_face is true
-            BACK_FACE_IF_ALLOWED;
             // override can_hit_back_face as true in the case where the origin is inside the volume
             BACK_FACE;
         } = .NO_HIT;
@@ -41,27 +38,27 @@ Collider_Raycast_Request :: struct {
     flip_back_face_hit_normal: bool;
 }
 
-raycast_ray_length :: inline (using request: Collider_Raycast_Request) -> float {
+raycast_ray_length :: inline (using request: Raycast_Request) -> float {
     return ifx max_distance < 0 then RAYCAST_DEFAULT_MAX_DISTANCE else max_distance;
 }
 
-raycast_can_hit_back_face :: inline (using request: Collider_Raycast_Request, origin_inside_collider: bool) -> bool {
+raycast_can_hit_back_face :: inline (using request: Raycast_Request, origin_inside_collider: bool) -> bool {
     if origin_inside_collider {
-        return (origin_inside_collider_rules.hit_where == .BACK_FACE_IF_ALLOWED && hit_back_face) || origin_inside_collider_rules.hit_where == .BACK_FACE;
+        return hit_back_face || origin_inside_collider_rules.hit_where == .BACK_FACE;
     } else {
         return hit_back_face;
     }
 } 
 
-raycast :: (request: Collider_Raycast_Request, out_result: *Collider_Raycast_Result) -> bool {
+raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
     collider_data: Packed_Collider = ---;
-    // todo: grid
-    cur_result: Collider_Raycast_Result = ---;
+    // todo: grid + sphere intersection test
+    cur_result: Raycast_Result = ---;
     out_result.* = .{hit_distance=FLOAT32_MAX};
     for 0..entities.count-1 {
         cur_result.is_hit = false;
         e_phys := *entity_physics_core[it];
-        e_props := get_entity_physics_properties_at(it);
+        e_props := get_physics_properties_at(it);
         packed_collider := Packed_Collider.{e_props.body_collider, e_phys.position, e_phys.orientation};
         if e_props.body_collider.type == {
         case .SPHERE;
@@ -79,7 +76,7 @@ raycast :: (request: Collider_Raycast_Request, out_result: *Collider_Raycast_Res
     return out_result.is_hit;
 }
 
-raycast_sphere_hit_calculation :: inline (sphere_center: Vector3, sphere_radius: float, ray_origin: Vector3, ray_direction: Vector3, line_pt: Vector3, line_pt_dist_sq: float, out_result: *Collider_Raycast_Result) {
+raycast_sphere_hit_calculation :: inline (sphere_center: Vector3, sphere_radius: float, ray_origin: Vector3, ray_direction: Vector3, line_pt: Vector3, line_pt_dist_sq: float, out_result: *Raycast_Result) {
     projection_tri_edge_dist_sq := square(sphere_radius) - line_pt_dist_sq;
     if projection_tri_edge_dist_sq < VERY_SMALL_NUMBER {
         out_result.hit_location = sphere_center - ray_direction * sphere_radius;
@@ -92,7 +89,7 @@ raycast_sphere_hit_calculation :: inline (sphere_center: Vector3, sphere_radius:
     out_result.hit_distance = distance(ray_origin, out_result.hit_location);
 }
 
-raycast_sphere :: (using request: Collider_Raycast_Request, collider_data: Packed_Collider, out_result: *Collider_Raycast_Result, entity_index: s64) -> bool {
+raycast_sphere :: (using request: Raycast_Request, collider_data: Packed_Collider, out_result: *Raycast_Result, entity_index: s64) -> bool {
     assert(is_normalized(ray.direction, 0.0001));
     out_result.* = .{};
 
@@ -171,7 +168,7 @@ raycast_sphere :: (using request: Collider_Raycast_Request, collider_data: Packe
     return out_result.is_hit;
 }
 
-raycast_rect :: (using request: Collider_Raycast_Request, collider_data: Packed_Collider, out_result: *Collider_Raycast_Result, entity_index: s64) -> bool {
+raycast_rect :: (using request: Raycast_Request, collider_data: Packed_Collider, out_result: *Raycast_Result, entity_index: s64) -> bool {
     assert(is_normalized(ray.direction, 0.0001));
     out_result.* = .{};
 
@@ -198,7 +195,7 @@ raycast_rect :: (using request: Collider_Raycast_Request, collider_data: Packed_
             toward_projection_scaled_cos_t := dot(origin_projection_diff, ray.direction);
             assert(toward_projection_scaled_cos_t > 0);
 
-            origin_projection_dist := length(origin_projection_diff);
+            origin_projection_dist := abs(dot(origin_projection_diff, rect_normal));
             inv_cos_t := origin_projection_dist / toward_projection_scaled_cos_t;
             distance_to_intersection := origin_projection_dist * inv_cos_t; 
             if distance_to_intersection <= ray_length {

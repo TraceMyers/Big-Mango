@@ -20,9 +20,9 @@ draw_sphere :: (center: Vector3, radius: float, color: Color4f, poly_count := Sp
     array_add(*sphere_draws, .{center, radius, color, poly_count});
 }
 
-draw_aabb :: (collider: Entity_Collider, position: Vector3, orientation: Quaternion, color: Color4f) {
+draw_aabb :: (shape: Collision_Shape, position: Vector3, orientation: Quaternion, color: Color4f) {
     aabb: AABB = ---;
-    get_aabb(collider, position, orientation, *aabb);
+    get_aabb(shape, position, orientation, *aabb);
     draw_aabb(aabb, color);
 }
 
@@ -35,10 +35,10 @@ draw_aabb :: (aabb: AABB, color: Color4f) {
 }
 
 draw_all_body_collider_aabbs :: () {
-    for 1..entities.count-1 {
-        if entities[it].type_flags & .STATIC_MESH {
+    for 1..entity_patch_infos.count-1 {
+        if entity_patch_infos[it].type_flags & .STATIC_MESH {
             e := get_entity_at(it);
-            draw_aabb(e.physics_properties.body_collider, e.position, e.orientation, COLOR4F_RED);
+            draw_aabb(e.body.shape, e.center, e.orientation, COLOR4F_RED);
         }
     }
 }

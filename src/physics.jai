@@ -223,7 +223,7 @@ solve_physics :: () {
                 } else continue;
             }
 
-            e_props = get_entity_physics_properties_at(collision_entity_index);
+            e_props = get_physics_properties_at(collision_entity_index);
             if e_props.mass <= IMMOVABLE_ENTITY_MASS {
                 #if RUN_PHYSICS_DEBUGGER {
                     phys_debugger_outer_loop_continue();
@@ -279,7 +279,7 @@ solve_physics :: () {
 
                     if inner_index_2 == collision_entity_index then continue;
                     if inner_index_2 == prev_contacted_entity_index then continue;
-                    props_b := get_entity_physics_properties_at(inner_index_2);
+                    props_b := get_physics_properties_at(inner_index_2);
                     if (props_b.body_collision_channels & e_props.body_collision_channels) == 0 then continue;
                     if array_find(fucking_fuck, inner_index_2.(s16)) then continue;
 

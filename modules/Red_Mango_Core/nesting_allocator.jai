@@ -19,21 +19,23 @@ nack_initialize :: (using allocator: *Nesting_Allocator_Collection, parent_alloc
 
 nack_alloc :: (using allocator: *Nesting_Allocator_Collection, size: s64) -> Nested_Allocation_Ref {
     ref: Nested_Allocation_Ref = ---;
+    Bin_Type :: type_of(ref.info.bin);
     if size < medium_allocator.MIN_ALLOCATION_SIZE {
         ref = na_alloc(*small_allocator, size);
-        ref.info.bin = .SMALL;
+        ref.info.bit_pattern |= xx Bin_Type.SMALL; // preserve the bit pattern in bit_pattern, unioned with this field
     } else if size < large_allocator.MIN_ALLOCATION_SIZE {
         ref = na_alloc(*medium_allocator, size);
-        ref.info.bin = .MEDIUM;
+        ref.info.bit_pattern |= xx Bin_Type.MEDIUM;
     } else {
         ref = na_alloc(*large_allocator, size);
-        ref.info.bin = .LARGE;
+        ref.info.bit_pattern |= xx Bin_Type.LARGE;
     }
     return ref;
 }
 
 nack_free :: (using allocator: *Nesting_Allocator_Collection, ref: *Nested_Allocation_Ref) {
     assert((ref.info.bit_pattern & 0xf0) == 0xa0);
+    // clearing the bit pattern allows for a clean read of the bin
     ref.info.bit_pattern &= 0x0f;
     if #complete ref.info.bin == {
     case .SMALL;

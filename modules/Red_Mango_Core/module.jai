@@ -51,7 +51,7 @@ ID_Ref64 :: struct($type_constant: s64) {
     TYPE_ID :: type_constant;
 }
 
-RUN_TESTS :: false;
+RUN_TESTS :: true;
 SAFE_TEXT_ENCODING :: true;
 SERIALIZE_DEBUG :: false;
 NESTING_ALLOCATOR_DEBUG :: false;

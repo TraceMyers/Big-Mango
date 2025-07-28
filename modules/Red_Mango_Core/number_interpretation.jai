@@ -14,13 +14,13 @@ is_float_type :: (In_Type: Type) -> bool {
     return (cast(*Type_Info)In_Type).type == .FLOAT;
 }
 
-min_value :: inline (number: $Number_Type) -> Number_Type #expand {
-    return min_value(type_of(number));
-}
+// min_value :: inline (number: $Number_Type) -> Number_Type #expand {
+//     return get_min_value(type_of(number));
+// }
 
-max_value :: inline (number: $Number_Type) -> Number_Type #expand {
-    return max_value(type_of(number));
-}
+// max_value :: inline (number: $Number_Type) -> Number_Type #expand {
+//     return get_max_value(type_of(number));
+// }
 
 // ceil to a multiple of a power of 2
 // todo: rename to something better
@@ -65,7 +65,7 @@ shift_for_divide :: inline ($Number_Type: Type) -> u8 {
     return 0;
 }
 
-min_value :: ($Number_Type: Type) -> Number_Type
+get_min_value :: ($Number_Type: Type) -> Number_Type
 #modify {
     return is_number_type(Number_Type);
 } {
@@ -95,7 +95,7 @@ min_value :: ($Number_Type: Type) -> Number_Type
     }
 }
 
-max_value :: ($Number_Type: Type) -> Number_Type
+get_max_value :: ($Number_Type: Type) -> Number_Type
 #modify {
     return is_number_type(Number_Type);
 } {

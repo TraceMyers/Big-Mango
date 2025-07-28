@@ -1,30 +1,27 @@
 
-fixed_delta_time := 0.0;
-
-// I feel silly for taking so long to see this language, compiler, and module set for what it is: a gift 
-// that paves the way toward what I want to do.
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 
 main :: () {
     rm_log("starting...", header="STARTUP");
     defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
+
     #if OS == .WINDOWS {
         Win32.SetProcessDPIAware();
         // Windows is very bad at thread-switching by default unless you do this. buh-buh-buh-buh-bad. buh-buh-buh-buh-bad
-        Win32.timeBeginPeriod(1);
+        Win32.timeBeginPeriod(1); // bad to the bone
     }
 
-    startup_success := true;
-    scope_system_init(boot_misc,        *startup_success);
-    scope_system_init(boot_input,       *startup_success);
-    scope_system_init(boot_vulkan,      *startup_success);
-    scope_system_init(boot_imgui,       *startup_success);
-    scope_system_init(boot_entities,    *startup_success);
-    scope_system_init(boot_collision,   *startup_success);
-    if !startup_success then return;
+    pre_boot();
 
-    scratch_init_game();
+    startup_success := true;
+    scope_system_init(_input,       *startup_success);
+    scope_system_init(_vulkan,      *startup_success);
+    scope_system_init(_imgui,       *startup_success);
+    scope_system_init(_entities,    *startup_success);
+    scope_system_init(_collision,   *startup_success);
+    scope_system_init(_scratch,     *startup_success);
+    if !startup_success then return;
 
     per_frame_time = seconds_since_init();
     non_render_time = seconds_since_init();
@@ -32,62 +29,61 @@ main :: () {
     while !quit {
         update_input();
         scratch_think();
-        // solve_physics();
+        solve_contacts();
+        move_stuff();
         draw_dev_ui();
         end_frame();
     }
 }
 
-boot_misc :: (stage: Boot_Stage) -> bool {
-    if stage == .STARTUP {
-        // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
-        bump_allocator_initialize(*program_runtime_allocator);
+pre_boot :: () {
+    // give the logger a proc to call after forming the log message
+    rm_log_passthrough_callback = rm_log_callback;
+    // call_rm_log_passthrough_only = true;
 
-        // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
-        command_line_procedures = COMMAND_LINE_PROCEDURES;
-        
-        // give the logger a proc to call after forming the log message
-        rm_log_passthrough_callback = rm_log_callback;
-        // don't push the log messages to stdout
-        call_rm_log_passthrough_only = true;
+    // circular buffer, n messages, for the gui log
+    // todo: bring this up to 1000+. all it needs is a way to cull messages that won't be rendered
+    LOG_MESSAGE_COUNT :: 256;
+    rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
+    
+    initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
+    // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
+    bump_allocator_initialize(*program_runtime_allocator);
 
-        // circular buffer, n messages, for the gui log
-        // todo: bring this up to 1000+. all it needs is a way to cull messages that won't be rendered
-        LOG_MESSAGE_COUNT :: 256;
-        rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
-        initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
-    } else {
-
-    }
-    return true;
+    // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
+    command_line_procedures = COMMAND_LINE_PROCEDURES;
 }
 
 end_frame :: () {
+    // console_window = GetConsoleWindow();
+    // if console_window != null {
+    //     Win32.SetWindowPos(console_window, null, 0, 0, 100, 100, 0);
+    // }
+
     new_non_render_time := seconds_since_init();
     simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
     render_frame();
     non_render_time = seconds_since_init();
 
-    new_time := seconds_since_init();
-    if fixed_delta_time != 0.0 {
-        delta_time = fixed_delta_time;
-    } else {
-        delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
-    }
-    per_frame_time = new_time;
-
-    delta_times[dt_index] = delta_time;
-    render_times[dt_index] = render_dt;
-    simulation_times[dt_index] = simulation_dt;
-    dt_index = increment_wrap(dt_index, 0, DELTA_TIME_COUNT-1);
-
-    flush_entity_deletion_queue();
+    entity_frame_turnover();
 
     reset_temporary_storage();
     game_frame_count += 1;
 
     // doing this after game_frame_count advances so the data are correct for the next generation of entities
     set_global_entities();
+
+    new_time := seconds_since_init();
+    delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
+    per_frame_time = new_time;
+    if fixed_delta_time != 0.0 {
+        delta_time = fixed_delta_time;
+    }
+
+    delta_times[dt_index] = delta_time;
+    render_times[dt_index] = render_dt;
+    simulation_times[dt_index] = simulation_dt;
+    dt_index = increment_wrap(dt_index, 0, delta_times.count-1);
 }
 
 calc_fps :: () -> float32 {
@@ -127,13 +123,15 @@ Boot_Stage :: enum {
     SHUTDOWN;
 }
 
+fixed_delta_time := 0.0;
+
 window: Window_Type;
+console_window: Window_Type;
 delta_time := 0.01;
 game_frame_count: s32;
 per_frame_time: float64;
 non_render_time: float64;
 quit := false;
-
 
 simulation_dt: float;
 render_dt: float;
@@ -180,11 +178,16 @@ Zlib :: #import "zlib";
 #load "world.jai";
 #load "scratch.jai";
 #load "allocators.jai";
-#load "physics.jai";
+#load "physics_new.jai";
 #load "draw.jai";
 #load "entity_control.jai";
 // #load "raycast.jai";
 #load "entities/entity_button.jai";
 #load "add_to_context.jai";
+#load "collision_types.jai";
+// #load "collision_grid.jai";
 #load "collision.jai";
-#load "overlap.jai";
+// #load "overlap.jai";
+
+kernel32 :: #system_library "kernel32";
+GetConsoleWindow :: () -> Win32.HWND #foreign kernel32;

@@ -7,22 +7,24 @@ SMALLEST_OF_NUMBERS :: 0.00000003; // (not really)
 INV_PI          :: 1.0 / PI;
 INV_2_PI        :: 1.0 / (2.0 * PI);
 
-COS_0           :: 1.0;
-COS_PI_OVER_128 :: 0.9996988;
-COS_PI_OVER_64  :: 0.9987955;
-COS_PI_OVER_32  :: 0.9951847;
-COS_PI_OVER_28  :: 0.9937122;
-COS_PI_OVER_24  :: 0.9914449;
-COS_PI_OVER_20  :: 0.9876883;
-COS_PI_OVER_16  :: 0.9807853;
-COS_PI_OVER_12  :: 0.9659258;
-COS_PI_OVER_8   :: 0.9238795;
-COS_PI_OVER_7   :: 0.9009689;
-COS_PI_OVER_6   :: 0.8660254;
-COS_PI_OVER_5   :: 0.8090170;
-COS_PI_OVER_4   :: 0.7071067;
-COS_PI_OVER_3   :: 0.5;
-COS_PI_OVER_2   :: 0.0;
+COS_0            :: 1.0;
+COS_PI_OVER_2048 :: 0.9999988; // ~0.09 degrees
+ALMOST_COS_0     :: COS_PI_OVER_2048;
+COS_PI_OVER_128  :: 0.9996988;
+COS_PI_OVER_64   :: 0.9987955;
+COS_PI_OVER_32   :: 0.9951847;
+COS_PI_OVER_28   :: 0.9937122;
+COS_PI_OVER_24   :: 0.9914449;
+COS_PI_OVER_20   :: 0.9876883;
+COS_PI_OVER_16   :: 0.9807853;
+COS_PI_OVER_12   :: 0.9659258;
+COS_PI_OVER_8    :: 0.9238795;
+COS_PI_OVER_7    :: 0.9009689;
+COS_PI_OVER_6    :: 0.8660254;
+COS_PI_OVER_5    :: 0.8090170;
+COS_PI_OVER_4    :: 0.7071067;
+COS_PI_OVER_3    :: 0.5;
+COS_PI_OVER_2    :: 0.0;
 
 QUATERNION_IDENTITY :: Quaternion.{0,0,0,1};
 VectorTypes :: Type.[Vector2, Vector3, Vector4, Quaternion];  // Used for type restriction in normalize().
@@ -62,12 +64,12 @@ round :: (a: float64, $Int_Type := s32) -> Int_Type
 #modify {
     return is_int_type(Int_Type);
 } {
-    if a < min_value(Int_Type).(float64) {
-        return min_value(Int_Type);
+    if a < get_min_value(Int_Type).(float64) {
+        return get_min_value(Int_Type);
     }
     rounded_toward_zero := a.(Int_Type);
     if a > 0 && rounded_toward_zero < 0 { // overflow on cast
-        return max_value(Int_Type);
+        return get_max_value(Int_Type);
     }
     diff := a - cast(float64)rounded_toward_zero;
     if diff > 0.5 {
@@ -86,11 +88,11 @@ alter_cast :: inline (number: $In_Type, $Out_Type: Type, $NORMALIZED_FLOAT := fa
     int_to_float := is_int_type(In_Type) && is_float_type(Out_Type);
     return float_to_int || int_to_float;
 } {
-    MIN_IN :: #run min_value(In_Type);
-    MAX_IN :: #run max_value(In_Type);
+    MIN_IN :: #run get_min_value(In_Type);
+    MAX_IN :: #run get_max_value(In_Type);
     IN_DIFF :: MAX_IN - MIN_IN;
-    MIN_OUT :: #run min_value(Out_Type);
-    MAX_OUT :: #run max_value(Out_Type);
+    MIN_OUT :: #run get_min_value(Out_Type);
+    MAX_OUT :: #run get_max_value(Out_Type);
     OUT_DIFF :: MAX_OUT - MIN_OUT;
     IN_IS_FLOAT :: #run type_info(In_Type).type == .FLOAT;
     OUT_IS_FLOAT :: #run type_info(Out_Type).type == .FLOAT;
@@ -148,18 +150,16 @@ is_normalized :: (v: $Vec_Type, tolerance := 0.0001) -> bool {
 }
 
 increment_wrap :: inline (val: $T, min: T, max: T) -> T {
-    val += 1;
-    if val > max {
+    if val >= max {
         val = min;
-    }
+    } else val += 1;
     return val;
 }
 
 decrement_wrap :: inline (val: $T, min: T, max: T) -> T {
-    val -= 1;
-    if val < min {
+    if val <= min {
         val = max;
-    }
+    } else val -= 1;
     return val;
 }
 
@@ -193,6 +193,11 @@ is_power_of_two :: inline (val: u64) -> bool {
 
 sort_range :: (in_vec: Int_Vector2) -> Int_Vector2 {
     return .{min(in_vec.x, in_vec.y), max(in_vec.x, in_vec.y)};
+}
+
+
+ordered_ranges_overlap :: inline (range_1_x: $T, range_1_y: T, range_2_x: T, range_2_y: T) -> bool {
+    return range_2_y >= range_1_x && range_2_x <= range_1_y;
 }
 
 ordered_ranges_overlap :: inline (range_1: $T/Vector2Types, range_2: T) -> bool {
@@ -313,26 +318,37 @@ distance :: inline (q1: Quaternion, q2: Quaternion) -> float {
 
 interp_rotate :: (origin: Quaternion, target: Quaternion, norm: float32) -> Quaternion {
     assert(norm >= 0.0 && norm <= 1.0);
-    // small distances can be lerped without being able to tell the difference
-    dp := dot(origin, target);
-    use_target := ifx dp < 0 then -target else target;
-    rot_dist_sq := distance_squared(origin, use_target);
-    if rot_dist_sq <= VERY_SMALL_NUMBER {
+    cos_theta := dot(origin, target);
+    if cos_theta >= ALMOST_COS_0 {
         return target;
+    } else if cos_theta >= COS_PI_OVER_12 {
+        // small distances can be lerped without being able to tell the difference
+        return nlerp(origin, target, norm);
+    } else {
+        return slerp(origin, target, norm);
     }
-    if rot_dist_sq < 0.15 {
-         return lerp(origin, use_target, norm);
-    } else return slerp(origin, use_target, norm);
 }
 
+// slow because of acos at the top
+// instead of calling this a bunch, for a fixed rotation, just use quat multiply
 interp_rotate :: (origin: Quaternion, target: Quaternion, speed: float32, delta_time: float32) -> Quaternion {
     rot_dist := speed * delta_time;
     cos_ht := abs(dot(origin, target));
-    // todo: prob don't need to do acos here and in slerp
-    t := 2.0 * acos(cos_ht);
+    t := 2.0 * acos_approx(cos_ht);
     if abs(rot_dist) >= t {
         return target;
     } else return interp_rotate(origin, target, rot_dist / t);
+}
+
+// small abs max error (~0.0008) and ~15% faster when using cephes.jai acos() as the reference. thanks to Vasili at https://math.stackexchange.com/questions/4983100/finding-arcsin-or-arccos-from-other-mathmatical-functions
+acos_approx :: inline (x: float) -> float {
+    if x < 0 {
+        x = max(-x, -1);
+        return PI - sqrt(1-x) * (1.5707963267948966 - 0.20347053865798365 * x + 0.046887774236182234 * x * x).(float32);
+    } else {
+        x = min(x, 1);
+        return sqrt(1-x) * (1.5707963267948966 - 0.20347053865798365 * x + 0.046887774236182234 * x * x).(float32);
+    }
 }
 
 // todo do these work???
@@ -771,6 +787,17 @@ informed_clamp :: inline (x: float, min: float, max: float) -> float, s32 {
     }
 }
 
+clamp_point_to_rect :: inline (point: Vector3, rect_center: Vector3, rect_up: Vector3, rect_right: Vector3, rect_half_height: float, rect_half_width: float) -> Vector3 {
+    diff := point - rect_center;
+    up_dist := clamp(dot(diff, rect_up), -rect_half_height, rect_half_height);
+    right_dist := clamp(dot(diff, rect_right), -rect_half_width, rect_half_width);
+    return rect_center + rect_up * up_dist + rect_right * right_dist;
+}
+
+world_space_to_local_space :: inline (vector: Vector3, axis_fore: Vector3, axis_up: Vector3, axis_right: Vector3) -> Vector3 {
+    return Vector3.{dot(axis_fore, vector), dot(axis_right, vector), dot(axis_up, vector)};
+}
+
 // don't use this procedure if the input value is too large! makes large error.
 // recommended max somewhere in 2000-5000
 mod_two_pi :: inline (x: float) -> float {
@@ -952,61 +979,46 @@ closest_point_in_box :: inline (position: Vector3, box: Box) -> Vector3 {
     return box.center + clamp(dist_along_axes, box.extent);
 }
 
-linear_compress_float_16bit :: inline (x: float, $min_value: float, $max_value: float, $do_clamp := true) -> u16 {
-    INV_RANGE :: 1.0 / (max_value - min_value);
+linear_compress_float :: inline (x: float, $in_min: float, $in_max: float, $out_type := u16, $do_clamp := true) -> out_type {
+    assert(is_int_type(out_type));
+    INV_RANGE :: 1.0 / (in_max - in_min);
+    INT_TYPE_MIN :: get_min_value(out_type).(float);
+    INT_TYPE_MAX :: get_max_value(out_type).(float);
+    INT_TYPE_RANGE :: INT_TYPE_MAX - INT_TYPE_MIN;
     #if do_clamp {
-        xc := clamp(x, min_value, max_value);
+        xc := clamp(x, in_min, in_max);
     } else {
         xc := x;
     }
-    min_diff := xc - min_value;
+    min_diff := xc - in_min;
     norm := min_diff * INV_RANGE;
-    return round(U16_MAX.(float) * norm, u16);
+    return round(INT_TYPE_MIN + INT_TYPE_RANGE * norm, out_type);
 }
 
-linear_decompress_float_16bit :: inline (u: u16, $min_value: float, $max_value: float) -> float {
-    INV_U16_RANGE :: #run (1.0 / U16_MAX.(float));
+linear_decompress_float :: inline (u: $in_type, $min_value: float, $max_value: float) -> float 
+#modify {
+    return is_int_type(in_type);
+} {
+    INT_TYPE_MIN :: get_min_value(in_type).(float);
+    INT_TYPE_MAX :: get_max_value(in_type).(float);
+    INT_TYPE_RANGE :: INT_TYPE_MAX - INT_TYPE_MIN;
+    INV_INT_TYPE_RANGE :: 1.0 / INT_TYPE_RANGE.(float);
     FLOAT_RANGE :: #run (max_value - min_value);
-    norm := u.(float) * INV_U16_RANGE;
+    norm := (u.(float) - INT_TYPE_MIN) * INV_INT_RANGE;
     return min_value + norm * FLOAT_RANGE;
 }
 
-linear_compress_float_21bit :: inline (x: float, $min_value: float, $max_value: float, $do_clamp := true) -> u64 {
-    INV_RANGE :: 1.0 / (max_value - min_value);
-    #if do_clamp {
-        xc := clamp(x, min_value, max_value);
-    } else {
-        xc := x;
-    }
-    min_diff := xc - min_value;
-    norm := min_diff * INV_RANGE;
-    return round((((1).(u64) << 21)-1).(float) * norm, u16);
-}
-
-linear_decompress_float_21bit :: inline (u: u64, $min_value: float, $max_value: float) -> float {
-    INV_U16_RANGE :: #run (1.0 / U16_MAX.(float));
-    FLOAT_RANGE :: #run (max_value - min_value);
-    norm := u.(float) * (((1).(u64) << 21)-1).(float);
-    return min_value + norm * FLOAT_RANGE;
-}
-
-Compressed_Axes :: struct {
-    fore: u64;
-    up: u64;
-    right: u64;
-}
-
-linear_compress_vector3 :: inline (v: Vector3, $min_value: float, $max_value: float) -> u64 {
-    x := linear_compress_float_21bit(b.x, min_value, max_value);
-    y := linear_compress_float_21bit(b.y, min_value, max_value);
-    z := linear_compress_float_21bit(b.z, min_value, max_value);
+linear_compress_vector3 :: (v: Vector3, $min_value: float, $max_value: float) -> u64 {
+    x := linear_compress_float_21bit(v.x, min_value, max_value);
+    y := linear_compress_float_21bit(v.y, min_value, max_value);
+    z := linear_compress_float_21bit(v.z, min_value, max_value);
     return (z << 42) | (y << 21) | (x << 0);
 }
 
-linear_decompress_vector3 :: inline (v: u64, $min_value: float, $max_value: float) -> Vector3 {
-    x := (v >>  0) & 0x15;
-    y := (v >> 21) & 0x15;
-    z := (v >> 42) & 0x15;
+linear_decompress_vector3 :: (v: u64, $min_value: float, $max_value: float) -> Vector3 {
+    x := (v >>  0) & 0x1fffff;
+    y := (v >> 21) & 0x1fffff;
+    z := (v >> 42) & 0x1fffff;
     return .{
         linear_decompress_float_21bit(x, min_value, max_value),
         linear_decompress_float_21bit(y, min_value, max_value),
@@ -1015,12 +1027,12 @@ linear_decompress_vector3 :: inline (v: u64, $min_value: float, $max_value: floa
 }
 
 sweep_aabb :: (aabb: AABB, displacement: Vector3) -> AABB {
-    min := aabb.center.xy - aabb.extent.xy;
-    max := aabb.center.xy + aabb.extent.xy;
+    min := aabb.center - aabb.extent;
+    max := aabb.center + aabb.extent;
     // sweep the aabb to account for velocity
-    if displacement.x < 0 then min.x += displacement.x else max.x += displacement.x;
-    if displacement.y < 0 then min.y += displacement.y else max.y += displacement.y;
-    if displacement.z < 0 then min.z += displacement.z else max.z += displacement.z;
+    if displacement.x < 0 then min.x += displacement.x; else max.x += displacement.x;
+    if displacement.y < 0 then min.y += displacement.y; else max.y += displacement.y;
+    if displacement.z < 0 then min.z += displacement.z; else max.z += displacement.z;
     extent := (max - min) * 0.5;
     return .{min + extent, extent};
 }
@@ -1028,7 +1040,44 @@ sweep_aabb :: (aabb: AABB, displacement: Vector3) -> AABB {
 linear_compress_norm_vector3        :: #bake_arguments linear_compress_vector3(min_value=-1, max_value=1);
 linear_decompress_norm_vector3      :: #bake_arguments linear_decompress_vector3(min_value=-1, max_value=1);
 
+linear_compress_float_8bit          :: #bake_arguments linear_compress_float(out_type=u8);
+linear_decompress_float_8bit :: inline (u: $in_type, $min_value: float, $max_value: float) -> float 
+#modify {
+    return in_type == u8;
+} {
+    return linear_decompress_float(u, min_value, max_value);
+}
+
+linear_compress_float_16bit         :: #bake_arguments linear_compress_float(out_type=u16);
+linear_decompress_float_16bit :: inline (u: $in_type, $min_value: float, $max_value: float) -> float 
+#modify {
+    return in_type == u16;
+} {
+    return linear_decompress_float(u, min_value, max_value);
+}
+
+linear_compress_float_21bit :: (x: float, $min_value: float, $max_value: float, $do_clamp := true) -> u64 {
+    INV_RANGE :: 1.0 / (max_value - min_value);
+    #if do_clamp {
+        xc := clamp(x, min_value, max_value);
+    } else {
+        xc := x;
+    }
+    min_diff := xc - min_value;
+    norm := min_diff * INV_RANGE;
+    out_val := round(_21_BITS_MAX.(float) * norm, u64);
+    return out_val;
+}
+
+linear_decompress_float_21bit :: (u: u64, $min_value: float, $max_value: float) -> float {
+    FLOAT_RANGE :: #run (max_value - min_value);
+    norm := u.(float) * INV_21_BITS_MAX;
+    return min_value + norm * FLOAT_RANGE;
+}
+
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+_21_BITS_MAX :: (((1).(u64) << 21)-1);
+INV_21_BITS_MAX : float : ((1.0).(float64) / _21_BITS_MAX.(float64)).(float);
 
 // precalculated fixed point math values for sin_cos
 FIXED_SHIFT : u64 : 14; // seems to maximize precision over the whole sin_cos process

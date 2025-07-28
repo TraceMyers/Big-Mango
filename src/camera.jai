@@ -44,7 +44,7 @@ view_matrix :: (camera: *Entity) -> Matrix4 {
     // by just passing the relative normalized axes of the camera
     rotation := make_matrix_from_rows(right_direction(camera), -up_direction(camera), -fore_direction(camera));
     // 'moving the world' into place by removing the camera's position
-    return translate(rotation, -camera.position);
+    return translate(rotation, -camera.center);
 }
 
 get_aspect_ratio :: inline (camera: *Entity, viewport: Vector2, $which := enum { X_OVER_Y; Y_OVER_X; }.X_OVER_Y) -> float {

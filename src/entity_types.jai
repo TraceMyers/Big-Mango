@@ -4,7 +4,6 @@ Entity_Patch_Info :: struct {
     camera: u8 = INVALID_CAMERA_INDEX;
     using ref: Entity_Ref;
     physics_properties: u16;
-    body_collider: u16;
     meshes: u16;
     device: u16 = INVALID_DEVICE_INDEX;
     flags: Entity_Patch_Flags = 0;
@@ -14,9 +13,11 @@ Entity :: struct {
     using type_union: Entity_Type_Flags_Union;
     using camera: *Entity_Camera;
     using ref: Entity_Ref;
-    using physics_core: *Entity_Physics_Core;
+    using body: *Collision_Body;
+    using movement: *Entity_Movement;
+    using angular_body: *Angular_Body;
+    compressed_axes: *Compressed_Axes;
     physics_properties: *Physics_Properties;
-    body_collider: *Entity_Collider;
     meshes: []Entity_Mesh;
     device: *Entity_Device;
     name: string;
@@ -48,6 +49,8 @@ ALL_ENTITY_TYPE_FLAGS :: #run -> Entity_Type_Flags {
 
 Entity_Patch_Flags :: enum_flags u32 {
     DYNAMIC_PHYSICS_PROPERTIES;
+    JUST_SPAWNED;
+    COLLIDING_WITH_SOMETHING;
 }
 
 Entity_Type_Flags_Union :: union {
@@ -64,23 +67,20 @@ Entity_Device_Type :: enum u16 {
 
 // ------------------------------------------------------------------------------------------------------------- components
 
-Entity_Physics_Core_Flags :: enum_flags u32 {
+Entity_Movement_Flags :: enum_flags u32 {
     MOVED_BY_PHYSICS;
     JUMP_QUEUED;
     ON_GROUND;
+    ACCELERATE_IN_3D;
 }
 
-Entity_Physics_Core :: struct {
-    position: Vector3;
-    linear_velocity: Vector3;
-    angular_velocity: Vector3;
-    orientation: Quaternion;
+Entity_Movement :: struct {
     linear_input: Vector3;
-    physics_flags: Entity_Physics_Core_Flags;
     jump_queued_at_time: float;
+    movement_flags: Entity_Movement_Flags;
 }
 
-ENTITY_PHYSICS_PER_FRAME_FLAGS : Entity_Physics_Core_Flags : .ON_GROUND;
+ENTITY_MOVEMENT_PER_FRAME_FLAGS : Entity_Movement_Flags : .ON_GROUND;
 
 Entity_Mesh_Collection :: struct {
     allocation_ref: Nested_Allocation_Ref;
@@ -102,12 +102,17 @@ Entity_Mesh :: struct {
     albedo: Mesh_Albedo;
 }
 
+Angular_Body :: struct {
+    orientation: Quaternion = QUATERNION_IDENTITY;
+    angular_velocity: Vector3;
+}
+
 Trigger_Volume_Proc :: #type (owner: *Entity, guest: *Entity);
 
 Trigger_Volume :: struct {
     position: Vector3;
     orientation: Quaternion;
-    volume: Entity_Collider;
+    shape: Collision_Shape;
     on_enter: Trigger_Volume_Proc;
     on_exit: Trigger_Volume_Proc;
     overlap_mode: enum u8 {

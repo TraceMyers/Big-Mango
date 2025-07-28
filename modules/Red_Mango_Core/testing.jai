@@ -21,4 +21,5 @@ run_tests :: (header: string, tests: []Test_Proc) {
         log(log_str);
     }
     log("passed % / % tests\n   ", passed_test_ct, tests.count);
+    a := 0;
 }
