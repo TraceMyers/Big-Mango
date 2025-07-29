@@ -1,11 +1,11 @@
 
 Entity_Patch_Info :: struct {
     using type_union: Entity_Type_Flags_Union;
-    camera: u8 = INVALID_CAMERA_INDEX;
     using ref: Entity_Ref;
     physics_properties: u16;
     meshes: u16;
     device: u16 = INVALID_DEVICE_INDEX;
+    camera: u8 = INVALID_CAMERA_INDEX;
     flags: Entity_Patch_Flags = 0;
 }
 

@@ -15,12 +15,13 @@ main :: () {
     pre_boot();
 
     startup_success := true;
-    scope_system_init(_input,       *startup_success);
-    scope_system_init(_vulkan,      *startup_success);
-    scope_system_init(_imgui,       *startup_success);
-    scope_system_init(_entities,    *startup_success);
-    scope_system_init(_collision,   *startup_success);
-    scope_system_init(_scratch,     *startup_success);
+    scope_system_init(_input,               *startup_success);
+    scope_system_init(_vulkan,              *startup_success);
+    scope_system_init(_imgui,               *startup_success);
+    scope_system_init(_entities,            *startup_success);
+    scope_system_init(_collision,           *startup_success);
+    scope_system_init(_collision_grid,      *startup_success);
+    scope_system_init(_scratch,             *startup_success);
     if !startup_success then return;
 
     per_frame_time = seconds_since_init();
@@ -185,8 +186,8 @@ Zlib :: #import "zlib";
 #load "entities/entity_button.jai";
 #load "add_to_context.jai";
 #load "collision_types.jai";
-// #load "collision_grid.jai";
 #load "collision.jai";
+#load "collision_grid.jai";
 // #load "overlap.jai";
 
 kernel32 :: #system_library "kernel32";

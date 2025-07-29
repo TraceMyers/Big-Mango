@@ -20,8 +20,6 @@ AABB_OVERLAP_BUFFER :: 1.0;
 
 _collision :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        context.collision_overlaps.allocator = temp;
-        // init_collision_grid(.{}, .{2000,2000}, .{10,10});
     }
     return true;
 }
@@ -32,96 +30,187 @@ solve_contacts :: () {
         return;
     }
 
-    Move_Entity :: struct {
-        body: *Collision_Body;
-        axes: *Axes;
-        movement: *Entity_Movement;
+    draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
+
+    for 0..entity_ct-1 {
+        if entity_collision_channels[it] == 0 {
+            continue;
+        }
+        self_body := *entity_collision_bodies[it];
+        self_aabb := get_aabb_at(it);
+
+        // account for velocity
+        self_displacement := self_body.velocity * delta_time;
+        self_swept_aabb := sweep_aabb(.{self_aabb.center, self_aabb.extent}, self_displacement);
+
+        grid_pos_min := world_to_collision_grid_position(self_swept_aabb.center.xy - self_swept_aabb.extent.xy);
+        grid_pos_max := world_to_collision_grid_position(self_swept_aabb.center.xy + self_swept_aabb.extent.xy);
+
+        hash_upper := collision_grid_index(grid_pos_min);
+        hash_lower := collision_grid_index(grid_pos_max);
+        hash : s64 = (hash_upper.(s64) << 32) | hash_lower;
+
+        if collision_cell_hashes[it] != hash {
+            if collision_cell_hashes[it] != -1 {
+                prev_hash_upper := collision_cell_hashes[it] >> 32;
+                prev_grid_pos_min := collision_grid_index_to_grid_position(xx prev_hash_upper);
+                prev_hash_lower := collision_cell_hashes[it] & 0xffff_ffff;
+                prev_grid_pos_max := collision_grid_index_to_grid_position(xx prev_hash_lower);
+                collision_grid_iterate(xx it, null, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
+            }
+            collision_grid_iterate(xx it, null, grid_pos_min, grid_pos_max, self_swept_aabb, add_to_collision_cell);
+            collision_cell_hashes[it] = hash;
+        }
     }
 
-    for e1 : 0..entity_ct-2 {
-        if entity_collision_channels[e1] == 0 then continue;
-        entity_1_body               := *entity_collision_bodies[e1];
-        entity_1_compressed_axes    := *entity_compressed_axes[e1];
-        entity_1_movement           := *entity_movements[e1];
-        entity_1_axes: Axes = ---;
-        decompress_axes(entity_1_compressed_axes, *entity_1_axes);
-        entity_1_props              := get_physics_properties_at(e1);
+    overlap_groups := temp_dynamic_array([..]Pair(s16), 2048);
+    solve_contacts_broadphase(*overlap_groups);
 
-        entity_1_aabb: AABB = ---;
-        get_aabb(entity_1_body.shape, entity_1_body.center, entity_1_axes.fore, entity_1_axes.up, entity_1_axes.right, *entity_1_aabb);
+    random_seed(*color_group_random_state, 80);
+    entities_in_group := temp_dynamic_array(s16, 2048);
+    for overlap_groups {
+        get_entities_in_overlap_group(it, *entities_in_group);
+        group_color := random_color4f(random_state=*color_group_random_state);
+        for entities_in_group {
+            aabb := get_aabb_at(it);
+            draw_aabb(aabb, group_color);
+        }
+        array_reset_keeping_memory(*entities_in_group); 
+    }
 
-        for e2 : e1+1..entity_ct-1 {
-            if (entity_collision_channels[e1] & entity_collision_channels[e2]) == 0 then continue;
-            entity_2_body               := *entity_collision_bodies[e2];
-            entity_2_compressed_axes    := *entity_compressed_axes[e2];
-            entity_2_movement           := *entity_movements[e2];
-            entity_2_axes: Axes = ---;
-            decompress_axes(entity_2_compressed_axes, *entity_2_axes);
-            entity_2_props              := get_physics_properties_at(e2);
+    // Move_Entity :: struct {
+    //     body: *Collision_Body;
+    //     axes: *Axes;
+    //     movement: *Entity_Movement;
+    // }
 
-            entity_2_aabb: AABB = ---;
-            get_aabb(entity_2_body.shape, entity_2_body.center, entity_2_axes.fore, entity_2_axes.up, entity_2_axes.right, *entity_2_aabb);
+    // for e1 : 0..entity_ct-2 {
+    //     if entity_collision_channels[e1] == 0 then continue;
+    //     entity_1_body               := *entity_collision_bodies[e1];
+    //     entity_1_compressed_axes    := *entity_compressed_axes[e1];
+    //     entity_1_movement           := *entity_movements[e1];
+    //     entity_1_axes: Axes = ---;
+    //     decompress_axes(entity_1_compressed_axes, *entity_1_axes);
+    //     entity_1_props              := get_physics_properties_at(e1);
+    //     entity_1_aabb               := get_aabb(entity_1_body, entity_1_axes);
 
-            if !is_overlap_aabb_aabb(entity_1_aabb, entity_2_aabb) {
-                continue;
-            }
+    //     for e2 : e1+1..entity_ct-1 {
+    //         if (entity_collision_channels[e1] & entity_collision_channels[e2]) == 0 then continue;
+    //         entity_2_body               := *entity_collision_bodies[e2];
+    //         entity_2_compressed_axes    := *entity_compressed_axes[e2];
+    //         entity_2_axes: Axes = ---;
+    //         decompress_axes(entity_2_compressed_axes, *entity_2_axes);
+    //         entity_2_movement           := *entity_movements[e2];
+    //         entity_2_props              := get_physics_properties_at(e2);
+    //         entity_2_aabb               := get_aabb(entity_2_body, entity_2_axes);
 
-            result: Contact_Result;
-            is_contact: bool;
-            // very for now. just move up to collis and kill velocity along normals
-            move_entity_2: bool;
-            if entity_1_body.shape.type == .RECT && entity_2_body.shape.type == .SPHERE {
-                is_contact = solve_potential_contact(entity_2_body.*, entity_2_axes, entity_1_body.*, entity_1_axes, FIXED_TIME_STEP, *result);
-                move_entity_2 = true;
-            } else {
-                is_contact = solve_potential_contact(entity_1_body.*, entity_1_axes, entity_2_body.*, entity_2_axes, FIXED_TIME_STEP, *result);
-            }
+    //         if !is_overlap_aabb_aabb(entity_1_aabb, entity_2_aabb) {
+    //             continue;
+    //         }
 
-            if !is_contact {
-                continue;
-            }
+    //         result: Contact_Result;
+    //         is_contact: bool;
+    //         // very for now. just move up to collis and kill velocity along normals
+    //         move_entity_2: bool;
+    //         if entity_1_body.shape.type == .RECT && entity_2_body.shape.type == .SPHERE {
+    //             is_contact = solve_potential_contact(entity_2_body.*, entity_2_axes, entity_1_body.*, entity_1_axes, FIXED_TIME_STEP, *result);
+    //             move_entity_2 = true;
+    //         } else {
+    //             is_contact = solve_potential_contact(entity_1_body.*, entity_1_axes, entity_2_body.*, entity_2_axes, FIXED_TIME_STEP, *result);
+    //         }
 
-            move_entity_a: Move_Entity = ---;
-            move_entity_b: Move_Entity;
-            if move_entity_2 {
-                move_entity_a = .{entity_2_body, *entity_2_axes, entity_2_movement};
-            } else {
-                move_entity_a = .{entity_1_body, *entity_1_axes, entity_1_movement};
-                if entity_2_props.mass > IMMOVABLE_ENTITY_MASS {
-                    move_entity_b = .{entity_2_body, *entity_2_axes, entity_2_movement};
+    //         if !is_contact {
+    //             continue;
+    //         }
+
+    //         move_entity_a: Move_Entity = ---;
+    //         move_entity_b: Move_Entity;
+    //         if move_entity_2 {
+    //             move_entity_a = .{entity_2_body, *entity_2_axes, entity_2_movement};
+    //         } else {
+    //             move_entity_a = .{entity_1_body, *entity_1_axes, entity_1_movement};
+    //             if entity_2_props.mass > IMMOVABLE_ENTITY_MASS {
+    //                 move_entity_b = .{entity_2_body, *entity_2_axes, entity_2_movement};
+    //             }
+    //         }
+
+    //         // don't worry about ccd stuff...
+    //         if move_entity_b.movement == null {
+    //             using move_entity_a;
+    //             speed_in_direction_opposite_hit_normal := dot(body.velocity, -result.contact_normal);
+    //             body.velocity += result.contact_normal * speed_in_direction_opposite_hit_normal;
+    //         } else {
+    //             a_speed_in_direction_of_hit_normal := dot(move_entity_a.body.velocity, result.contact_normal);
+    //             move_entity_a.body.velocity -= a_speed_in_direction_of_hit_normal;
+    //             b_speed_in_direction_of_hit_normal := dot(move_entity_b.body.velocity, result.contact_normal);
+    //             move_entity_b.body.velocity -= b_speed_in_direction_of_hit_normal;
+    //         }
+
+    //         entity_patch_infos[e1].flags |= .COLLIDING_WITH_SOMETHING;
+    //         entity_patch_infos[e2].flags |= .COLLIDING_WITH_SOMETHING;
+    //     }
+    // }
+
+    // for e : 0..entity_ct-1 {
+    //     if entity_collision_channels[e] == 0 then continue;
+    //     entity_body := *entity_collision_bodies[e];
+    //     entity_axes: Axes = ---;
+    //     decompress_axes(*entity_compressed_axes[e], *entity_axes);
+    //     entity_aabb: AABB = ---;
+    //     get_aabb(entity_body.shape, entity_body.center, entity_axes.fore, entity_axes.up, entity_axes.right, *entity_aabb);
+
+    //     if entity_patch_infos[e].flags & .COLLIDING_WITH_SOMETHING {
+    //     } else {
+    //         draw_aabb(entity_aabb, .{g=1});
+    //     }
+    // }
+}
+
+get_entities_in_overlap_group :: (group: []Pair(s16), out_entities: *[..]s16) {
+    last_known_pair_a: s16 = -1;
+    for group {
+        if it.a != last_known_pair_a {
+            array_add_if_unique(out_entities, it.a);
+            last_known_pair_a = it.a;
+        }
+        array_add_if_unique(out_entities, it.b);
+    }
+}
+
+solve_contacts_broadphase :: (overlap_groups: *[..][..]Pair(s16)) {
+    entity_ct := get_entity_count();
+
+    iteration_overlaps: [..]Pair(s16);
+    iteration_overlaps.allocator = temp;
+    array_reserve(*iteration_overlaps, 1024);
+
+    // todo: parallelizing this should be easy?
+    // todo: maybe in-order iteration is slower than something more fancy here
+    for e : 0..entity_ct-1 {
+        array_reset_keeping_memory(*iteration_overlaps);
+        collision_grid_iterate(xx e, *iteration_overlaps, find_overlaps_in_cell);
+        if iteration_overlaps.count == 0 {
+            continue;
+        }
+        in_collision_group: *[..]Pair(s16);
+        for *group : (overlap_groups.*) {
+            for pair : group.* {
+                if pair.b == e {
+                    in_collision_group = group;
+                    break group;
+                } else for iteration_overlaps {
+                    if pair.b == it.b {
+                        in_collision_group = group;
+                        break group;
+                    }
                 }
             }
-
-            // don't worry about ccd stuff...
-            if move_entity_b.movement == null {
-                using move_entity_a;
-                speed_in_direction_opposite_hit_normal := dot(body.velocity, -result.contact_normal);
-                body.velocity += result.contact_normal * speed_in_direction_opposite_hit_normal;
-            } else {
-                a_speed_in_direction_of_hit_normal := dot(move_entity_a.body.velocity, result.contact_normal);
-                move_entity_a.body.velocity -= a_speed_in_direction_of_hit_normal;
-                b_speed_in_direction_of_hit_normal := dot(move_entity_b.body.velocity, result.contact_normal);
-                move_entity_b.body.velocity -= b_speed_in_direction_of_hit_normal;
-            }
-
-            entity_patch_infos[e1].flags |= .COLLIDING_WITH_SOMETHING;
-            entity_patch_infos[e2].flags |= .COLLIDING_WITH_SOMETHING;
         }
-    }
-
-    for e : 0..entity_ct-1 {
-        if entity_collision_channels[e] == 0 then continue;
-        entity_body := *entity_collision_bodies[e];
-        entity_axes: Axes = ---;
-        decompress_axes(*entity_compressed_axes[e], *entity_axes);
-        entity_aabb: AABB = ---;
-        get_aabb(entity_body.shape, entity_body.center, entity_axes.fore, entity_axes.up, entity_axes.right, *entity_aabb);
-
-        if entity_patch_infos[e].flags & .COLLIDING_WITH_SOMETHING {
-            draw_aabb(entity_aabb, .{r=1});
-        } else {
-            draw_aabb(entity_aabb, .{g=1});
+        if in_collision_group == null {
+            // new group
+            in_collision_group = array_add(overlap_groups);
         }
+        array_append(in_collision_group, iteration_overlaps);
     }
 }
 
@@ -421,9 +510,23 @@ get_aabb :: inline (shape: Collision_Shape, position: Vector3, axis_fore: Vector
     out_aabb.extent = get_aabb_extent(shape, axis_fore, axis_up, axis_right);
 }
 
+get_aabb :: inline (body: *Collision_Body, axes: Axes) -> AABB {
+    out_aabb : AABB = ---;
+    out_aabb.center = body.center;
+    out_aabb.extent = get_aabb_extent(body.shape, axes.fore, axes.up, axes.right);
+    return out_aabb;
+}
+
+get_aabb_at :: inline (i: s64) -> AABB {
+    axes := get_axes_at(i);
+    return get_aabb(*entity_collision_bodies[i], axes);
+}
+
 collision_grid: []Collision_Grid_Allocation;
 collision_grid_allocator: Nesting_Allocator(8);
 collision_grid_origin: Vector2;
 collision_grid_dimensions: Int_Vector2;
 collision_cell_dimensions: Vector2;
 inv_collision_cell_dimensions: Vector2;
+
+color_group_random_state: Random_State;

@@ -30,6 +30,7 @@ _entities :: (stage: Boot_Stage) -> bool {
         program_runtime_allocate(*name_allocations, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entity_trigger_volume_allocations, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entity_collision_channels, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*collision_cell_hashes, ENTITY_MAX_COUNT);
 
         program_runtime_initialize(*devices, DEVICE_MAX_COUNT);
         program_runtime_initialize(*cameras, CAMERA_MAX_COUNT);
@@ -109,6 +110,7 @@ spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation
     entity_collision_bodies[i] = .{center=location};
     entity_angular_bodies[i] = .{orientation=orientation};
     compress_axes(*entity_angular_bodies[i].orientation, *entity_compressed_axes[i]);
+    collision_cell_hashes[i] = -1;
 
     mesh_collection := *entity_mesh_collections[i];
     assert(mesh_collection.mesh_count == 0 && mesh_collection.allocation_ref.data == null && mesh_collection.allocation_ref.info.bit_pattern == 0);
@@ -433,6 +435,11 @@ get_position_offset_from_entity_at :: (i: s64, fore_offset := 0.0, up_offset := 
     return entity_collision_bodies[i].center + axes.fore * fore_offset + axes.up * up_offset + axes.right * right_offset;
 }
 
+get_position_offset_from_entity :: (entity: *Entity, fore_offset := 0.0, up_offset := 0.0, right_offset := 0.0) -> Vector3{
+    axes := get_axes_at(entity_patch_layer[entity.ref.index]);
+    return entity.center + axes.fore * fore_offset + axes.up * up_offset + axes.right * right_offset;
+}
+
 // ---------------------------------------------------------------------------------------------------
 
 // all arrays parallel to entity_patch_infos array
@@ -448,6 +455,7 @@ entity_mesh_collections: []Entity_Mesh_Collection;
 entity_trigger_volume_allocations: []Trigger_Volume_Allocation;
 entity_collision_channels: []Collision_Channels;
 name_allocations: []Entity_Name_Allocation;
+collision_cell_hashes: []s64;
 
 entity_deletion_queue: [..]Entity_Ref;
 

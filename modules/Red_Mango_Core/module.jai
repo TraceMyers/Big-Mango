@@ -29,6 +29,7 @@ UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
 #load "file.jai";
 #load "no_allocator.jai";
 #load "color.jai";
+#load "common_types.jai";
 
 // useful token to represent an index to an array, the elements of which are uniquely id'd. so, you use
 // the index to get the element, and the id to verify that the element is the expected one. this approach
@@ -51,7 +52,7 @@ ID_Ref64 :: struct($type_constant: s64) {
     TYPE_ID :: type_constant;
 }
 
-RUN_TESTS :: true;
+RUN_TESTS :: false;
 SAFE_TEXT_ENCODING :: true;
 SERIALIZE_DEBUG :: false;
 NESTING_ALLOCATOR_DEBUG :: false;
@@ -70,6 +71,7 @@ MANGO_UP    :: Vector3.{UP_X, UP_Y, UP_Z};
 #import "Thread";
 #import "String";
 #import "Bit_Operations";
+#import "Random";
 Program_Print :: #import "Program_Print";
 Compiler :: #import "Compiler";
 

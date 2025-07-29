@@ -92,3 +92,15 @@ to_color4f :: inline (color4b: Color4b) -> Color4f {
     float_color.a = alter_cast(color4b.a, float, true);
     return float_color;
 }
+
+random_color4f :: inline (r_bounds := Vector2.{0.4, 0.9}, g_bounds := Vector2.{0.4, 0.9}, b_bounds := Vector2.{0.4, 0.9}, a := 1.0, random_state : *Random_State = null) -> Color4f {
+    if random_state == null {
+        random_state = *context.random_state;
+    }
+    float_color: Color4f = ---;
+    float_color.r = r_bounds.x + random_get_zero_to_one(random_state) * (r_bounds.y - r_bounds.x);
+    float_color.g = g_bounds.x + random_get_zero_to_one(random_state) * (g_bounds.y - g_bounds.x);
+    float_color.b = b_bounds.x + random_get_zero_to_one(random_state) * (b_bounds.y - b_bounds.x);
+    float_color.a = a;
+    return float_color;
+}
