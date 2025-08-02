@@ -107,6 +107,7 @@ _imgui :: (stage: Boot_Stage) -> bool {
 }
 
 draw_dev_ui :: () {
+    scope_timer();
     if quit then return;
     ImplVulkan_NewFrame();
     ImplWin32_NewFrame();
@@ -569,7 +570,7 @@ add_physics_debugger :: () {
 add_entity_pocket :: () {
     if CollapsingHeader("entity pocket") {
         if Button("capsule") {
-            entity := spawn_entity(.STATIC_MESH, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
+            entity := spawn_entity(.PERSON, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
             test_ref := entity.ref;
             entity_phys_props := get_entity_physics_properties(test_ref);
             {

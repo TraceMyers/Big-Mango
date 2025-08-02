@@ -36,7 +36,7 @@ draw_aabb :: (aabb: AABB, color: Color4f) {
 
 draw_all_body_collider_aabbs :: () {
     for 1..entity_patch_infos.count-1 {
-        if entity_patch_infos[it].type_flags & .STATIC_MESH {
+        if entity_patch_infos[it].patch_flags & .STATIC_MESH {
             e := get_entity_at(it);
             draw_aabb(e.body.shape, e.center, e.orientation, COLOR4F_RED);
         }

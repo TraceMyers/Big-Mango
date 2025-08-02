@@ -11,6 +11,11 @@ ortho_scale := 10.0; @command_line
 
 dbg_character_move_input: Vector3;
 
+process_entity_input :: (e: *Entity) {
+    if input_focus != .GAME then return;
+
+}
+
 process_entity_input :: () {
     if input_focus != .GAME then return;
     if control_mode == .FIRST_PERSON_CAMERA_ONLY {

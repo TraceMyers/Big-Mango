@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../../../compilers/jai-beta-2-014/jai/modules"
+		}
+	],
+	"settings": {}
+}

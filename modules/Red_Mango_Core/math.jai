@@ -31,6 +31,49 @@ VectorTypes :: Type.[Vector2, Vector3, Vector4, Quaternion];  // Used for type r
 Vector2Types :: Type.[Vector2, Int_Vector2];
 VectorAndFloatTypes :: Type.[Vector2, Vector3, Vector4, Quaternion, float32, float64];  // Used for type restriction in normalize().
 
+Direction :: enum {
+    UP;
+    DOWN;
+    LEFT;
+    RIGHT;
+    FORE;
+    BACK;
+}
+
+world_direction :: (dir: Direction) -> Vector3 {
+    if #complete dir == {
+    case .UP;
+        return MANGO_UP;
+    case .DOWN;
+        return -MANGO_UP;
+    case .LEFT;
+        return -MANGO_RIGHT;
+    case .RIGHT;
+        return MANGO_RIGHT;
+    case .FORE;
+        return MANGO_FORE;
+    case .BACK;
+        return -MANGO_FORE;
+    }
+}
+
+local_direction :: (dir: Direction, orientation: Quaternion) -> Vector3 {
+    if #complete dir == {
+    case .UP;
+        return up_direction(*orientation);
+    case .DOWN;
+        return -up_direction(*orientation);
+    case .LEFT;
+        return -right_direction(*orientation);
+    case .RIGHT;
+        return right_direction(*orientation);
+    case .FORE;
+        return fore_direcion(*orientation);
+    case .BACK;
+        return -fore_direcion(*orientation);
+    }
+}
+
 Ray3 :: struct {
     origin: Vector3;
     direction: Vector3;

@@ -28,6 +28,8 @@ get_group_count :: inline (using array: *Bit_Array($COUNT)) -> s64 {
     return groups_bit_size / GROUP_BIT_COUNT;
 }
 
+get_count :: get_group_count;
+
 single_bit_mask :: inline (using array: *Bit_Array($COUNT), group: s64, in_group_index: s64) -> s64, u64 {
     assert(group < get_group_count(array));
     assert(in_group_index >= 0 && in_group_index <= GROUP_BIT_COUNT);

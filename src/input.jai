@@ -75,6 +75,7 @@ revert_input_focus :: () {
 }
 
 update_input :: () {
+    scope_timer();
     Input.update_window_events();
 
     prev_control_mode = control_mode;

@@ -3,9 +3,10 @@ FIXED_TIME_STEP :: 1.0 / 60.0;
 
 // the collision resolution is going to be complicated, so for now I just want very simple movement to debug collisions.
 move_stuff :: () {
+    scope_timer();
     entity_ct := get_entity_count();
     for 0..entity_ct-1 {
-        #if BUILD_CONFIG == .DEBUG then _dbg_entity := get_entity_at(it);
+        #if BUILDVAR_BUILD_CONFIG == .DEBUG then _dbg_entity := get_entity_at(it);
         movement := get_movement_at(it);
         body := get_body_at(it);
         props := get_physics_properties_at(it);

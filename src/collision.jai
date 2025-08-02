@@ -32,36 +32,10 @@ solve_contacts :: () {
 
     draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
 
-    for 0..entity_ct-1 {
-        if entity_collision_channels[it] == 0 {
-            continue;
-        }
-        self_body := *entity_collision_bodies[it];
-        self_aabb := get_aabb_at(it);
-
-        // account for velocity
-        self_displacement := self_body.velocity * delta_time;
-        self_swept_aabb := sweep_aabb(.{self_aabb.center, self_aabb.extent}, self_displacement);
-
-        grid_pos_min := world_to_collision_grid_position(self_swept_aabb.center.xy - self_swept_aabb.extent.xy);
-        grid_pos_max := world_to_collision_grid_position(self_swept_aabb.center.xy + self_swept_aabb.extent.xy);
-
-        hash_upper := collision_grid_index(grid_pos_min);
-        hash_lower := collision_grid_index(grid_pos_max);
-        hash : s64 = (hash_upper.(s64) << 32) | hash_lower;
-
-        if collision_cell_hashes[it] != hash {
-            if collision_cell_hashes[it] != -1 {
-                prev_hash_upper := collision_cell_hashes[it] >> 32;
-                prev_grid_pos_min := collision_grid_index_to_grid_position(xx prev_hash_upper);
-                prev_hash_lower := collision_cell_hashes[it] & 0xffff_ffff;
-                prev_grid_pos_max := collision_grid_index_to_grid_position(xx prev_hash_lower);
-                collision_grid_iterate(xx it, null, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
-            }
-            collision_grid_iterate(xx it, null, grid_pos_min, grid_pos_max, self_swept_aabb, add_to_collision_cell);
-            collision_cell_hashes[it] = hash;
-        }
-    }
+    // todo: naive version is safer (basically shouldn't have bugs related to position + bounds), but
+    // it would be better to skip updates for entities that haven't changed their position or bounds.
+    // updating here is probably fine since the grid cache will need to be warm anyway.
+    update_collision_grid_cell_occupations();
 
     overlap_groups := temp_dynamic_array([..]Pair(s16), 2048);
     solve_contacts_broadphase(*overlap_groups);
@@ -174,6 +148,37 @@ get_entities_in_overlap_group :: (group: []Pair(s16), out_entities: *[..]s16) {
             last_known_pair_a = it.a;
         }
         array_add_if_unique(out_entities, it.b);
+    }
+}
+
+update_collision_grid_cell_occupations :: () {
+    entity_ct := get_entity_count();
+
+    for 0..entity_ct-1 {
+        if entity_collision_channels[it] == 0 {
+            continue;
+        }
+        self_body := *entity_collision_bodies[it];
+        self_aabb := get_aabb_at(it);
+
+        grid_pos_min := world_to_collision_grid_position(self_aabb.center.xy - self_aabb.extent.xy);
+        grid_pos_max := world_to_collision_grid_position(self_aabb.center.xy + self_aabb.extent.xy);
+
+        hash_upper := collision_grid_index(grid_pos_min);
+        hash_lower := collision_grid_index(grid_pos_max);
+        hash : s64 = (hash_upper.(s64) << 32) | hash_lower;
+
+        if collision_cell_hashes[it] != hash {
+            if collision_cell_hashes[it] != -1 {
+                prev_hash_upper := collision_cell_hashes[it] >> 32;
+                prev_grid_pos_min := collision_grid_index_to_grid_position(xx prev_hash_upper);
+                prev_hash_lower := collision_cell_hashes[it] & 0xffff_ffff;
+                prev_grid_pos_max := collision_grid_index_to_grid_position(xx prev_hash_lower);
+                collision_grid_iterate(xx it, null, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
+            }
+            collision_grid_iterate(xx it, null, grid_pos_min, grid_pos_max, .{}, add_to_collision_cell);
+            collision_cell_hashes[it] = hash;
+        }
     }
 }
 

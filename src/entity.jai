@@ -6,11 +6,9 @@
 INVALID_ENTITY_ID : u32 : 0;
 INVALID_ENTITY_INDEX : u32 : U32_MAX;
 INVALID_CAMERA_INDEX : u8  : U8_MAX;
-INVALID_DEVICE_INDEX : u16 : U16_MAX;
 // Entity_Physics_Properties :: Physics_Properties_Dynamic;
 
-ENTITY_MAX_COUNT :: 20000;
-DEVICE_MAX_COUNT :: 20000;
+ENTITY_MAX_COUNT :: 20_000;
 CAMERA_MAX_COUNT :: 64;
 ENTITY_MESHES_MAX_COUNT :: 8;
 ENTITY_NAME_MAX_CHAR_COUNT :: 64;
@@ -31,8 +29,8 @@ _entities :: (stage: Boot_Stage) -> bool {
         program_runtime_allocate(*entity_trigger_volume_allocations, ENTITY_MAX_COUNT);
         program_runtime_allocate(*entity_collision_channels, ENTITY_MAX_COUNT);
         program_runtime_allocate(*collision_cell_hashes, ENTITY_MAX_COUNT);
+        program_runtime_allocate(*entity_datas, ENTITY_MAX_COUNT);
 
-        program_runtime_initialize(*devices, DEVICE_MAX_COUNT);
         program_runtime_initialize(*cameras, CAMERA_MAX_COUNT);
         program_runtime_initialize(*dynamic_entity_physics_properties, ENTITY_MAX_COUNT);
 
@@ -46,6 +44,8 @@ _entities :: (stage: Boot_Stage) -> bool {
         entity_trigger_volumes_data_size := ENTITY_MAX_COUNT * size_of(Trigger_Volume);
         program_runtime_initialize(*entity_trigger_volumes_allocator, na_chunk_list_size_large, entity_trigger_volumes_data_size);
 
+        entity_id_counter = 1;
+
         return true;
     } else {
         return true;
@@ -58,6 +58,20 @@ get_entity :: inline (ref: Entity_Ref) -> *Entity {
     return get_entity_at(i);
 }
 
+get_entity_if_valid :: inline (ref: Entity_Ref) -> *Entity {
+    if !is_null(ref) {
+        i := entity_patch_layer[ref.index];
+        if entity_patch_infos[i].id == ref.id {
+            return get_entity(ref);
+        }
+    }
+    return null;
+}
+
+is_null :: inline (ref: Entity_Ref) -> bool {
+    return ref.id == 0;
+}
+
 // when using this procedure outside this file, it's important to observe the lifetime of an index w.r.t entities. to access entities in a way that is always safe, store and get with an Entity_Ref.
 get_entity_at :: (i: s64) -> *Entity {
     e := *entities_patched[i];
@@ -66,26 +80,22 @@ get_entity_at :: (i: s64) -> *Entity {
 
         e.* = .{
             type = patch_info.type,
+            patch = patch_info.patch,
             ref = patch_info.ref,
             body = *entity_collision_bodies[i],
             movement = *entity_movements[i],
             angular_body = *entity_angular_bodies[i],
             compressed_axes = *entity_compressed_axes[i],
             meshes = get_entity_meshes(patch_info),
-            name = get_entity_name(patch_info)
+            name = get_entity_name(patch_info),
+            data = *entity_datas[i]
         };
 
-        if (patch_info.type_flags & .CAMERA) != 0 {
+        if (patch_info.patch_flags & .CAMERA) != 0 {
             assert(patch_info.camera != INVALID_CAMERA_INDEX);
             e.camera = *cameras.items[patch_info.camera];
         } else {
             assert(patch_info.camera == INVALID_CAMERA_INDEX);
-        }
-        if (patch_info.type_flags & .DEVICE) != 0 {
-            assert(patch_info.device != INVALID_DEVICE_INDEX);
-            e.device = *devices.items[patch_info.device];
-        } else {
-            assert(patch_info.device == INVALID_DEVICE_INDEX);
         }
 
         if (patch_info.flags & .DYNAMIC_PHYSICS_PROPERTIES) != 0 {
@@ -99,8 +109,21 @@ get_entity_at :: (i: s64) -> *Entity {
     return e;
 }
 
-spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
+spawn_entity :: (in_type: Entity_Type, name := "", location := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
     // scope_lock_mutex(*spawn_entity_mutex);
+
+    t: Entity_Patch_Type;
+    if in_type == {
+    case .STATIC_ENVIRONMENT; 
+        t = .STATIC_MESH;
+    case .DYNAMIC_ENVIRONMENT;
+        t = .STATIC_MESH;
+    case .CAMERA;
+        t = .CAMERA;
+    case .PERSON;
+        t = .STATIC_MESH;
+    }
+
     i := entity_patch_infos.count.(u16);
     e := array_add(*entity_patch_infos);
     assert(i >= 0 && i < ENTITY_MAX_COUNT);
@@ -111,6 +134,7 @@ spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation
     entity_angular_bodies[i] = .{orientation=orientation};
     compress_axes(*entity_angular_bodies[i].orientation, *entity_compressed_axes[i]);
     collision_cell_hashes[i] = -1;
+    entity_datas[i] = .{};
 
     mesh_collection := *entity_mesh_collections[i];
     assert(mesh_collection.mesh_count == 0 && mesh_collection.allocation_ref.data == null && mesh_collection.allocation_ref.info.bit_pattern == 0);
@@ -120,7 +144,8 @@ spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation
     entity_id_counter += 1;
 
     e.* = .{
-        type = t,
+        type = in_type,
+        patch_type = t,
         ref = .{xx i, xx new_id},
         flags = .JUST_SPAWNED
     };
@@ -140,18 +165,11 @@ spawn_entity :: (t: Entity_Type, name := "", location := Vector3.{}, orientation
     phys_props := get_entity_physics_properties(e.ref);
     entity_collision_channels[i] = phys_props.default_collision_channels;
 
-    if (e.type_flags & .CAMERA) != 0 {
+    if (e.patch_flags & .CAMERA) != 0 {
         index := request_item(*cameras);
         assert(index >= 0 && index < CAMERA_MAX_COUNT);
         e.camera = xx index;
         cameras[e.camera] = .{};
-    }
-
-    if (e.type_flags & .DEVICE) != 0 {
-        index := request_item(*devices);
-        assert(index >= 0 && index < DEVICE_MAX_COUNT);
-        e.device = xx index;
-        devices[e.device] = .{};
     }
 
     set_entity_name(e.ref, name);
@@ -209,13 +227,9 @@ delete_entity :: (i: s64) {
     e := *entity_patch_infos[i];
 
     // todo: ideally find a good way to patch up holes in the pools on the spot.
-    if (e.type_flags & .CAMERA) != 0 {
+    if (e.patch_flags & .CAMERA) != 0 {
         assert(e.camera >= 0 && e.camera < CAMERA_MAX_COUNT);
         return_item(*cameras, e.camera);
-    }
-    if (e.type_flags & .DEVICE) != 0 {
-        assert(e.device >= 0 && e.device < DEVICE_MAX_COUNT);
-        return_item(*devices, e.device);
     }
     if (e.flags & .DYNAMIC_PHYSICS_PROPERTIES) {
         assert(e.physics_properties >= 0 && e.physics_properties <= ENTITY_MAX_COUNT);
@@ -239,12 +253,13 @@ delete_entity :: (i: s64) {
     entity_compressed_axes[i]   = entity_compressed_axes[last_entity_index];
     entity_mesh_collections[i]  = entity_mesh_collections[last_entity_index];
     name_allocations[i]         = name_allocations[last_entity_index];
+    entity_datas[i]             = entity_datas[last_entity_index];
 }
 
 // spawn helpers
 
 spawn_entity_human :: (name := "", location := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties_template := Physics_Properties_Template.CAPSULE_MAN, make_physics_properties_dynamic := false) -> *Entity {
-    entity := spawn_entity(.STATIC_MESH, name, location, orientation, physics_properties_template, make_physics_properties_dynamic);
+    entity := spawn_entity(.PERSON, name, location, orientation, physics_properties_template, make_physics_properties_dynamic);
     entity.movement_flags |= .MOVED_BY_PHYSICS;
     return entity;
 }
@@ -444,6 +459,7 @@ get_position_offset_from_entity :: (entity: *Entity, fore_offset := 0.0, up_offs
 
 // all arrays parallel to entity_patch_infos array
 entity_patch_infos: [..]Entity_Patch_Info;
+entity_datas : []Entity_Data;
 entities_patched: []Entity;
 entity_patch_layer: []u16;
 // default entity data
@@ -467,7 +483,6 @@ entity_trigger_volumes_allocator: Nesting_Allocator(TRIGGER_VOLUMES_ALLOCATOR_MI
 // type-specific entity data
 
 cameras: Pool(Entity_Camera);
-devices: Pool(Entity_Device);
 dynamic_entity_physics_properties: Pool(Physics_Properties_Dynamic);
 
 spawn_entity_mutex: Mutex;

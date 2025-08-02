@@ -14,7 +14,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
     // ground entity
     {
-        context.ground = spawn_entity(.STATIC_MESH, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
+        context.ground = spawn_entity(.STATIC_ENVIRONMENT, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
 
         context.ground.body.shape.type = .RECT;
         context.ground.body.shape.rect.half_height = 50.0;
@@ -76,6 +76,13 @@ _scratch :: (stage: Boot_Stage) -> bool {
     {
         context.player_entity = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
 
+        context.player_entity.ai.update = scratch_ai_update;
+        context.player_entity.movement_flags |= .CONTROL_ATTACHED_CAMERA;
+        context.player_entity.movement_flags |= .MOVE_RELATIVE_TO_CAMERA;
+        context.player_entity.attached_camera = context.camera_1.ref;
+        context.player_entity.ai.input_oscillation_max_time = 5;
+        context.player_entity.ai.input_direction = .DOWN;
+
         {
             context.player_entity.body.shape.type = .SPHERE;
             using context.player_entity.body.shape.sphere;
@@ -99,6 +106,27 @@ _scratch :: (stage: Boot_Stage) -> bool {
 
         context.player_entity.center.xy = .{40,40};
         context.player_entity.center.z = 50.0;
+    }
+    for 0..1000
+    {
+        ai_entity := spawn_entity_human(name="ai guy", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
+        ai_entity.ai.update = scratch_ai_update;
+        ai_entity.ai.input_oscillation_max_time = 5;
+        val := it & 0x3;
+        if val == 3 then val = 0;
+        if val == {
+        case 0;
+            ai_entity.ai.input_direction = ifx it & 1 == 0 then .LEFT else .RIGHT;
+        case 1; 
+            ai_entity.ai.input_direction = ifx it & 1 == 0 then .FORE else .BACK;
+        case 2;
+            ai_entity.ai.input_direction = ifx it & 1 == 0 then .UP else .DOWN;
+        }
+        ai_entity.shape.type = .SPHERE;
+        ai_entity.shape.sphere.radius = 10;
+        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * 50 - 25, random_get_zero_to_one() * 50 - 25};
+
+        set_entity_meshes(ai_entity.ref, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
     }
     return true;
 }

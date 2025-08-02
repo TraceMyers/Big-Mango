@@ -180,9 +180,10 @@ find_overlaps_in_cell :: (self_index: s16, x: s64, y: s64, grid_index: s32, self
             continue;
         }
         pair := Pair(s16).{self_index, xx other_index};
+        // check if we've already found a positive overlap
         for iteration_collision_overlaps.* {
-            if it == pair {
-                break other_index;
+            if it.b == pair.b {
+                continue other_index;
             }
         }
         other_body := *entity_collision_bodies[other_index];

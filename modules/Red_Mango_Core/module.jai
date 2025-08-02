@@ -5,6 +5,8 @@
 //     UP_X := 0.0,        UP_Y := 0.0,        UP_Z := 1.0
 // ); 
 
+#module_parameters()();
+
 FORE_X :: 0.0;      FORE_Y :: 1.0;      FORE_Z :: 0.0;
 RIGHT_X :: 1.0;     RIGHT_Y :: 0.0;    RIGHT_Z :: 0.0;
 UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
@@ -41,13 +43,13 @@ UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
 // Entity_Ref :: ID_Ref(ENTITY_REF_TYPE);
 // Nav_Ref :: ID_Ref(NAV_REF_TYPE);
 ID_Ref :: struct($type_constant: s64) {
-    index: s32 = -1;
+    index: s32;
     id: u32;
     TYPE_ID :: type_constant;
 }
 
 ID_Ref64 :: struct($type_constant: s64) {
-    index: s64 = -1;
+    index: s64;
     id: u64;
     TYPE_ID :: type_constant;
 }

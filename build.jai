@@ -1,4 +1,9 @@
 
+// BUILDVAR_ ...
+// options that change the program to something different whenever they are changed.
+DO_PROFILING :: true;
+
+// options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
 GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 
@@ -104,7 +109,12 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: true;
     // force the compiler to wait for compiler_wait_for_message() calls so that the compilation process can be customized during compilation
     compiler_begin_intercept(w);
 
-    add_build_string(tprint("Compiler :: #import \"Compiler\"; BUILD_CONFIG :: Compiler.Optimization_Type.%;", optimization), w);
+    add_build_string(tprint("BUILDVAR_DO_PROFILING :: %;", DO_PROFILING), w);
+    add_build_string(tprint("Compiler :: #import \"Compiler\";\nBUILDVAR_BUILD_CONFIG :: Compiler.Optimization_Type.%;", optimization), w);
+
+    add_build_file("src/prebuild/scope_timer.jai", w);
+    // add the definition of get_scope_timer_id() to compilation. its id counter is declared in this file, so it is only usable during compilation.
+    add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);
 
     add_build_file("src/game.jai", w);
 
@@ -185,16 +195,6 @@ update_module :: (module_name: string) -> bool {
     log("   ");
     return true;
 }
-
-#import "Basic";
-#import "Compiler";
-#import "File";
-#import "File_Utilities";
-#import "Process";
-#import "String";
-Program_Print :: #import "Program_Print";
-
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 scope_set_working_directory :: (dir: string) #expand {
     cwd := get_working_directory();
@@ -281,6 +281,7 @@ HERE,
 
 generate_captured_procedures :: (procs_to_capture_as_structs: [..]*Code_Procedure_Header, w: Workspace) {
     #if !GENERATE_PROCEDURE_BODY_CAPTURES {
+        add_build_file("src/generated/procedure_captures.jai", w);
         return;
     }
 
@@ -443,3 +444,22 @@ recursively_gather_declarations_from_block :: (block: *Code_Block, builder: *Str
     }
 }
 
+// the counter used for scope timer id's
+scope_timer_id_counter: u32;
+
+GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING :: #string HERE
+#import "Atomics";
+get_scope_timer_id :: () -> u32 {
+    comptime_id_counter : *u32 = xx %;
+    out_id := atomic_add(comptime_id_counter, 1);
+    return out_id;
+}
+HERE;
+
+#import "Basic";
+#import "Compiler";
+#import "File";
+#import "File_Utilities";
+#import "Process";
+#import "String";
+Program_Print :: #import "Program_Print";
