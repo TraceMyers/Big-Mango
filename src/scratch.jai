@@ -112,6 +112,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
         ai_entity := spawn_entity_human(name="ai guy", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
         ai_entity.ai.update = scratch_ai_update;
         ai_entity.ai.input_oscillation_max_time = 5;
+        ai_entity.ai.input_oscillation_timer = random_get_within_range(0, 5);
         val := it & 0x3;
         if val == 3 then val = 0;
         if val == {
@@ -124,7 +125,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
         }
         ai_entity.shape.type = .SPHERE;
         ai_entity.shape.sphere.radius = 10;
-        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * 50 - 25, random_get_zero_to_one() * 50 - 25};
+        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * 150 - 75, random_get_zero_to_one() * 150 - 75};
 
         set_entity_meshes(ai_entity.ref, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
     }

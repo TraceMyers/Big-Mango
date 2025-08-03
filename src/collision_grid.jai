@@ -63,7 +63,8 @@ rectify_collision_cell_allocation :: (grid_index: s32) {
     }
 }
 
-get_collision_cell :: inline (grid_index: s32) -> []s16 {
+get_collision_cell :: (grid_index: s32) -> []s16 {
+    scope_timer();
     alloc := *collision_grid[grid_index];
     out_array : []s16 = ---;
     if alloc.inline_allocation.zero_if_inline == 0 {
@@ -83,6 +84,7 @@ get_collision_cell :: inline (grid_index: s32) -> []s16 {
 }
 
 remove_from_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
+    scope_timer();
     alloc := *collision_grid[grid_index];
     if alloc.inline_allocation.zero_if_inline == 0 {
         count := *alloc.inline_allocation.count;
@@ -99,6 +101,7 @@ remove_from_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s3
 }
 
 add_to_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
+    scope_timer();
     alloc := *collision_grid[grid_index];
     add_to_heap_alloc := false;
     if alloc.inline_allocation.zero_if_inline == 0 {
@@ -147,6 +150,7 @@ add_to_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, sw
 }
 
 remove_from_collision_cell_do_remove :: (array: []s16, remove_index: s16) #expand {
+    scope_timer();
     #if COLLISION_DEBUG {
         found_match := false;
         assert(`count.* > 0);
@@ -166,26 +170,28 @@ remove_from_collision_cell_do_remove :: (array: []s16, remove_index: s16) #expan
 }
 
 find_overlaps_in_cell :: (self_index: s16, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
-    iteration_collision_overlaps := data.(*[..]Pair(s16));
+    scope_timer();
+    find_overlaps_data := data.(*Find_Overlaps_Data);
+    iteration_collision_overlaps := find_overlaps_data.collision_overlaps;
+
     cell := get_collision_cell(grid_index);
-    if self_index == context.player_entity.ref.index {
-        a := 0;
-    }
     for other_index : cell {
-        // to guarantee no duplicate pairs, lower-indexed entities collect overlaps with higher-indexed entities (also don't overlap with self)
-        if other_index >= self_index {
+        // to guarantee no duplicate pairs, higher-indexed entities collect overlaps with lower-indexed entities (also don't overlap with self)
+        // this has the added benefit of making sure the 'other' entity here has done their grid iteration first, giving it the chance to set its' 'skip' flag.
+        if self_index >= other_index && (entity_collision_bodies[other_index].collision_flags & .SKIPPED_GRID_ITERATE) == 0 {
             continue;
         }
         if (entity_collision_channels[self_index] & entity_collision_channels[other_index]) == 0 {
             continue;
         }
         pair := Pair(s16).{self_index, xx other_index};
-        // check if we've already found a positive overlap
-        for iteration_collision_overlaps.* {
-            if it.b == pair.b {
-                continue other_index;
-            }
+        
+        // check if we've already tried to find an overlap with the other guy
+        if bit_is_set(*find_overlaps_data.already_overlapped, pair.b) {
+            continue;
         }
+        set_bit(*find_overlaps_data.already_overlapped, pair.b);
+
         other_body := *entity_collision_bodies[other_index];
         other_aabb := get_aabb_at(other_index);
         // other_displacement := other_body.velocity * delta_time;
@@ -197,6 +203,7 @@ find_overlaps_in_cell :: (self_index: s16, x: s64, y: s64, grid_index: s32, self
 }
 
 collision_grid_iterate :: (entity_index: s16, data: *void, $inner_loop_proc: (entity_a: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
+    scope_timer();
     self_body := *entity_collision_bodies[entity_index];
     self_aabb := get_aabb_at(entity_index);
 
@@ -225,6 +232,7 @@ collision_grid_iterate :: (entity_index: s16, data: *void, grid_pos_min: Int_Vec
 }
 
 draw_collision_grid :: (at_height: float, color: Color4f) {
+    scope_timer();
     for x : 0..collision_grid_dimensions.x {
         top := collision_grid_origin + Vector2.{x.(float), 0} * collision_cell_dimensions;
         bottom := top;

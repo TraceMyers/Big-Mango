@@ -22,12 +22,17 @@ Collision_Shape :: struct {
     };
 }
 
+Collision_Flags :: enum_flags u32 {
+    SKIPPED_GRID_ITERATE;
+}
+
 // the boundaries of this data are set around whatever is needed to calculate collisions.
 // this isn't world object model situation, but I still think "Body" is fitting.
 Collision_Body :: struct {
     center: Vector3;
     velocity: Vector3;
     shape: Collision_Shape;
+    collision_flags: Collision_Flags = 0;
 }
 
 Compressed_Axes :: struct {
@@ -61,13 +66,18 @@ decompress_axes :: inline (compressed: *Compressed_Axes, decompressed: *Axes) {
     decompress_axes(compressed, *decompressed.fore, *decompressed.up, *decompressed.right);
 }
 
+Find_Overlaps_Data :: struct {
+    collision_overlaps: *[..]Pair(s16);
+    already_overlapped: Bit_Array(1);
+}
+
 Contact_Result :: struct {
     a_collider: s16;
     b_collider: s16;
     a_local_space_contact_point: Vector3;
     b_local_space_contact_point: Vector3;
     contact_normal: Vector3; // toward a
-    contact_depth_if_time_is_zero: float; // only used when norm time is zero
+    contact_depth_if_time_is_zero: float;
     norm_time: float;
 }
 

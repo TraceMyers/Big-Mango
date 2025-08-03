@@ -941,7 +941,7 @@ AABB :: struct {
     extent: Vector3;
 }
 
-is_overlap_aabb_aabb :: (aabb_a: AABB, aabb_b: AABB) -> bool {
+is_overlap_aabb_aabb :: inline (aabb_a: AABB, aabb_b: AABB) -> bool {
     abs_pos_diff := abs(aabb_a.center - aabb_b.center);
     return abs_pos_diff.x < aabb_a.extent.x + aabb_b.extent.x
         && abs_pos_diff.y < aabb_a.extent.y + aabb_b.extent.y

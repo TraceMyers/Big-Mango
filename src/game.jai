@@ -28,10 +28,11 @@ main :: () {
     non_render_time = seconds_since_init();
 
     while !quit {
+        scope_timer("game frame", true);
         update_input();
         scratch_think();
         entity_ai_updates();
-        // solve_contacts();
+        solve_contacts();
         move_stuff();
         draw_dev_ui();
         end_frame();
@@ -41,7 +42,6 @@ main :: () {
 }
 
 pre_boot :: () {
-    scope_timer();
     // give the logger a proc to call after forming the log message
     rm_log_passthrough_callback = rm_log_callback;
     // call_rm_log_passthrough_only = true;
@@ -140,32 +140,46 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
 // each timer has a unique id and a name
 // the stack of timers for any stack frame should be evaluatable immediately (or it can just be known due to having an explicit stack)
 // todo: replace QueryPerformanceCounter with __rdtsc?
-scope_timer :: ($name := "") #expand {
+scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
     proc_name :: #procedure_name();
     #if BUILDVAR_DO_PROFILING {
         #insert -> string {
-            use_name := ifx name == "" then proc_name else name;
-            id_name := tprint("%_timer_id", replace(use_name, " ", "_"));
+            id_name_base, timer_name: string;
+            if name == "" {
+                id_name_base = proc_name;
+                timer_name = proc_name;
+            } else {
+                id_name_base = replace(name, " ", "_");
+                timer_name = tprint("% :: %", proc_name, name);
+            }
+            id_name := tprint("%_timer_id", id_name_base);
             return tprint(
 #string HERE
-    % :: #run get_scope_timer_id();
-    if scope_timers.count <= % {
-        array_resize(*scope_timers, %+1);
-    }
-    scope_timers[%].name = "%";
-    new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=true};
-    Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
-    array_add(*scope_timer_stack_diffs, new_stack_diff);
+        % :: #run get_scope_timer_id();
+        if scope_timers.count <= % {
+            array_resize(*scope_timers, %+1);
+        }
+        scope_timers[%].name = "%";
+        new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=true,is_game_frame=is_game_frame_timer};
+        Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
+        array_add(*scope_timer_stack_diffs, new_stack_diff);
 HERE,
-            id_name, id_name, id_name, id_name, use_name, id_name);
+            id_name, id_name, id_name, id_name, timer_name, id_name);
         }
         `defer {
             #insert -> string {
-                use_name := ifx name == "" then proc_name else name;
-                id_name := tprint("%_timer_id", replace(use_name, " ", "_"));
+                id_name_base, timer_name: string;
+                if name == "" {
+                    id_name_base = proc_name;
+                    timer_name = proc_name;
+                } else {
+                    id_name_base = replace(name, " ", "_");
+                    timer_name = tprint("% :: %", proc_name, name);
+                }
+                id_name := tprint("%_timer_id", id_name_base);
                 return tprint(
 #string HERE
-                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=false};
+                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=false,is_game_frame=is_game_frame_timer};
                 Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
                 array_add(*scope_timer_stack_diffs, new_stack_diff);
 HERE, 
@@ -179,11 +193,16 @@ report_scope_times :: () {
     #if BUILDVAR_DO_PROFILING {
         Timer_Tracker :: struct {
             cpu_time_deltas: [..]s64;
+            frame_cpu_time_deltas: [..]s64;
             begin_cpu_time: s64;
+            last_known_frame_begin_index: s32 = -1;
             scope_is_open: bool;
         };
 
         trackers: [..]Timer_Tracker;
+
+        game_frame_began: bool;
+        frame_began_at_index: s32;
 
         for scope_timer_stack_diffs {
             required_tracker_ct := it.timer_id + 1;
@@ -194,6 +213,24 @@ report_scope_times :: () {
 
             {
                 using trackers[it.timer_id];
+
+                if it.is_game_frame {
+                    if it.is_scope_begin {
+                        assert(!game_frame_began);
+                        game_frame_began = true;
+                        frame_began_at_index = xx it_index;
+                    } else {
+                        assert(game_frame_began);
+                        game_frame_began = false;
+                        array_add(*frame_cpu_time_deltas, 0);
+                    }
+                } else {
+                    if last_known_frame_begin_index != frame_began_at_index {
+                        array_add(*frame_cpu_time_deltas, 0);
+                        last_known_frame_begin_index = frame_began_at_index;
+                    }
+                }
+
                 if it.is_scope_begin {
                     assert(!scope_is_open);
                     scope_is_open = true;
@@ -201,42 +238,63 @@ report_scope_times :: () {
                 } else {
                     assert(scope_is_open);
                     scope_is_open = false;
-                    array_add(*cpu_time_deltas, max(it.cpu_time - begin_cpu_time, 0));
+                    time_delta := max(it.cpu_time - begin_cpu_time, 0);
+                    array_add(*cpu_time_deltas, time_delta);
+                    frame_cpu_time_deltas[frame_cpu_time_deltas.count-1] += time_delta;
                 }
             }
         }
         array_reset(*scope_timer_stack_diffs);
 
+        get_array_stats :: (arr: []s64, percentile := 0.99) -> (min: float64, median: float64, high_percentile: float64) {
+            if arr.count < 3 {
+                return 0,0,0;
+            }
+            quick_sort(arr, (a, b) => a - b);
+            min_cpu_time := arr[0];
+            median_cpu_time: s64;
+            if arr.count & 0x1 == 0 {
+                median_part_1 := arr[arr.count/2];
+                median_part_2 := arr[arr.count/2+1];
+                median_cpu_time = (median_part_1 + median_part_2) / 2;
+            } else {
+                median_cpu_time = arr[arr.count/2];
+            }
+            high_percentile_cpu_time_index : s64 = xx (arr.count.(float64) * percentile);
+            high_percentile_cpu_time := arr[high_percentile_cpu_time_index];
+            cpu_frequency_per_ms := cpu_frequency / 1000;
+            inv_cpu_frequency_per_ms : float64 = (1.0).(float64) / cpu_frequency_per_ms.(float64);
+
+            return min_cpu_time.(float64) * inv_cpu_frequency_per_ms,
+                median_cpu_time.(float64) * inv_cpu_frequency_per_ms,
+                high_percentile_cpu_time.(float64) * inv_cpu_frequency_per_ms;
+        }
+
         for trackers {
-            log("timer [%/%]", it_index, scope_timers[it_index].name);
+            log("[%]", scope_timers[it_index].name);
             if it.cpu_time_deltas.count < 1 {
                 continue;
             }
-            quick_sort(it.cpu_time_deltas, (a, b) => a - b);
-
-            min_cpu_time := it.cpu_time_deltas[0];
-            median_cpu_time: s64;
-            if it.cpu_time_deltas.count & 0x1 == 0 {
-                median_part_1 := it.cpu_time_deltas[it.cpu_time_deltas.count/2];
-                median_part_2 := it.cpu_time_deltas[it.cpu_time_deltas.count/2+1];
-                median_cpu_time = (median_part_1 + median_part_2) / 2;
-            } else {
-                median_cpu_time = it.cpu_time_deltas[it.cpu_time_deltas.count/2];
-            }
-            HIGH_PERCENTILE : float64 : 0.995;
-            high_percentile_cpu_time_index : s64 = xx (it.cpu_time_deltas.count.(float64) * HIGH_PERCENTILE);
-            high_percentile_cpu_time := it.cpu_time_deltas[high_percentile_cpu_time_index];
-            cpu_frequency_per_ms := cpu_frequency / 1000;
-            inv_cpu_frequency_per_ms : float64 = (1.0).(float64) / cpu_frequency_per_ms.(float64);
+            scope_min, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
+            frame_min, frame_median, frame_high_percentile := get_array_stats(it.frame_cpu_time_deltas);
             log(
 #string HERE
-    min  : % ms
-    med  : % ms
-    .995 : % ms
+    ---------    ------- --
+    scope min    % ms
+    scope med    % ms
+    scope .99    % ms
+    ---------    ------- --
+    frame min    % ms
+    frame med    % ms
+    frame .99    % ms
+    ---------    ------- --
 HERE,
-                FormatFloat.{value=min_cpu_time.(float64) * inv_cpu_frequency_per_ms, width=7, trailing_width=4},
-                FormatFloat.{value=median_cpu_time.(float64) * inv_cpu_frequency_per_ms, width=7, trailing_width=4},
-                FormatFloat.{value=high_percentile_cpu_time.(float64) * inv_cpu_frequency_per_ms, width=7, trailing_width=4},
+                FormatFloat.{value=scope_min, width=7, trailing_width=4},
+                FormatFloat.{value=scope_median, width=7, trailing_width=4},
+                FormatFloat.{value=scope_high_percentile, width=7, trailing_width=4},
+                FormatFloat.{value=frame_min, width=7, trailing_width=4},
+                FormatFloat.{value=frame_median, width=7, trailing_width=4},
+                FormatFloat.{value=frame_high_percentile, width=7, trailing_width=4},
             );
         }
     }

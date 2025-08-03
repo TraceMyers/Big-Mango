@@ -1,11 +1,11 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-DO_PROFILING :: true;
+DO_PROFILING :: false;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: true;
+GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {
     // make sure environment is set up
@@ -21,13 +21,11 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: true;
         }
     }
 
-    #if COMPILE_SHADERS {
-        {
-            scope_set_working_directory("shaders");
-            log("compiling shaders...");
-            run_command("compile.bat");
-        }
-    }
+    #if COMPILE_SHADERS {{
+        scope_set_working_directory("shaders");
+        log("compiling shaders...");
+        run_command("compile.bat");
+    }}
 
     clone_red_mango_core := !is_directory("modules/Red_Mango_Core");
     if clone_red_mango_core {

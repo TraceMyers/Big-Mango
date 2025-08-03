@@ -5,6 +5,8 @@
 
 // NOTE: never use a variable named 'data' in a scope that is 'using' an allocator..
 
+VALIDATION_PATTERN : u8 : 0xa0;
+
 Nesting_Allocator_Collection :: struct {
     small_allocator: Nesting_Allocator(16);
     medium_allocator: Nesting_Allocator(1024);
@@ -22,19 +24,21 @@ nack_alloc :: (using allocator: *Nesting_Allocator_Collection, size: s64) -> Nes
     Bin_Type :: type_of(ref.info.bin);
     if size < medium_allocator.MIN_ALLOCATION_SIZE {
         ref = na_alloc(*small_allocator, size);
-        ref.info.bit_pattern |= xx Bin_Type.SMALL; // preserve the bit pattern in bit_pattern, unioned with this field
+        ref.info.bin = .SMALL;
     } else if size < large_allocator.MIN_ALLOCATION_SIZE {
         ref = na_alloc(*medium_allocator, size);
-        ref.info.bit_pattern |= xx Bin_Type.MEDIUM;
+        ref.info.bin = .MEDIUM;
     } else {
         ref = na_alloc(*large_allocator, size);
-        ref.info.bit_pattern |= xx Bin_Type.LARGE;
+        ref.info.bin = .LARGE;
     }
+    // needs to be re-set because it's unioned with 'bin'. (setting 'bin' clears the validation pattern.)
+    ref.info.bit_pattern |= VALIDATION_PATTERN;
     return ref;
 }
 
 nack_free :: (using allocator: *Nesting_Allocator_Collection, ref: *Nested_Allocation_Ref) {
-    assert((ref.info.bit_pattern & 0xf0) == 0xa0);
+    assert((ref.info.bit_pattern & 0xf0) == VALIDATION_PATTERN);
     // clearing the bit pattern allows for a clean read of the bin
     ref.info.bit_pattern &= 0x0f;
     if #complete ref.info.bin == {
@@ -66,7 +70,7 @@ Nested_Allocation_Info :: struct {
 }
 
 basic_validity_check :: inline (using ref: Nested_Allocation_Ref) -> bool {
-    return data != null && info.list >= 0 && (info.bit_pattern & 0xf0) == 0xa0;
+    return data != null && info.list >= 0 && (info.bit_pattern & 0xf0) == VALIDATION_PATTERN;
 }
 
 Nested_Allocation_Ref :: struct {
@@ -207,7 +211,9 @@ na_try_alloc :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), size: s64
     } else {
         success, ref = na_try_alloc_small(allocator, alloc_inner_chunk_count);
     }
-    ref.info.bit_pattern |= 0xa0;
+    // (these two fields are unioned)
+    ref.info.bin = .STANDALONE;
+    ref.info.bit_pattern |= VALIDATION_PATTERN;
     return success, ref;
 }
 
