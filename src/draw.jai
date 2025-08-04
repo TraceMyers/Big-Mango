@@ -4,6 +4,7 @@ draw_line :: inline (start: Vector3, end: Vector3, color: Color4f) {
 }
 
 draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f) {
+    if lines.count + 2 > LINES_MAX then return;
     array_add(*lines, .{
         .{
             position = .{xyz=start,w=1},

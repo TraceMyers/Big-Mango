@@ -137,7 +137,7 @@ spawn_entity :: (in_type: Entity_Type, name := "", location := Vector3.{}, orien
     entity_datas[i] = .{};
 
     mesh_collection := *entity_mesh_collections[i];
-    assert(mesh_collection.mesh_count == 0 && mesh_collection.allocation_ref.data == null && mesh_collection.allocation_ref.info.bit_pattern == 0);
+    assert(mesh_collection.mesh_count == 0 && mesh_collection.allocation_ref.data == null);
 
     assert(entity_id_counter < U32_MAX);
     new_id := entity_id_counter;
@@ -180,6 +180,7 @@ spawn_entity :: (in_type: Entity_Type, name := "", location := Vector3.{}, orien
 }
 
 entity_frame_turnover :: () {
+    scope_timer();
     flush_entity_deletion_queue();
     compress_entity_axes();
     frame_refresh_patch_infos();

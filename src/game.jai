@@ -6,6 +6,10 @@ main :: () {
     defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
 
+    #if BUILDVAR_DO_PROFILING {
+        scope_timer_stack_diffs.count = 0;
+    }
+
     #if OS == .WINDOWS {
         Win32.SetProcessDPIAware();
         // Windows is very bad at thread-switching by default unless you do this. buh-buh-buh-buh-bad. buh-buh-buh-buh-bad
@@ -28,6 +32,7 @@ main :: () {
     non_render_time = seconds_since_init();
 
     while !quit {
+        respond_to_scope_timer_commands();
         scope_timer("game frame", true);
         update_input();
         scratch_think();
@@ -63,6 +68,18 @@ pre_boot :: () {
 
     // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
     command_line_procedures = COMMAND_LINE_PROCEDURES;
+}
+
+respond_to_scope_timer_commands :: inline () {
+    if profiling_on {
+        is_profiling_on = true;
+        profiling_on = false;
+        profiling_started_at_time = seconds_since_init();
+    }
+    if profiling_off {
+        is_profiling_on = false;
+        profiling_off = false;
+    }
 }
 
 end_frame :: () {
@@ -137,53 +154,27 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
     }
 }
 
-// each timer has a unique id and a name
-// the stack of timers for any stack frame should be evaluatable immediately (or it can just be known due to having an explicit stack)
-// todo: replace QueryPerformanceCounter with __rdtsc?
 scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
-    proc_name :: #procedure_name();
     #if BUILDVAR_DO_PROFILING {
-        #insert -> string {
-            id_name_base, timer_name: string;
-            if name == "" {
-                id_name_base = proc_name;
-                timer_name = proc_name;
-            } else {
-                id_name_base = replace(name, " ", "_");
-                timer_name = tprint("% :: %", proc_name, name);
+        proc_name :: #procedure_name();
+        timer_name :: #run ifx name == "" then tprint("%", proc_name) else tprint("% :: %", proc_name, name);
+        id :: #run get_scope_timer_id();
+
+        if is_profiling_on {
+            if scope_timers.count <= id {
+                array_resize(*scope_timers, id+1);
             }
-            id_name := tprint("%_timer_id", id_name_base);
-            return tprint(
-#string HERE
-        % :: #run get_scope_timer_id();
-        if scope_timers.count <= % {
-            array_resize(*scope_timers, %+1);
+            scope_timers[id].name = timer_name;
+            new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=true,is_game_frame=is_game_frame_timer};
+            Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
+            array_add(*scope_timer_stack_diffs, new_stack_diff);
         }
-        scope_timers[%].name = "%";
-        new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=true,is_game_frame=is_game_frame_timer};
-        Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
-        array_add(*scope_timer_stack_diffs, new_stack_diff);
-HERE,
-            id_name, id_name, id_name, id_name, timer_name, id_name);
-        }
+
         `defer {
-            #insert -> string {
-                id_name_base, timer_name: string;
-                if name == "" {
-                    id_name_base = proc_name;
-                    timer_name = proc_name;
-                } else {
-                    id_name_base = replace(name, " ", "_");
-                    timer_name = tprint("% :: %", proc_name, name);
-                }
-                id_name := tprint("%_timer_id", id_name_base);
-                return tprint(
-#string HERE
-                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=%,is_scope_begin=false,is_game_frame=is_game_frame_timer};
+            if is_profiling_on {
+                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=false,is_game_frame=is_game_frame_timer};
                 Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
                 array_add(*scope_timer_stack_diffs, new_stack_diff);
-HERE, 
-                    id_name);
             }
         }
     }
@@ -281,12 +272,12 @@ report_scope_times :: () {
 #string HERE
     ---------    ------- --
     scope min    % ms
-    scope med    % ms
-    scope .99    % ms
+          med    % ms
+          .99    % ms
     ---------    ------- --
     frame min    % ms
-    frame med    % ms
-    frame .99    % ms
+          med    % ms
+          .99    % ms
     ---------    ------- --
 HERE,
                 FormatFloat.{value=scope_min, width=7, trailing_width=4},
@@ -315,6 +306,11 @@ per_frame_time: float64;
 non_render_time: float64;
 cpu_frequency: s64;
 quit := false;
+
+profiling_on: bool; @command_line
+profiling_off: bool; @command_line
+is_profiling_on: bool;
+profiling_started_at_time: float64;
 
 simulation_dt: float;
 render_dt: float;
@@ -366,7 +362,6 @@ Zlib :: #import "zlib";
 #load "draw.jai";
 #load "entity_control.jai";
 // #load "raycast.jai";
-#load "entities/entity_button.jai";
 #load "add_to_context.jai";
 #load "collision_types.jai";
 #load "collision.jai";

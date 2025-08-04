@@ -11,6 +11,7 @@
 
 COLLISION_DEBUG :: true;
 AABB_OVERLAP_BUFFER :: 1.0;
+INVALID_COLLISION_GROUP : s16 : S16_MAX;
 
 #if COLLISION_DEBUG {
     collision_assert :: assert;
@@ -21,6 +22,10 @@ AABB_OVERLAP_BUFFER :: 1.0;
 _collision :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // bump_allocator_initialize(*collisions_allocator, heaps_tracking_array_ct := 16);
+        program_runtime_allocate(*collision_group_indices, ENTITY_MAX_COUNT);
+        for *collision_group_indices {
+            it.* = INVALID_COLLISION_GROUP;
+        }
     }
     return true;
 }
@@ -38,28 +43,45 @@ solve_contacts :: () {
     // todo: naive version is safer (basically shouldn't have bugs related to position + bounds), but
     // it would be better to skip updates for entities that haven't changed their position or bounds.
     // updating here is probably fine since the grid cache will need to be warm anyway.
-    update_collision_grid_cell_occupations();
 
-    overlap_groups := temp_dynamic_array([..]Pair(s16), 2048);
-    solve_contacts_broadphase(*overlap_groups);
+    altered_cells := temp_dynamic_array(s32, 4096);
+    update_collision_grid_cell_occupations(*altered_cells);
+
+    solve_contacts_broadphase();
 
     for 0..entity_ct-1 {
         entity_collision_bodies[it].collision_flags = 0;
     }
 
+    // for any cells that were altered, shrink occupation allocations to be inline if the allocation fits inline
+    for altered_cells {
+        collision_grid_cell_flags[it] &= ~.JUST_ALTERED;
+        rectify_collision_cell_allocation(it);
+    }
+
     {
-        scope_timer("draw color groups");
-        random_seed(*color_group_random_state, 80);
-        entities_in_group := temp_dynamic_array(s16, 2048);
-        for overlap_groups {
-            get_entities_in_overlap_group(it, *entities_in_group);
-            group_color := random_color4f(random_state=*color_group_random_state);
-            for entities_in_group {
-                aabb := get_aabb_at(it);
-                draw_aabb(aabb, group_color);
-            }
-            array_reset_keeping_memory(*entities_in_group); 
-        }
+        // scope_timer("draw color groups");
+        // entities_in_group := temp_dynamic_array(s16, 2048);
+        // for collision_overlap_groups.items {
+        //     if !is_item_in_use(*collision_overlap_groups, it_index) {
+        //         continue;
+        //     }
+        //     get_entities_in_overlap_group(it, *entities_in_group);
+
+        //     // because overlap groups often disband and re-create at different pool indexes, persistent-ish group color can't well be determined by the index of the group. so, instead it's determined by the min entity index over all group members.
+        //     min_index : u64 = xx S16_MAX;
+        //     for entities_in_group {
+        //         min_index = min(it.(u64), min_index);
+        //     }
+        //     random_seed(*color_group_random_state, min_index);
+        //     group_color := random_color4f(random_state=*color_group_random_state);
+
+        //     for entities_in_group {
+        //         aabb := get_aabb_at(it);
+        //         draw_aabb(aabb, group_color);
+        //     }
+        //     array_reset_keeping_memory(*entities_in_group); 
+        // }
     }
 
     // Move_Entity :: struct {
@@ -161,7 +183,7 @@ get_entities_in_overlap_group :: (group: []Pair(s16), out_entities: *[..]s16) {
     }
 }
 
-update_collision_grid_cell_occupations :: () {
+update_collision_grid_cell_occupations :: (altered_cells: *[..]s32) {
     scope_timer();
     entity_ct := get_entity_count();
 
@@ -185,76 +207,94 @@ update_collision_grid_cell_occupations :: () {
                 prev_grid_pos_min := collision_grid_index_to_grid_position(xx prev_hash_upper);
                 prev_hash_lower := collision_cell_hashes[it] & 0xffff_ffff;
                 prev_grid_pos_max := collision_grid_index_to_grid_position(xx prev_hash_lower);
-                collision_grid_iterate(xx it, null, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
+                collision_grid_iterate(xx it, altered_cells, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
             }
-            collision_grid_iterate(xx it, null, grid_pos_min, grid_pos_max, .{}, add_to_collision_cell);
+            collision_grid_iterate(xx it, altered_cells, grid_pos_min, grid_pos_max, .{}, add_to_collision_cell);
             collision_cell_hashes[it] = hash;
+            entity_collision_bodies[it].collision_flags |= .CHANGED_CELL_OCCUPATIONS;
+        }
+
+        // this is just a convenient place to get this part out of the way. while already iterating to change the cell occupations, go ahead and make sure entities that have moved are removed from their collision group, so they have to update their overlaps.
+        // NOTE: could allow things to slowly overlap
+        prev_loc_dist_sq := distance_squared(self_body.center, self_body.previous_center);
+        if prev_loc_dist_sq > VERY_SMALL_NUMBER && collision_group_indices[it] != INVALID_COLLISION_GROUP {
+            overlap_group := *collision_overlap_groups[collision_group_indices[it]];
+            entity_index := it;
+            for #v2 < 0..overlap_group.count-1 {
+                overlap_pair := overlap_group.*[it];
+                if overlap_pair.a == entity_index {
+                    array_unordered_remove_by_index(overlap_group, it);
+                    entity_collision_bodies[overlap_pair.b].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
+                } else if overlap_pair.b == entity_index {
+                    array_unordered_remove_by_index(overlap_group, it);
+                    entity_collision_bodies[overlap_pair.a].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
+                }
+            }
+            collision_group_indices[it] = INVALID_COLLISION_GROUP;
+        }
+    }
+
+    // when entities move and remove themselves from their overlap group, this potentially has the knock-on effect of taking other entities out of the group, if they were in the group only due to those removed overlaps.
+    for e : 0..entity_ct-1 {
+        in_a_group := collision_group_indices[e] != INVALID_COLLISION_GROUP;
+        some_of_my_overlaps_removed := (entity_collision_bodies[e].collision_flags & .NEED_CHECK_IF_IN_OVERLAP_GROUP) != 0;
+        if in_a_group && some_of_my_overlaps_removed {
+            overlap_group := *collision_overlap_groups[collision_group_indices[e]];
+            found_overlap: bool;
+            for *(overlap_group.*) {
+                if it.a == e || it.b == e {
+                    found_overlap = true;
+                    break;
+                }
+            }
+            if !found_overlap {
+                collision_group_indices[e] = INVALID_COLLISION_GROUP;
+            }
+        }
+    }
+
+    if collision_overlap_groups.items.count > 0 {
+        for *collision_overlap_groups.items {
+            if it.count == 0 {
+                array_reset(it);
+                return_item(*collision_overlap_groups, it_index);
+            }
         }
     }
 }
 
-solve_contacts_broadphase :: (overlap_groups: *[..][..]Pair(s16)) {
+absorb_overlap_group :: (collision_group_indices: *[]s16, absorbing_group: s16, absorbed_group: s16) {
+    assert(absorbing_group != absorbed_group);
+    fat_group := *collision_overlap_groups[absorbing_group];
+    dead_group := *collision_overlap_groups[absorbed_group];
+    array_append(fat_group, dead_group.*);
+    for dead_group.* {
+        collision_group_indices.*[it.a] = absorbing_group;
+        collision_group_indices.*[it.b] = absorbing_group;
+        array_add(fat_group, it);
+    }
+    array_reset(dead_group);
+    return_item(*collision_overlap_groups, absorbed_group);
+}
+
+solve_contacts_broadphase :: () {
     scope_timer();
     entity_ct := get_entity_count();
 
-    absorb_overlap_group :: no_inline (overlap_groups: *[..][..]Pair(s16), entity_group_indices: *[..]s16, absorbing_group: s16, absorbed_group: s16) {
-        assert(absorbing_group != absorbed_group);
-        fat_group := *((overlap_groups.*)[absorbing_group]);
-        dead_group := (overlap_groups.*)[absorbed_group];
-        array_append(fat_group, dead_group);
-        for dead_group {
-            entity_group_indices.*[it.a] = absorbing_group;
-            entity_group_indices.*[it.b] = absorbing_group;
-        }
-        for entity_group_indices.* {
-            if it == absorbed_group {
-                a := 0;
-            }
-        }
-
-        // unordered element remove by swapping with end. just doing it inline so the correctness here isn't dependent on array_ procs doing what I expect.
-        if absorbed_group != overlap_groups.count - 1 {
-            swap_group : *[..]Pair(s16) = *((overlap_groups.*)[absorbed_group]);
-            swap_group.* = (overlap_groups.*)[overlap_groups.count-1];
-            for *(swap_group.*) {
-                entity_group_indices.*[it.a] = absorbed_group;
-                entity_group_indices.*[it.b] = absorbed_group;
-            }
-        }
-        overlap_groups.count -= 1;
-    }
-
-    entity_in_group :: (e: s16, groups: *[..][..]Pair(s16), group_index: s16) -> bool {
-        if group_index == S16_MAX {
-            return true;
-        }
-        group := groups.*[group_index];
-        for group {
-            if it.a == e || it.b == e {
-                return true;
-            }
-        }
-        return false;
-    }
-
     iteration_overlaps := temp_dynamic_array(Pair(s16), 4096);
-    entity_group_indices := temp_dynamic_array(s16, entity_ct);
-    array_resize(*entity_group_indices, entity_ct);
-    for *entity_group_indices {
-        it.* = S16_MAX;
-    }
 
     find_overlaps_data: Find_Overlaps_Data;
     set_capacity(*find_overlaps_data.already_overlapped, entity_ct);
 
-    // todo: parallelizing this should be easy?
-    // todo: maybe in-order iteration is slower than something more fancy here
+    // todo: parallelizing this?
     for e : 0..entity_ct-1 {
-        array_reset_keeping_memory(*iteration_overlaps);
-        if entity_group_indices[e] != S16_MAX {
+        if collision_group_indices[e] != INVALID_COLLISION_GROUP {
             entity_collision_bodies[e].collision_flags |= .SKIPPED_GRID_ITERATE;
             continue;
         }
+
+        // moved in grid: movers take responsibility for generating new overlaps
+        array_reset_keeping_memory(*iteration_overlaps);
 
         unset_all(*find_overlaps_data.already_overlapped);
         find_overlaps_data.collision_overlaps = *iteration_overlaps;
@@ -264,42 +304,37 @@ solve_contacts_broadphase :: (overlap_groups: *[..][..]Pair(s16)) {
             continue;
         }
 
-        scope_timer("find min overlap group");
-
-        add_to_group := entity_group_indices[e];
-        assert(entity_in_group(xx e, overlap_groups, entity_group_indices[e]));
+        add_to_group := collision_group_indices[e];
         for iteration_overlaps {
-            add_to_group = min(add_to_group, entity_group_indices[it.b]);
+            add_to_group = min(add_to_group, collision_group_indices[it.b]);
         }
         
-        if add_to_group == S16_MAX {
-            // new group
-            scope_timer("create new overlap group");
-
-            new_group := array_add(overlap_groups);
-            new_group.allocator = temp;
+        if add_to_group == INVALID_COLLISION_GROUP {
+            new_group_index := request_item(*collision_overlap_groups);
+            assert(new_group_index != INVALID_COLLISION_GROUP);
+            new_group := *collision_overlap_groups[new_group_index];
             array_resize(new_group, iteration_overlaps.count);
             copy_array(new_group.*, iteration_overlaps);
-            entity_group_indices[e] = xx (overlap_groups.count - 1);
+            collision_group_indices[e] = xx new_group_index;
             for *(new_group.*) {
-                entity_group_indices[it.b] = xx (overlap_groups.count - 1);
+                collision_group_indices[it.b] = xx new_group_index;
             }
         }
         else {
-            scope_timer("absorb overlap groups");
-
-            existing_group := *((overlap_groups.*)[add_to_group]);
-            if entity_group_indices[e] != S16_MAX && entity_group_indices[e] != add_to_group {
-                absorb_overlap_group(overlap_groups, *entity_group_indices, add_to_group, entity_group_indices[e]);
+            existing_group := *collision_overlap_groups[add_to_group];
+            if collision_group_indices[e] != INVALID_COLLISION_GROUP && collision_group_indices[e] != add_to_group {
+                absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[e]);
             }
-            entity_group_indices[e] = add_to_group;
+            collision_group_indices[e] = add_to_group;
 
             for iteration_overlaps {
                 array_add(existing_group, it);
-                if entity_group_indices[it.b] != S16_MAX && entity_group_indices[it.b] != add_to_group {
-                    absorb_overlap_group(overlap_groups, *entity_group_indices, add_to_group, entity_group_indices[it.b]);
+                if collision_group_indices[it.b] == INVALID_COLLISION_GROUP {
+
+                } else if collision_group_indices[it.b] != add_to_group {
+                    absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[it.b]);
                 }
-                entity_group_indices[it.b] = add_to_group;
+                collision_group_indices[it.b] = add_to_group;
             }
         }
     }
@@ -614,11 +649,15 @@ get_aabb_at :: inline (i: s64) -> AABB {
 }
 
 collision_grid: []Collision_Grid_Allocation;
+collision_grid_cell_flags: []Collision_Grid_Cell_Flags;
 collision_grid_allocator: Nesting_Allocator(8);
 collision_grid_origin: Vector2;
 collision_grid_dimensions: Int_Vector2;
 collision_cell_dimensions: Vector2;
 inv_collision_cell_dimensions: Vector2;
+
+collision_overlap_groups: Pool([..]Pair(s16));
+collision_group_indices: []s16;
 
 // collisions_allocator: Bump_Allocator;
 

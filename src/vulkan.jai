@@ -4,6 +4,9 @@
 ENABLE_VALIDATION_LAYERS :: true;
 UNLIT :: false;
 
+LINES_MAX :: 65_536;
+MESHES_MAX :: 4096;
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Notes:
@@ -949,10 +952,10 @@ create_experimental_data :: () {
         create_graphics_buffer(*lights.buffer, *lights.allocation, as_string(lights.data), .UNIFORM_BUFFER_BIT, .UNIFORM_READ_BIT, .FRAGMENT_SHADER_BIT);
     }
     {
-        program_runtime_reserve(*lines, 32_768);
+        program_runtime_reserve(*lines, LINES_MAX);
     }
     {
-        program_runtime_reserve(*meshes, 2048);
+        program_runtime_reserve(*meshes, MESHES_MAX);
     }
 }
 

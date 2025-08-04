@@ -23,13 +23,16 @@ Collision_Shape :: struct {
 }
 
 Collision_Flags :: enum_flags u32 {
+    CHANGED_CELL_OCCUPATIONS;
     SKIPPED_GRID_ITERATE;
+    NEED_CHECK_IF_IN_OVERLAP_GROUP;
 }
 
 // the boundaries of this data are set around whatever is needed to calculate collisions.
 // this isn't world object model situation, but I still think "Body" is fitting.
 Collision_Body :: struct {
     center: Vector3;
+    previous_center: Vector3;
     velocity: Vector3;
     shape: Collision_Shape;
     collision_flags: Collision_Flags = 0;
@@ -48,11 +51,11 @@ Axes :: struct {
 }
 
 compress_axes :: (quat: Quaternion, out_axes: *Compressed_Axes) {
-    fore := fore_direction(*quat);
+    fore    := fore_direction(*quat);
     out_axes.fore   = linear_compress_norm_vector3(fore);
-    up := up_direction(*quat);
+    up      := up_direction(*quat);
     out_axes.up     = linear_compress_norm_vector3(up);
-    right := right_direction(*quat);
+    right   := right_direction(*quat);
     out_axes.right  = linear_compress_norm_vector3(right);
 }
 
@@ -119,11 +122,15 @@ AABB_Shape :: struct {
 //     entities: []s16;
 // }
 
+Collision_Grid_Cell_Flags :: enum_flags u8 {
+    JUST_ALTERED;
+}
+
 Collision_Grid_Allocation :: union {
     inline_allocation: struct {
         array: [7]s16;
         count: s8;
-        zero_if_inline: u8;
+        zero_if_inline: u8; // overlaps with nesting allocation bit pattern & bin
     };
     allocation_ref: Nested_Allocation_Ref = ---;
 }

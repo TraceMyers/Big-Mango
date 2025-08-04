@@ -30,13 +30,18 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
     if InputText("##CommandLine_InputText", command_line_text_buffer.data, command_line_text_buffer.count, .EnterReturnsTrue | .CallbackCompletion, command_line_autocomplete_callback) {
         input_str := string.{c_style_strlen(command_line_text_buffer.data), command_line_text_buffer.data};
         tokens := tokenize_and_trim(input_str, #char " ");
-        if tokens.count > 0 {
+        command_has_prefix: bool;
+        if begins_with(input_str, "vtoggle") || begins_with(input_str, "vset") {
+            command_has_prefix = true;
+        }
+        if (!command_has_prefix && tokens.count > 0) || tokens.count > 1 {
             COMMAND_LINE_ARGS_MAX_COUNT :: 16;
             assert(tokens.count-1 <= COMMAND_LINE_ARGS_MAX_COUNT);
             args: [COMMAND_LINE_ARGS_MAX_COUNT]Command_Line_Argument;
             args_bound := bound_array(args);
 
-            if tokens.count > 1 then for 1..tokens.count-1 {
+            iter_start := ifx command_has_prefix then 2 else 1;
+            if tokens.count > iter_start then for iter_start..tokens.count-1 {
                 // todo: get types of params from the procedure struct
                 arg := bound_array_add(*args_bound);
                 // parse_... procs consume the input
@@ -47,8 +52,15 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
                 arg._string = tokens[it];
             }
 
-            rm_log("calling %", tokens[0]);
-            if !try_call_command_line_procedure(tokens[0], args_bound.array) {
+            hashable_input: string;
+            if command_has_prefix {
+                hashable_input = tprint("% %", tokens[0], tokens[1]);
+            } else {
+                hashable_input = tokens[0];
+            }
+            rm_log("calling %", hashable_input);
+            hash := native_XXH64(hashable_input.data, xx hashable_input.count, 0xDEADBEEF);
+            if !try_call_command_line_procedure(hash, args_bound.array) {
                 rm_warning("call failure");
             }
             memset(command_line_text_buffer.data, 0, command_line_text_buffer.count);
@@ -112,7 +124,8 @@ add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height:
     quick_sort(matching_procedures, (a, b) => a.index_of_matched_pattern - b.index_of_matched_pattern);
     for matching_procedures {
         SetCursorPosX(input_begin_x-4);
-        Text(command_line_procedures[it.proc].name);
+        proc_name := command_line_procedures[it.proc].name;
+        Text(proc_name);
     }
 
     return out_count;

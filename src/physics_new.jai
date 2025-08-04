@@ -6,10 +6,10 @@ move_stuff :: () {
     scope_timer();
     entity_ct := get_entity_count();
     for 0..entity_ct-1 {
-        #if BUILDVAR_BUILD_CONFIG == .DEBUG then _dbg_entity := get_entity_at(it);
         movement := get_movement_at(it);
         body := get_body_at(it);
         props := get_physics_properties_at(it);
+        body.previous_center = body.center;
 
         // friction (in future just handle in the physics solving)
         if movement.movement_flags & .ACCELERATE_IN_3D {

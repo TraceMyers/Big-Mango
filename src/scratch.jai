@@ -76,12 +76,12 @@ _scratch :: (stage: Boot_Stage) -> bool {
     {
         context.player_entity = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
 
-        context.player_entity.ai.update = scratch_ai_update;
-        context.player_entity.movement_flags |= .CONTROL_ATTACHED_CAMERA;
-        context.player_entity.movement_flags |= .MOVE_RELATIVE_TO_CAMERA;
-        context.player_entity.attached_camera = context.camera_1.ref;
-        context.player_entity.ai.input_oscillation_max_time = 5;
-        context.player_entity.ai.input_direction = .DOWN;
+        // context.player_entity.ai.update = scratch_ai_update;
+        // context.player_entity.movement_flags |= .CONTROL_ATTACHED_CAMERA;
+        // context.player_entity.movement_flags |= .MOVE_RELATIVE_TO_CAMERA;
+        // context.player_entity.attached_camera = context.camera_1.ref;
+        // context.player_entity.ai.input_oscillation_max_time = 5;
+        // context.player_entity.ai.input_direction = .DOWN;
 
         {
             context.player_entity.body.shape.type = .SPHERE;
@@ -125,7 +125,11 @@ _scratch :: (stage: Boot_Stage) -> bool {
         }
         ai_entity.shape.type = .SPHERE;
         ai_entity.shape.sphere.radius = 10;
-        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * 150 - 75, random_get_zero_to_one() * 150 - 75};
+        SPREAD :: 500.0;
+        HALF_SPREAD :: SPREAD * 0.5;
+        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * SPREAD - HALF_SPREAD, random_get_zero_to_one() * SPREAD - HALF_SPREAD};
+        
+        ai_entity.movement_flags |= .ACCELERATE_IN_3D;
 
         set_entity_meshes(ai_entity.ref, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
     }

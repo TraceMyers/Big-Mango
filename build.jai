@@ -1,7 +1,7 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-DO_PROFILING :: false;
+DO_PROFILING :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
@@ -118,6 +118,7 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
     procs_to_capture_as_structs: [..]*Code_Procedure_Header;
     gen_float_command_line_var_procs: [..]string;
+    gen_bool_command_line_var_procs: [..]string;
     command_line_proc_names: [..]string;
     generated_code: bool;
 
@@ -140,8 +141,19 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
                         if note.text == "command_line" {
                             log("found command line var: %", it.expression.name);
                             array_add(*gen_float_command_line_var_procs, it.expression.name);
-                            command_line_proc_name := tprint("setvar_%", it.expression.name);
+                            command_line_proc_name := tprint("vset_%", it.expression.name);
                             array_add(*command_line_proc_names, command_line_proc_name);
+                        }
+                    }
+                } else if it.expression.type.type == .BOOL {
+                    for note : it.expression.notes {
+                        if note.text == "command_line" {
+                            log("found command line var: %", it.expression.name);
+                            array_add(*gen_bool_command_line_var_procs, it.expression.name);
+                            set_command_line_proc_name := tprint("vset_%", it.expression.name);
+                            toggle_command_line_proc_name := tprint("vtoggle_%", it.expression.name);
+                            array_add(*command_line_proc_names, set_command_line_proc_name);
+                            array_add(*command_line_proc_names, toggle_command_line_proc_name);
                         }
                     }
                 } else if it.expression.type.type == .PROCEDURE {
@@ -170,7 +182,7 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
             m_phase := cast(*Message_Phase)m;
             if m_phase.phase == .TYPECHECKED_ALL_WE_CAN && !generated_code {
                 generate_captured_procedures(procs_to_capture_as_structs, w);
-                generate_command_line_code(gen_float_command_line_var_procs, command_line_proc_names, w);
+                generate_command_line_code(gen_float_command_line_var_procs, gen_bool_command_line_var_procs, command_line_proc_names, w);
                 log("\nend code generation\n");
                 generated_code = true;
             }
@@ -247,13 +259,13 @@ process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64
     return line_count;
 }
 
-generate_command_line_code :: (gen_float_command_line_var_procs: [..]string, command_line_proc_names: [..]string, w: Workspace) {
+generate_command_line_code :: (gen_float_command_line_var_procs: [..]string, gen_bool_command_line_var_procs: [..]string, command_line_proc_names: [..]string, w: Workspace) {
     builder: String_Builder;
 
     for varname : gen_float_command_line_var_procs {
         print_to_builder(*builder, 
 #string HERE
-setvar_% :: (args: []Command_Line_Argument) {
+vset_% :: (args: []Command_Line_Argument) {
     init_command_line_proc_or_return(args, 1);
     x, success := try_parse_command_line_arg(*args[0], float64);
     if success {
@@ -267,9 +279,41 @@ HERE,
         );
     }
 
+    for varname : gen_bool_command_line_var_procs {
+        print_to_builder(*builder, 
+#string HERE
+vset_% :: (args: []Command_Line_Argument) {
+    if args.count == 1 {
+        x, success := try_parse_command_line_arg(*args[0], s64);
+        if success {
+            % = x != 0;
+        }
+    } else if args.count == 0 {
+        % = true;
+    }
+}
+vtoggle_% :: (args: []Command_Line_Argument) {
+    if args.count > 0 then return;
+    % = !%;
+}
+HERE,
+            varname, varname, varname, varname, varname, varname
+        );
+    }
+
     print_to_builder(*builder, "COMMAND_LINE_PROCEDURES :: Command_Line_Procedure.[\n");
     for command_line_proc_names {
-        print_to_builder(*builder, "\t.{name=\"%\", proc=%},\n", it, it);
+        input_string := it;
+        if begins_with(input_string, "vset") {
+            input_string = copy_string(input_string);
+            input_string[4] = " ";
+        } else if begins_with(input_string, "vtoggle") {
+            input_string = copy_string(input_string);
+            input_string[7] = " ";
+        }
+
+        hash := native_XXH64(input_string.data, xx input_string.count, 0xDEADBEEF);
+        print_to_builder(*builder, "\t.{name=\"%\", proc=%, hash=%},\n", input_string, it, hash);
     }
     print_to_builder(*builder, "];\n");
 
@@ -460,4 +504,5 @@ HERE;
 #import "File_Utilities";
 #import "Process";
 #import "String";
+#import "xxHash";
 Program_Print :: #import "Program_Print";

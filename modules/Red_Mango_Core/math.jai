@@ -1069,7 +1069,7 @@ linear_decompress_vector3 :: (v: u64, $min_value: float, $max_value: float) -> V
     };
 }
 
-sweep_aabb :: (aabb: AABB, displacement: Vector3) -> AABB {
+sweep_aabb :: inline  (aabb: AABB, displacement: Vector3) -> AABB {
     min := aabb.center - aabb.extent;
     max := aabb.center + aabb.extent;
     // sweep the aabb to account for velocity

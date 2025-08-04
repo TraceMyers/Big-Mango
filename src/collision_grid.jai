@@ -1,7 +1,9 @@
 
+// todo: figure out & test rectifying the cell allocations
+
 _collision_grid :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
-        init_collision_grid(.{}, .{100, 100}, .{30, 30});
+        init_collision_grid(.{}, .{100, 100}, .{25, 25});
     }
     return true;
 }
@@ -15,6 +17,8 @@ init_collision_grid :: (center: Vector2, dimensions: Int_Vector2, cell_dimension
     inv_collision_cell_dimensions = 1.0 / cell_dimensions;
     cell_count := dimensions.x * dimensions.y;
     program_runtime_allocate(*collision_grid, cell_count);
+    program_runtime_allocate(*collision_grid_cell_flags, cell_count);
+    memset(collision_grid_cell_flags.data, 0, cell_count * size_of(Collision_Grid_Cell_Flags));
 
     na_chunk_list_size := 4096 * 16;
     max_data_size := ENTITY_MAX_COUNT * size_of(s16) * 8;
@@ -63,8 +67,7 @@ rectify_collision_cell_allocation :: (grid_index: s32) {
     }
 }
 
-get_collision_cell :: (grid_index: s32) -> []s16 {
-    scope_timer();
+get_collision_cell :: inline (grid_index: s32) -> []s16 {
     alloc := *collision_grid[grid_index];
     out_array : []s16 = ---;
     if alloc.inline_allocation.zero_if_inline == 0 {
@@ -83,9 +86,16 @@ get_collision_cell :: (grid_index: s32) -> []s16 {
     return out_array;
 }
 
-remove_from_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
-    scope_timer();
+remove_from_collision_cell :: inline (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
     alloc := *collision_grid[grid_index];
+
+    // mark this cell as altered so that its allocation can be rectified later
+    if (collision_grid_cell_flags[grid_index] & .JUST_ALTERED) == 0 {
+        altered_cells := data.(*[..]s32);
+        array_add(altered_cells, grid_index);
+        collision_grid_cell_flags[grid_index] |= .JUST_ALTERED;
+    }
+
     if alloc.inline_allocation.zero_if_inline == 0 {
         count := *alloc.inline_allocation.count;
         collision_assert(count.* <= alloc.inline_allocation.array.count);
@@ -100,9 +110,16 @@ remove_from_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s3
     }
 }
 
-add_to_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
-    scope_timer();
+add_to_collision_cell :: inline (entity_index: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
     alloc := *collision_grid[grid_index];
+
+    // mark this cell as altered so that its allocation can be rectified later
+    if (collision_grid_cell_flags[grid_index] & .JUST_ALTERED) == 0 {
+        altered_cells := data.(*[..]s32);
+        array_add(altered_cells, grid_index);
+        collision_grid_cell_flags[grid_index] |= .JUST_ALTERED;
+    }
+
     add_to_heap_alloc := false;
     if alloc.inline_allocation.zero_if_inline == 0 {
         count := *alloc.inline_allocation.count;
@@ -149,8 +166,7 @@ add_to_collision_cell :: (entity_index: s16, x: s64, y: s64, grid_index: s32, sw
     }
 }
 
-remove_from_collision_cell_do_remove :: (array: []s16, remove_index: s16) #expand {
-    scope_timer();
+remove_from_collision_cell_do_remove :: inline (array: []s16, remove_index: s16) #expand {
     #if COLLISION_DEBUG {
         found_match := false;
         assert(`count.* > 0);
@@ -169,34 +185,34 @@ remove_from_collision_cell_do_remove :: (array: []s16, remove_index: s16) #expan
     `count.* -= 1;
 }
 
-find_overlaps_in_cell :: (self_index: s16, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
-    scope_timer();
+find_overlaps_in_cell :: inline (self_index: s16, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
     find_overlaps_data := data.(*Find_Overlaps_Data);
     iteration_collision_overlaps := find_overlaps_data.collision_overlaps;
 
     cell := get_collision_cell(grid_index);
+
     for other_index : cell {
         // to guarantee no duplicate pairs, higher-indexed entities collect overlaps with lower-indexed entities (also don't overlap with self)
         // this has the added benefit of making sure the 'other' entity here has done their grid iteration first, giving it the chance to set its' 'skip' flag.
-        if self_index >= other_index && (entity_collision_bodies[other_index].collision_flags & .SKIPPED_GRID_ITERATE) == 0 {
+        if self_index >= other_index && (entity_collision_bodies[other_index].collision_flags & .SKIPPED_GRID_ITERATE) == 0 { 
             continue;
         }
         if (entity_collision_channels[self_index] & entity_collision_channels[other_index]) == 0 {
             continue;
         }
-        pair := Pair(s16).{self_index, xx other_index};
         
         // check if we've already tried to find an overlap with the other guy
-        if bit_is_set(*find_overlaps_data.already_overlapped, pair.b) {
+        if bit_is_set(*find_overlaps_data.already_overlapped, other_index) {
             continue;
         }
-        set_bit(*find_overlaps_data.already_overlapped, pair.b);
+        set_bit(*find_overlaps_data.already_overlapped, other_index);
 
         other_body := *entity_collision_bodies[other_index];
         other_aabb := get_aabb_at(other_index);
         // other_displacement := other_body.velocity * delta_time;
         // other_swept_aabb := sweep_aabb(other_aabb, other_displacement);
         if is_overlap_aabb_aabb(self_swept_aabb, other_aabb) {
+            pair := Pair(s16).{self_index, xx other_index};
             array_add(iteration_collision_overlaps, pair);
         }
     }

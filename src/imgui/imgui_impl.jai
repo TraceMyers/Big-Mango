@@ -192,6 +192,13 @@ add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
     PushStyleColor(.Text, .{0.79, 0.79, 0.89, alpha});
     defer PopStyleColor();
 
+    if is_profiling_on {
+        time_delta := seconds_since_init() - profiling_started_at_time;
+        Text("profiling for % seconds", FormatFloat.{value=time_delta, zero_removal=.NO, width=4, trailing_width=1});
+    }
+
+    SameLine();
+
     // Text_align_right_for_auto_resize(*text_size, tprint("% | % ", input_focus, control_mode), left_offset);
     Text_align_right_for_auto_resize(*text_size, tprint("frames per second: %   ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=6, zero_removal=.NO}), left_offset);
     Text_align_right_for_auto_resize(*text_size, tprint("frame time: % ms", FormatFloat.{value=calc_avg(delta_times) * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);

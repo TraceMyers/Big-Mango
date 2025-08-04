@@ -82,23 +82,24 @@ Command_Line_Argument :: struct {
 Command_Line_Procedure :: struct {
     name: string;
     proc: ([]Command_Line_Argument);
+    hash: u64;
 }
 
-command_line_procedure_index :: (cmd: string) -> s32 {
+command_line_procedure_index :: (hash: u64) -> s32 {
     for command_line_procedures {
-        if cmd == it.name {
+        if hash == it.hash {
             return xx it_index;
         }
     }
     return -1;
 }
 
-is_command_line_procedure :: (cmd: string) -> bool {
-    return command_line_procedure_index(cmd) >= 0;
-}
+// is_command_line_procedure :: (cmd: string) -> bool {
+//     return command_line_procedure_index(cmd) >= 0;
+// }
 
-try_call_command_line_procedure :: (cmd: string, args: []Command_Line_Argument) -> bool {
-    index := command_line_procedure_index(cmd);
+try_call_command_line_procedure :: (input_hash: u64, args: []Command_Line_Argument) -> bool {
+    index := command_line_procedure_index(input_hash);
     if index >= 0 {
         command_line_procedures[index].proc(args);
         return true;
