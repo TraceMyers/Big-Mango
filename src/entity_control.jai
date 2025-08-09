@@ -19,20 +19,25 @@ process_entity_input :: (e: *Entity) {
 process_entity_input :: () {
     if input_focus != .GAME then return;
     if control_mode == .FIRST_PERSON_CAMERA_ONLY {
-        context.camera_2.movement_flags |= .ACCELERATE_IN_3D;
+        lfa_set(context.camera_2.flags, .ACCELERATE_IN_3D);
         handle_first_person_input(context.camera_2, null, .{}, true);
     } else if control_mode == .FIRST_PERSON_PLAYER {
-        context.player_entity.movement_flags &= ~.ACCELERATE_IN_3D;
+        lfa_unset(context.player_entity.flags, .ACCELERATE_IN_3D);
         first_person_camera_offset := Vector3.{z=context.player_entity.body.shape.half_height * 0.92};
         handle_first_person_input(context.player_entity, context.camera_1, first_person_camera_offset, false);
+        handle_player_input(context.player_entity);
     } else if control_mode == .FIRST_PERSON_PLAYER_FREE_FLY {
-        context.player_entity.movement_flags |= .ACCELERATE_IN_3D;
+        lfa_set(context.player_entity.flags, .ACCELERATE_IN_3D);
         first_person_camera_offset := Vector3.{z=context.player_entity.body.shape.half_height * 0.92};
         handle_first_person_input(context.player_entity, context.camera_1, first_person_camera_offset, true);
+        handle_player_input(context.player_entity);
     } else { // ortho
-        context.player_entity.movement_flags &= ~.ACCELERATE_IN_3D;
+        lfa_unset(context.player_entity.flags, .ACCELERATE_IN_3D);
         handle_ortho_input(context.player_entity, context.camera_2);
+        handle_player_input(context.player_entity);
     }
+
+    apply_acceleration(context.player_entity);
 }
 
 handle_first_person_input :: (entity: *Entity, fp_camera: *Entity, camera_offset: Vector3, free_fly: bool) {
@@ -171,6 +176,12 @@ handle_camera_relative_movement :: (entity: *Entity, rel_camera: *Entity, move_i
     if move_dir != .{0,0,0} {
         move_dir = normalize(move_dir);
         entity.linear_input = move_dir;
+    }
+}
+
+handle_player_input :: (entity: *Entity) {
+    if Input.input_button_states[#char "E"] & .DOWN {
+        
     }
 }
 

@@ -9,11 +9,35 @@
 // cell size: 10 x 10 
 // world cell counts: 200 x 200 = 80_000
 
-COLLISION_DEBUG :: true;
+// todo: woops I made the whole collision grid using backing data indices to represent entities, when I need to be using
+// reference indices. this problem comes to light when an entity is deleted.
+// note: i made the thing with the specific rule that backing data indices don't persist across frames, which is why the Entity_Ref exists and I forgot about the importance of it this whole time.
+
+// note:
+// quickest path to fun: 
+// - pick up object
+// - throw object
+// - automatic door
+// - human moves through door if open
+// - physics button controlling automatic door
+// - throw object at button
+
 AABB_OVERLAP_BUFFER :: 1.0;
 INVALID_COLLISION_GROUP : s16 : S16_MAX;
+PHYSICS_FIXED_TIME_STEP :: 1.0 / 240.0;
+DRAW_COLLISION_MESHES :: BUILDVAR_COLLISION_DEBUG;
 
-#if COLLISION_DEBUG {
+COLLISION_VELOCITY_ITERATION_COUNT :: 5;
+COLLISION_POSITION_ITERATION_COUNT :: 8;
+COLLISION_MAX_CORRECTION :: 1.0;
+COLLISION_OVERLAP_TOLERANCE :: 0.001;
+COLLISION_IMPULSE_DAMPING :: 0.95;
+COLLISION_POSITION_CORRECTION_DAMPING :: 0.25;
+Z_KILL_FLOOR :: -1000.0;
+
+DEFAULT_LINEAR_IMPULSE_DURATION :: 1.0 / 90.0;
+
+#if BUILDVAR_COLLISION_DEBUG {
     collision_assert :: assert;
 } else {
     collision_assert :: (b: bool) #expand {}
@@ -22,10 +46,11 @@ INVALID_COLLISION_GROUP : s16 : S16_MAX;
 _collision :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // bump_allocator_initialize(*collisions_allocator, heaps_tracking_array_ct := 16);
-        program_runtime_allocate(*collision_group_indices, ENTITY_MAX_COUNT);
-        for *collision_group_indices {
-            it.* = INVALID_COLLISION_GROUP;
-        }
+        // program_runtime_allocate(*collision_group_indices, ENTITY_MAX_COUNT);
+        // for *collision_group_indices {
+        //     it.* = INVALID_COLLISION_GROUP;
+        // }
+        array_reserve(*altered_cells, 4096);
     }
     return true;
 }
@@ -38,154 +63,69 @@ solve_contacts :: () {
         return;
     }
 
-    draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
-
-    // todo: naive version is safer (basically shouldn't have bugs related to position + bounds), but
-    // it would be better to skip updates for entities that haven't changed their position or bounds.
-    // updating here is probably fine since the grid cache will need to be warm anyway.
-
-    altered_cells := temp_dynamic_array(s32, 4096);
-    update_collision_grid_cell_occupations(*altered_cells);
-
-    solve_contacts_broadphase();
-
-    for 0..entity_ct-1 {
-        entity_collision_bodies[it].collision_flags = 0;
+    time_step_accumulator += delta_time;
+    time_step_count := (time_step_accumulator / PHYSICS_FIXED_TIME_STEP).(s32);
+    if time_step_count <= 0 {
+        return;
     }
 
-    // for any cells that were altered, shrink occupation allocations to be inline if the allocation fits inline
+    // draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
+
+    update_collision_grid_cell_occupations();
+
+    // for any cells that were altered, shrink occupation allocations to be inline if it fits
     for altered_cells {
         collision_grid_cell_flags[it] &= ~.JUST_ALTERED;
         rectify_collision_cell_allocation(it);
     }
 
-    {
-        // scope_timer("draw color groups");
-        // entities_in_group := temp_dynamic_array(s16, 2048);
-        // for collision_overlap_groups.items {
-        //     if !is_item_in_use(*collision_overlap_groups, it_index) {
-        //         continue;
-        //     }
-        //     get_entities_in_overlap_group(it, *entities_in_group);
+    warm_start_contacts();
+    array_reset_keeping_memory(*contact_pairs);
+    solve_contacts_broad_phase(time_step_count);
+    solve_contacts_narrow_phase(time_step_count);
 
-        //     // because overlap groups often disband and re-create at different pool indexes, persistent-ish group color can't well be determined by the index of the group. so, instead it's determined by the min entity index over all group members.
-        //     min_index : u64 = xx S16_MAX;
-        //     for entities_in_group {
-        //         min_index = min(it.(u64), min_index);
-        //     }
-        //     random_seed(*color_group_random_state, min_index);
-        //     group_color := random_color4f(random_state=*color_group_random_state);
-
-        //     for entities_in_group {
-        //         aabb := get_aabb_at(it);
-        //         draw_aabb(aabb, group_color);
-        //     }
-        //     array_reset_keeping_memory(*entities_in_group); 
-        // }
+    for 0..entity_ct-1 {
+        lfa_unset_multiple(*entity_flags[it], TRANSIENT_COLLISION_FLAGS);
     }
-
-    // Move_Entity :: struct {
-    //     body: *Collision_Body;
-    //     axes: *Axes;
-    //     movement: *Entity_Movement;
-    // }
-
-    // for e1 : 0..entity_ct-2 {
-    //     if entity_collision_channels[e1] == 0 then continue;
-    //     entity_1_body               := *entity_collision_bodies[e1];
-    //     entity_1_compressed_axes    := *entity_compressed_axes[e1];
-    //     entity_1_movement           := *entity_movements[e1];
-    //     entity_1_axes: Axes = ---;
-    //     decompress_axes(entity_1_compressed_axes, *entity_1_axes);
-    //     entity_1_props              := get_physics_properties_at(e1);
-    //     entity_1_aabb               := get_aabb(entity_1_body, entity_1_axes);
-
-    //     for e2 : e1+1..entity_ct-1 {
-    //         if (entity_collision_channels[e1] & entity_collision_channels[e2]) == 0 then continue;
-    //         entity_2_body               := *entity_collision_bodies[e2];
-    //         entity_2_compressed_axes    := *entity_compressed_axes[e2];
-    //         entity_2_axes: Axes = ---;
-    //         decompress_axes(entity_2_compressed_axes, *entity_2_axes);
-    //         entity_2_movement           := *entity_movements[e2];
-    //         entity_2_props              := get_physics_properties_at(e2);
-    //         entity_2_aabb               := get_aabb(entity_2_body, entity_2_axes);
-
-    //         if !is_overlap_aabb_aabb(entity_1_aabb, entity_2_aabb) {
-    //             continue;
-    //         }
-
-    //         result: Contact_Result;
-    //         is_contact: bool;
-    //         // very for now. just move up to collis and kill velocity along normals
-    //         move_entity_2: bool;
-    //         if entity_1_body.shape.type == .RECT && entity_2_body.shape.type == .SPHERE {
-    //             is_contact = solve_potential_contact(entity_2_body.*, entity_2_axes, entity_1_body.*, entity_1_axes, FIXED_TIME_STEP, *result);
-    //             move_entity_2 = true;
-    //         } else {
-    //             is_contact = solve_potential_contact(entity_1_body.*, entity_1_axes, entity_2_body.*, entity_2_axes, FIXED_TIME_STEP, *result);
-    //         }
-
-    //         if !is_contact {
-    //             continue;
-    //         }
-
-    //         move_entity_a: Move_Entity = ---;
-    //         move_entity_b: Move_Entity;
-    //         if move_entity_2 {
-    //             move_entity_a = .{entity_2_body, *entity_2_axes, entity_2_movement};
-    //         } else {
-    //             move_entity_a = .{entity_1_body, *entity_1_axes, entity_1_movement};
-    //             if entity_2_props.mass > IMMOVABLE_ENTITY_MASS {
-    //                 move_entity_b = .{entity_2_body, *entity_2_axes, entity_2_movement};
-    //             }
-    //         }
-
-    //         // don't worry about ccd stuff...
-    //         if move_entity_b.movement == null {
-    //             using move_entity_a;
-    //             speed_in_direction_opposite_hit_normal := dot(body.velocity, -result.contact_normal);
-    //             body.velocity += result.contact_normal * speed_in_direction_opposite_hit_normal;
-    //         } else {
-    //             a_speed_in_direction_of_hit_normal := dot(move_entity_a.body.velocity, result.contact_normal);
-    //             move_entity_a.body.velocity -= a_speed_in_direction_of_hit_normal;
-    //             b_speed_in_direction_of_hit_normal := dot(move_entity_b.body.velocity, result.contact_normal);
-    //             move_entity_b.body.velocity -= b_speed_in_direction_of_hit_normal;
-    //         }
-
-    //         entity_patch_infos[e1].flags |= .COLLIDING_WITH_SOMETHING;
-    //         entity_patch_infos[e2].flags |= .COLLIDING_WITH_SOMETHING;
-    //     }
-    // }
-
-    // for e : 0..entity_ct-1 {
-    //     if entity_collision_channels[e] == 0 then continue;
-    //     entity_body := *entity_collision_bodies[e];
-    //     entity_axes: Axes = ---;
-    //     decompress_axes(*entity_compressed_axes[e], *entity_axes);
-    //     entity_aabb: AABB = ---;
-    //     get_aabb(entity_body.shape, entity_body.center, entity_axes.fore, entity_axes.up, entity_axes.right, *entity_aabb);
-
-    //     if entity_patch_infos[e].flags & .COLLIDING_WITH_SOMETHING {
-    //     } else {
-    //         draw_aabb(entity_aabb, .{g=1});
-    //     }
-    // }
 }
 
 get_entities_in_overlap_group :: (group: []Pair(s16), out_entities: *[..]s16) {
-    last_known_pair_a: s16 = -1;
+    entity_ct := get_entity_count();
+    set_capacity(*seen_entity_in_group, entity_ct);
+    unset_all(*seen_entity_in_group);
     for group {
-        if it.a != last_known_pair_a {
-            array_add_if_unique(out_entities, it.a);
-            last_known_pair_a = it.a;
+        if !bit_is_set(*seen_entity_in_group, it.a) {
+            array_add(out_entities, it.a);
+            set_bit(*seen_entity_in_group, it.a);
         }
-        array_add_if_unique(out_entities, it.b);
+        if !bit_is_set(*seen_entity_in_group, it.b) {
+            array_add(out_entities, it.b);
+            set_bit(*seen_entity_in_group, it.b);
+        }
     }
 }
 
-update_collision_grid_cell_occupations :: (altered_cells: *[..]s32) {
+remove_entity_from_collision_grid :: (ref: Entity_Ref) {
+    i := entity_patch_layer[ref.index];
+    assert(ref.id == entity_patch_infos[i].id);
+    hash_upper := collision_cell_hashes[i] >> 32;
+    grid_pos_min := collision_grid_index_to_grid_position(xx hash_upper);
+    hash_lower := collision_cell_hashes[i] & 0xffff_ffff;
+    grid_pos_max := collision_grid_index_to_grid_position(xx hash_lower);
+    collision_grid_iterate(xx i, *altered_cells, grid_pos_min, grid_pos_max, .{}, remove_from_collision_cell);
+    collision_cell_hashes[i] = 0xffff_ffff_ffff_ffff;
+}
+
+update_collision_grid_cell_occupations :: () {
+    defer array_reset_keeping_memory(*altered_cells);
+
     scope_timer();
     entity_ct := get_entity_count();
+
+    // collision_overlap_group_changed: Bit_Array(1);
+    // collision_overlap_group_changed.items.allocator = temp;
+    // set_capacity(*collision_overlap_group_changed, collision_overlap_groups.items.count);
+    // unset_all(*collision_overlap_group_changed);
 
     for 0..entity_ct-1 {
         if entity_collision_channels[it] == 0 {
@@ -203,95 +143,115 @@ update_collision_grid_cell_occupations :: (altered_cells: *[..]s32) {
 
         if collision_cell_hashes[it] != hash {
             if collision_cell_hashes[it] != -1 {
-                prev_hash_upper := collision_cell_hashes[it] >> 32;
-                prev_grid_pos_min := collision_grid_index_to_grid_position(xx prev_hash_upper);
-                prev_hash_lower := collision_cell_hashes[it] & 0xffff_ffff;
-                prev_grid_pos_max := collision_grid_index_to_grid_position(xx prev_hash_lower);
-                collision_grid_iterate(xx it, altered_cells, prev_grid_pos_min, prev_grid_pos_max, .{}, remove_from_collision_cell);
+                remove_entity_from_collision_grid(entity_ref(it));
             }
-            collision_grid_iterate(xx it, altered_cells, grid_pos_min, grid_pos_max, .{}, add_to_collision_cell);
+            collision_grid_iterate(xx it, *altered_cells, grid_pos_min, grid_pos_max, .{}, add_to_collision_cell);
             collision_cell_hashes[it] = hash;
-            entity_collision_bodies[it].collision_flags |= .CHANGED_CELL_OCCUPATIONS;
+            lfa_set(*entity_flags[it], .CHANGED_CELL_OCCUPATIONS);
         }
 
         // this is just a convenient place to get this part out of the way. while already iterating to change the cell occupations, go ahead and make sure entities that have moved are removed from their collision group, so they have to update their overlaps.
         // NOTE: could allow things to slowly overlap
-        prev_loc_dist_sq := distance_squared(self_body.center, self_body.previous_center);
-        if prev_loc_dist_sq > VERY_SMALL_NUMBER && collision_group_indices[it] != INVALID_COLLISION_GROUP {
-            overlap_group := *collision_overlap_groups[collision_group_indices[it]];
-            entity_index := it;
-            for #v2 < 0..overlap_group.count-1 {
-                overlap_pair := overlap_group.*[it];
-                if overlap_pair.a == entity_index {
-                    array_unordered_remove_by_index(overlap_group, it);
-                    entity_collision_bodies[overlap_pair.b].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
-                } else if overlap_pair.b == entity_index {
-                    array_unordered_remove_by_index(overlap_group, it);
-                    entity_collision_bodies[overlap_pair.a].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
-                }
-            }
-            collision_group_indices[it] = INVALID_COLLISION_GROUP;
-        }
+        // prev_loc_dist_sq := distance_squared(self_body.center, self_body.previous_center);
+        // if prev_loc_dist_sq > 0 && collision_group_indices[it] != INVALID_COLLISION_GROUP {
+        //     overlap_group := *collision_overlap_groups[collision_group_indices[it]];
+        //     for overlap_group.* {
+        //         collision_group_indices[it.a] = INVALID_COLLISION_GROUP;
+        //         collision_group_indices[it.b] = INVALID_COLLISION_GROUP;
+        //     }
+        //     array_reset(overlap_group);
+
+        //     // TODO: make overlap group islanding work
+        //     // set_bit(*collision_overlap_group_changed, collision_group_indices[it]);
+        //     // entity_index := it;
+        //     // for #v2 < 0..overlap_group.count-1 {
+        //     //     overlap_pair := overlap_group.*[it];
+        //     //     if overlap_pair.a == entity_index {
+        //     //         array_unordered_remove_by_index(overlap_group, it);
+        //     //         entity_collision_bodies[overlap_pair.b].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
+        //     //     } else if overlap_pair.b == entity_index {
+        //     //         array_unordered_remove_by_index(overlap_group, it);
+        //     //         entity_collision_bodies[overlap_pair.a].collision_flags |= .NEED_CHECK_IF_IN_OVERLAP_GROUP;
+        //     //     }
+        //     // }
+        //     // collision_group_indices[it] = INVALID_COLLISION_GROUP;
+        // }
     }
 
     // when entities move and remove themselves from their overlap group, this potentially has the knock-on effect of taking other entities out of the group, if they were in the group only due to those removed overlaps.
-    for e : 0..entity_ct-1 {
-        in_a_group := collision_group_indices[e] != INVALID_COLLISION_GROUP;
-        some_of_my_overlaps_removed := (entity_collision_bodies[e].collision_flags & .NEED_CHECK_IF_IN_OVERLAP_GROUP) != 0;
-        if in_a_group && some_of_my_overlaps_removed {
-            overlap_group := *collision_overlap_groups[collision_group_indices[e]];
-            found_overlap: bool;
-            for *(overlap_group.*) {
-                if it.a == e || it.b == e {
-                    found_overlap = true;
-                    break;
-                }
-            }
-            if !found_overlap {
-                collision_group_indices[e] = INVALID_COLLISION_GROUP;
-            }
-        }
-    }
+    // for e : 0..entity_ct-1 {
+    //     in_a_group := collision_group_indices[e] != INVALID_COLLISION_GROUP;
+    //     some_of_my_overlaps_removed := (entity_collision_bodies[e].collision_flags & .NEED_CHECK_IF_IN_OVERLAP_GROUP) != 0;
+    //     if in_a_group && some_of_my_overlaps_removed {
+    //         overlap_group := *collision_overlap_groups[collision_group_indices[e]];
+    //         found_overlap: bool;
+    //         for *(overlap_group.*) {
+    //             if it.a == e || it.b == e {
+    //                 found_overlap = true;
+    //                 break;
+    //             }
+    //         }
+    //         if !found_overlap {
+    //             collision_group_indices[e] = INVALID_COLLISION_GROUP;
+    //         }
+    //     }
+    // }
 
-    if collision_overlap_groups.items.count > 0 {
-        for *collision_overlap_groups.items {
-            if it.count == 0 {
-                array_reset(it);
-                return_item(*collision_overlap_groups, it_index);
-            }
-        }
-    }
+    // initial_group_count := get_count(*collision_overlap_group_changed);
+
+    // remove empty groups
+    // if collision_overlap_groups.items.count > 0 {
+    //     for *collision_overlap_groups.items {
+    //         if is_item_in_use(*collision_overlap_groups, it_index) && it.count == 0 {
+    //             array_reset(it);
+    //             return_item(*collision_overlap_groups, it_index);
+    //         }
+    //     }
+    //     // todo: make overkap group islanding work
+    //     // for *collision_overlap_groups.items {
+    //     //     if is_item_in_use(*collision_overlap_groups, it_index) 
+    //     //     && it_index < initial_group_count 
+    //     //     && bit_is_set(*collision_overlap_group_changed, it_index) {
+    //     //         separate_collision_group_islands(xx it_index);
+    //     //     }
+    //     // }
+    // }
 }
 
-absorb_overlap_group :: (collision_group_indices: *[]s16, absorbing_group: s16, absorbed_group: s16) {
-    assert(absorbing_group != absorbed_group);
-    fat_group := *collision_overlap_groups[absorbing_group];
-    dead_group := *collision_overlap_groups[absorbed_group];
-    array_append(fat_group, dead_group.*);
-    for dead_group.* {
-        collision_group_indices.*[it.a] = absorbing_group;
-        collision_group_indices.*[it.b] = absorbing_group;
-        array_add(fat_group, it);
-    }
-    array_reset(dead_group);
-    return_item(*collision_overlap_groups, absorbed_group);
-}
+// absorb_overlap_group :: (collision_group_indices: *[]s16, absorbing_group: s16, absorbed_group: s16) {
+//     collision_assert(absorbing_group != absorbed_group);
+//     fat_group := *collision_overlap_groups[absorbing_group];
+//     dead_group := *collision_overlap_groups[absorbed_group];
+//     array_append(fat_group, dead_group.*);
+//     for dead_group.* {
+//         collision_group_indices.*[it.a] = absorbing_group;
+//         collision_group_indices.*[it.b] = absorbing_group;
+//         array_add(fat_group, it);
+//     }
+//     array_reset(dead_group);
+//     return_item(*collision_overlap_groups, absorbed_group);
+// }
 
-solve_contacts_broadphase :: () {
+solve_contacts_broad_phase :: (time_step_count: s32) {
     scope_timer();
     entity_ct := get_entity_count();
 
-    iteration_overlaps := temp_dynamic_array(Pair(s16), 4096);
+    iteration_overlaps := temp_dynamic_array(Contact_Pair, 4096);
 
     find_overlaps_data: Find_Overlaps_Data;
     set_capacity(*find_overlaps_data.already_overlapped, entity_ct);
 
+    total_time_step := PHYSICS_FIXED_TIME_STEP * time_step_count.(float);
+
     // todo: parallelizing this?
     for e : 0..entity_ct-1 {
-        if collision_group_indices[e] != INVALID_COLLISION_GROUP {
-            entity_collision_bodies[e].collision_flags |= .SKIPPED_GRID_ITERATE;
+        if entity_collision_channels[e] == 0 {
             continue;
         }
+        // if collision_group_indices[e] != INVALID_COLLISION_GROUP {
+        //     entity_collision_bodies[e].collision_flags |= .SKIPPED_GRID_ITERATE;
+        //     continue;
+        // }
 
         // moved in grid: movers take responsibility for generating new overlaps
         array_reset_keeping_memory(*iteration_overlaps);
@@ -299,46 +259,276 @@ solve_contacts_broadphase :: () {
         unset_all(*find_overlaps_data.already_overlapped);
         find_overlaps_data.collision_overlaps = *iteration_overlaps;
 
-        collision_grid_iterate(xx e, *find_overlaps_data, find_overlaps_in_cell);
+        collision_grid_iterate(xx e, total_time_step, *find_overlaps_data, find_overlaps_in_cell);
         if iteration_overlaps.count == 0 {
             continue;
         }
 
-        add_to_group := collision_group_indices[e];
-        for iteration_overlaps {
-            add_to_group = min(add_to_group, collision_group_indices[it.b]);
-        }
+        array_append(*contact_pairs, iteration_overlaps);
+
+        // add_to_group := collision_group_indices[e];
+        // for iteration_overlaps {
+        //     add_to_group = min(add_to_group, collision_group_indices[it.b]);
+        // }
         
-        if add_to_group == INVALID_COLLISION_GROUP {
-            new_group_index := request_item(*collision_overlap_groups);
-            assert(new_group_index != INVALID_COLLISION_GROUP);
-            new_group := *collision_overlap_groups[new_group_index];
-            array_resize(new_group, iteration_overlaps.count);
-            copy_array(new_group.*, iteration_overlaps);
-            collision_group_indices[e] = xx new_group_index;
-            for *(new_group.*) {
-                collision_group_indices[it.b] = xx new_group_index;
-            }
+        // if add_to_group == INVALID_COLLISION_GROUP {
+        //     new_group_index := request_item(*collision_overlap_groups);
+        //     collision_assert(new_group_index != INVALID_COLLISION_GROUP);
+        //     new_group := *collision_overlap_groups[new_group_index];
+        //     array_resize(new_group, iteration_overlaps.count);
+        //     copy_array(new_group.*, iteration_overlaps);
+        //     collision_group_indices[e] = xx new_group_index;
+        //     for *(new_group.*) {
+        //         collision_group_indices[it.b] = xx new_group_index;
+        //     }
+        // }
+        // else {
+        //     existing_group := *collision_overlap_groups[add_to_group];
+        //     if collision_group_indices[e] != INVALID_COLLISION_GROUP && collision_group_indices[e] != add_to_group {
+        //         absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[e]);
+        //     }
+        //     collision_group_indices[e] = add_to_group;
+
+        //     for iteration_overlaps {
+        //         array_add(existing_group, it);
+        //         if collision_group_indices[it.b] == INVALID_COLLISION_GROUP {
+
+        //         } else if collision_group_indices[it.b] != add_to_group {
+        //             absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[it.b]);
+        //         }
+        //         collision_group_indices[it.b] = add_to_group;
+        //     }
+        // }
+    }
+}
+
+solve_contacts_narrow_phase :: (time_step_count: s32) {
+    scope_timer();
+
+    entities_in_group: [..]s16;
+    array_reserve(*entities_in_group, 2048);
+
+    for 0..time_step_count-1 {
+        defer time_step_accumulator -= PHYSICS_FIXED_TIME_STEP;
+        apply_impulses();
+        solve_contact_velocities();
+        move_stuff(PHYSICS_FIXED_TIME_STEP);
+        solve_contact_positions();
+    }
+}
+
+apply_impulses :: () {
+    entity_ct := get_entity_count();
+    for 0..entity_ct-1 {
+        body := get_body_at(it);
+
+        if !lfa_is_set(*entity_flags[it], .MOVED_BY_PHYSICS) {
+            continue;
         }
-        else {
-            existing_group := *collision_overlap_groups[add_to_group];
-            if collision_group_indices[e] != INVALID_COLLISION_GROUP && collision_group_indices[e] != add_to_group {
-                absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[e]);
+        if lfa_is_set(*entity_flags[it], .APPLY_GRAVITY) {
+            body.velocity.z -= get_physics_properties_at(it).gravity_accel * PHYSICS_FIXED_TIME_STEP;
+        }
+
+        impulses := get_linear_impulses_at(it);
+        if impulses.count > 0 {
+            switch_break();
+            for *impulses {
+                impulse_time_step := min(it.time_remaining, PHYSICS_FIXED_TIME_STEP);
+                // a = f/m
+                prev_velocity := body.velocity;
+                time_over_mass := body.inv_mass * impulse_time_step;
+                body.velocity += it.force * time_over_mass;
+                it.time_remaining -= impulse_time_step + VERY_SMALL_NUMBER; // make sure we pass zero
             }
-            collision_group_indices[e] = add_to_group;
+            clear_completed_impulses_at(it); // todo: could just remove swap while iterating
+        }
+    }
+}
 
-            for iteration_overlaps {
-                array_add(existing_group, it);
-                if collision_group_indices[it.b] == INVALID_COLLISION_GROUP {
+solve_contact_velocities :: () {
+    // solve for velocity
+    for 0..COLLISION_VELOCITY_ITERATION_COUNT-1 {
+        for *pair : contact_pairs {
+            body_a  := get_body_at(pair.a);
+            axes_a  := get_axes_at(pair.a);
+            props_a := get_physics_properties_at(pair.a);
+            body_b  := get_body_at(pair.b);
+            axes_b  := get_axes_at(pair.b);
+            props_b := get_physics_properties_at(pair.b);
 
-                } else if collision_group_indices[it.b] != add_to_group {
-                    absorb_overlap_group(*collision_group_indices, add_to_group, collision_group_indices[it.b]);
+            contact_result: Contact_Result;
+            if solve_potential_contact(body_a, axes_a, body_b, axes_b, PHYSICS_FIXED_TIME_STEP, *contact_result) {
+                pair.contact_normal = contact_result.normal;
+
+                a_to_point := contact_result.point - body_a.center;
+                b_to_point := contact_result.point - body_b.center;
+                a_angular_velocity := cross(body_a.angular_velocity, a_to_point);
+                b_angular_velocity := cross(body_b.angular_velocity, b_to_point);
+
+                velocity_a := body_a.velocity + a_angular_velocity;
+                velocity_b := body_b.velocity + b_angular_velocity;
+
+                if props_b.mass == IMMOVABLE_ENTITY_MASS {
+                    body_a.velocity -= contact_result.normal * dot(body_a.velocity, contact_result.normal);
+                } else {
+                    effective_mass: float;
+                    if body_a.shape.type == .SPHERE && body_b.shape.type == .SPHERE {
+                        effective_mass = 1.0 / (body_a.inv_mass + body_b.inv_mass);
+                    } else {
+                        // todo: generalized effective mass calculation
+                    }
+                    relative_velocity := velocity_b - velocity_a;
+                    speed_along_normal := dot(relative_velocity, contact_result.normal);
+
+                    tangent_velocity := relative_velocity - speed_along_normal * contact_result.normal;
+                    tangent_speed_sq := length_squared(tangent_velocity);
+                    tangent_speed: float;
+                    if tangent_speed_sq > VERY_SMALL_NUMBER {
+                        tangent_speed = sqrt(tangent_speed_sq);
+                        pair.contact_tangent = tangent_velocity / tangent_speed;
+                    } else {
+                        pair.contact_tangent = .{};
+                    }
+
+                    friction_impulse_magnitude := -tangent_speed * effective_mass;
+                    normal_impulse_magnitude := speed_along_normal * effective_mass;
+
+                    normal_impulse_magnitude, friction_impulse_magnitude = feed_contact_impulse(pair, normal_impulse_magnitude, friction_impulse_magnitude);
+
+                    friction_impulse := pair.contact_tangent * friction_impulse_magnitude;
+                    normal_impulse := normal_impulse_magnitude * contact_result.normal;
+                    total_impulse := (normal_impulse + friction_impulse) * COLLISION_IMPULSE_DAMPING;
+
+                    body_a.velocity += total_impulse * body_a.inv_mass;
+                    body_b.velocity -= total_impulse * body_b.inv_mass;
+
+                    if lfa_is_set(*entity_flags[pair.a], .PHYSICS_DRIVEN_ROTATION) {
+                        body_a.angular_velocity += inv_inertia_tensors[pair.a] * cross(a_to_point, total_impulse);
+                    }
+                    if lfa_is_set(*entity_flags[pair.b], .PHYSICS_DRIVEN_ROTATION) {
+                        body_b.angular_velocity += inv_inertia_tensors[pair.b] * cross(b_to_point, total_impulse);
+                    }
                 }
-                collision_group_indices[it.b] = add_to_group;
             }
         }
     }
 }
+
+solve_contact_positions :: () {
+// correct positions
+    for 0..COLLISION_POSITION_ITERATION_COUNT-1 {
+        for pair : contact_pairs {
+            body_a  := get_body_at(pair.a);
+            axes_a  := get_axes_at(pair.a);
+            props_a := get_physics_properties_at(pair.a);
+            body_b  := get_body_at(pair.b);
+            axes_b  := get_axes_at(pair.b);
+            props_b := get_physics_properties_at(pair.b);
+
+            contact_result: Contact_Result;
+            if solve_potential_contact(body_a, axes_a, body_b, axes_b, PHYSICS_FIXED_TIME_STEP, *contact_result) {
+                if props_b.mass == IMMOVABLE_ENTITY_MASS {
+                    force := clamp(COLLISION_POSITION_CORRECTION_DAMPING * (contact_result.depth - COLLISION_OVERLAP_TOLERANCE), 0, COLLISION_MAX_CORRECTION);
+                    impulse := contact_result.normal * force;
+                    body_a.center += impulse;
+                } else {
+                    force := clamp(COLLISION_POSITION_CORRECTION_DAMPING * (contact_result.depth - COLLISION_OVERLAP_TOLERANCE), 0, COLLISION_MAX_CORRECTION);
+                    impulse := contact_result.normal * force;
+                    inv_mass_sum := 1 / (props_a.mass + props_b.mass);
+                    impulse_a :=  impulse * (body_a.inv_mass * inv_mass_sum);
+                    impulse_b := -impulse * (body_b.inv_mass * inv_mass_sum);
+                    body_a.center += impulse_a;
+                    body_b.center += impulse_b;
+                }
+            }
+        }
+    }
+}
+
+warm_start_contacts :: () {
+    entity_ct := get_entity_count();
+    for pair : contact_pairs {
+        if pair.a >= entity_ct || pair.b >= entity_ct {
+            continue;
+        }
+        if get_frame_counter_at(pair.a) > 1 && get_frame_counter_at(pair.b) > 1 {
+            body_a := get_body_at(pair.a);
+            body_b := get_body_at(pair.b);
+
+            normal_impulse := pair.contact_normal * (pair.normal_impulse_sum * COLLISION_IMPULSE_DAMPING);
+            body_a.velocity += normal_impulse * body_a.inv_mass;
+            body_b.velocity -= normal_impulse * body_b.inv_mass;
+            
+            // todo: warm start angular
+        }
+    }
+}
+
+// TODO: make overlap islanding work. doesn't work
+// whenever a group may have islands in itself, this can be run to separate the islands into their own groups
+// separate_collision_group_islands :: (group_index: s32) {
+//     auto_release_temp();
+//     group := *collision_overlap_groups[group_index];
+//     if group.count == 0 {
+//         return;
+//     }
+
+//     entities_in_group := temp_dynamic_array(s16, group.count);
+//     get_entities_in_overlap_group(group.*, *entities_in_group); 
+
+//     for e : entities_in_group {
+//         entity_collision_bodies[e].island_grouping_index = INVALID_COLLISION_GROUP;
+//     }
+
+//     // logic here doesn't work if INVALID_COLLISION_GROUP isn't at least larger than max(number of collision pairs, number of islands)
+//     collision_assert(INVALID_COLLISION_GROUP == S16_MAX);
+
+//     group_index_counter : s16 = 0;
+//     for pair : group.* {
+//         a_group := *entity_collision_bodies[pair.a].island_grouping_index;
+//         incremented_counter: bool;
+//         if a_group.* == INVALID_COLLISION_GROUP {
+//             a_group.* = group_index_counter;
+//             group_index_counter += 1;
+//             incremented_counter = true;
+//         }
+//         b_group := *entity_collision_bodies[pair.b].island_grouping_index;
+//         if b_group.* < a_group.* {
+//             a_group.* = b_group.*;
+//             if incremented_counter { // don't think this works
+//                 group_index_counter -= 1;
+//             }
+//         } else {
+//             b_group.* = a_group.*;
+//         }
+//     }
+
+//     group_old := duplicate(group.*, temp);
+//     array_reset_keeping_memory(group);
+
+//     true_group_indices := alloc_array(s16, group_old.count, temp);
+//     for *true_group_indices {
+//         it.* = INVALID_COLLISION_GROUP;
+//     }
+//     true_group_indices[0] = xx (group - collision_overlap_groups.items.data);
+
+//     for group_old {
+//         collision_assert(entity_collision_bodies[it.a].island_grouping_index == entity_collision_bodies[it.b].island_grouping_index);
+//         temp_index := entity_collision_bodies[it.a].island_grouping_index;
+//         true_group_index := true_group_indices[temp_index];
+//         if true_group_index == INVALID_COLLISION_GROUP {
+//             true_group_index = xx request_item(*collision_overlap_groups);
+//             true_group_indices[temp_index] = true_group_index;
+//             collector := *collision_overlap_groups[true_group_index];
+//             array_reserve(collector, 32);
+//         }
+//         collector := *collision_overlap_groups[true_group_index];
+//         collision_assert(true_group_index >= 0 && true_group_index < collision_overlap_groups.items.count);
+//         array_add(collector, it);
+//         collision_group_indices[it.a] = xx true_group_index;
+//         collision_group_indices[it.b] = xx true_group_index;
+//     }
+// }
 
 solve_potential_contact :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
     shape_a := *body_a.shape;
@@ -347,14 +537,14 @@ solve_potential_contact :: (body_a: Collision_Body, axes_a: Axes, body_b: Collis
     case .SPHERE;
         if shape_b.type == {
         case .SPHERE;
-            #if COLLISION_DEBUG {
+            #if BUILDVAR_COLLISION_DEBUG {
                 return Procedure_Capture_Duplicate.solve_potential_contact_sphere_sphere(body_a, axes_a, body_b, axes_b, time_step, out_result);
             } else {
                 return solve_potential_contact_sphere_sphere(body_a, axes_a, body_b, axes_b, time_step, out_result);
             }
         case .CAPSULE;
         case .RECT;
-            #if COLLISION_DEBUG {
+            #if BUILDVAR_COLLISION_DEBUG {
                 return Procedure_Capture_Duplicate.solve_potential_contact_sphere_rect(body_a, axes_a, body_b, axes_b, time_step, out_result);
             } else {
                 return solve_potential_contact_sphere_rect(body_a, axes_a, body_b, axes_b, time_step, out_result);
@@ -413,167 +603,63 @@ solve_potential_contact :: (body_a: Collision_Body, axes_a: Axes, body_b: Collis
 }
 
 solve_potential_contact_sphere_sphere :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
-    sphere_a := *body_a.shape.sphere;
-    sphere_b := *body_b.shape.sphere;
+    sphere_a    := *body_a.shape.sphere;
+    sphere_b    := *body_b.shape.sphere;
 
-    contact_radius := sphere_a.radius + sphere_b.radius;
-    contact_radius_sq := square(contact_radius);
-    if contact_radius < VERY_SMALL_NUMBER {
-        out_result.norm_time = 1;
-        return false;
-    }
+    radius_sum := sphere_a.radius + sphere_b.radius;
+    diff := body_a.center - body_b.center;
+    dist_sq := length_squared(diff);
 
-    // solve t = 0 contacts.
-    current_diff := body_a.center - body_b.center;
-    current_dist_sq := length_squared(current_diff);
-    if current_dist_sq < contact_radius_sq {
-        out_result.norm_time = 0;
-        if current_dist_sq < VERY_SMALL_NUMBER {
-            // colliders are two close to calculate a normal. just need to pick something
-            out_result.contact_normal = .{x=1};
-            out_result.contact_depth_if_time_is_zero = max(sphere_a.radius, sphere_b.radius);
-        } else {
-            contact_dist := sqrt(current_dist_sq);
-            out_result.contact_normal = current_diff / contact_dist;
-            out_result.contact_depth_if_time_is_zero = contact_radius - contact_dist;
-        }
-        out_result.a_local_space_contact_point = -out_result.contact_normal * sphere_a.radius;
-        out_result.b_local_space_contact_point =  out_result.contact_normal * sphere_b.radius;
+    if dist_sq < VERY_SMALL_NUMBER {
+        out_result.normal = WORLD_RIGHT;
+        out_result.point = body_a.center - out_result.normal * sphere_a.radius;
+        out_result.depth = radius_sum;
         return true;
     }
+    
+    dist := sqrt(dist_sq);
+    out_result.normal = diff / dist;
+    out_result.point = body_a.center - out_result.normal * sphere_a.radius;
 
-    sphere_a_sweep_diff         := body_a.velocity * time_step;
-    sphere_a_sweep_begin        := body_a.center;
-    sphere_a_sweep_end          := body_a.center + sphere_a_sweep_diff;
+    approach_speed := dot(out_result.normal, body_b.velocity - body_a.velocity);
+    future_dist := dist - approach_speed * time_step;
+    out_result.depth = radius_sum - future_dist;
 
-    b_closest_pt_on_line, norm_dist_along_sweep := closest_point_on_line(*body_b.center, *sphere_a_sweep_begin, *sphere_a_sweep_end);
-
-    dist_sq_from_line := distance_squared(b_closest_pt_on_line, body_b.center);
-    if dist_sq_from_line >= contact_radius_sq {
-        out_result.norm_time = 1.0;
-        return false;
-    }
-
-    clamped_norm_dist_along_sweep := clamp(norm_dist_along_sweep, 0, 1);
-    b_closest_pt_on_sweep := sphere_a_sweep_begin + sphere_a_sweep_diff * clamped_norm_dist_along_sweep;
-    dist_sq_from_sweep := distance_squared(b_closest_pt_on_sweep, body_b.center);
-    if dist_sq_from_sweep >= contact_radius_sq {
-        out_result.norm_time = 1.0;
-        return false;
-    }
-
-    move_from_line_projection_dist      := sqrt(contact_radius_sq - dist_sq_from_line);
-    sphere_a_sweep_length_sq            := length_squared(sphere_a_sweep_diff);
-    move_from_line_projection_norm_dist : float = ---;
-
-    if sphere_a_sweep_length_sq < VERY_SMALL_NUMBER {
-        move_from_line_projection_norm_dist = 0;
-    } else {
-        sphere_a_sweep_length := sqrt(sphere_a_sweep_length_sq);
-        move_from_line_projection_norm_dist = move_from_line_projection_dist / sphere_a_sweep_length;
-    }
-
-    normal_sign         := -sign(clamped_norm_dist_along_sweep);
-    norm_time           := norm_dist_along_sweep + normal_sign * move_from_line_projection_norm_dist;
-    a_contact_position  := sphere_a_sweep_begin + body_a.velocity * out_result.norm_time;
-    contact_diff        := a_contact_position - body_b.center;
-
-    out_result.contact_normal = normalize(contact_diff);
-    is_contact := true;
-    if norm_time >= 1 {
-        out_result.norm_time = 1;
-        is_contact = false;
-    }
-
-    // for spheres, just ignore the axes and use world axes
-    out_result.a_local_space_contact_point = -out_result.contact_normal * sphere_a.radius;
-    out_result.b_local_space_contact_point =  out_result.contact_normal * sphere_b.radius;
-
-    return is_contact;
+    return out_result.depth > 0;
 } @capture_body_as_struct
 
 solve_potential_contact_sphere_rect :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
     sphere_a    := *body_a.shape.sphere;
     rect_b      := *body_b.shape.rect;
 
-    contact_radius := sphere_a.radius;
-    contact_radius_sq := square(contact_radius);
-    if contact_radius < VERY_SMALL_NUMBER {
-        out_result.norm_time = 1;
+    center_diff := body_a.center - body_b.center;
+    distance_along_normal := dot(center_diff, axes_b.fore);
+    if distance_along_normal < VERY_SMALL_NUMBER {
         return false;
     }
 
-    sphere_a_sweep_diff         := body_a.velocity * time_step;
-    sphere_a_sweep_begin        := body_a.center;
-    sphere_a_sweep_end          := body_a.center + sphere_a_sweep_diff;
+    up_dist := clamp(dot(center_diff, axes_b.up), -rect_b.half_height, rect_b.half_height);
+    right_dist := clamp(dot(center_diff, axes_b.right), -rect_b.half_width, rect_b.half_width);
+    a_projected_onto_b := body_b.center + axes_b.up * up_dist + axes_b.right * right_dist;
 
-    rect_b_normal       := axes_b.fore;
-    rect_b_axis_up      := axes_b.up;
-    rect_b_axis_right   := axes_b.right;
+    contact_diff := body_a.center - a_projected_onto_b;
+    dist := distance(body_a.center, a_projected_onto_b);
 
-    sweep_begin_projected_to_rect := clamp_point_to_rect(sphere_a_sweep_begin, body_b.center, rect_b_axis_up, rect_b_axis_right, rect_b.half_height, rect_b.half_width);
+    out_result.normal = contact_diff / dist;
 
-    current_diff        := sphere_a_sweep_begin - sweep_begin_projected_to_rect;
-    current_dist_signed := dot(rect_b_normal, current_diff);
+    approach_speed := dot(out_result.normal, body_b.velocity - body_a.velocity);
+    future_dist := dist - approach_speed * time_step;
+    out_result.depth = sphere_a.radius - future_dist;
 
-    // if the sphere is behind the rect and will stay behind it, there is no collision
-    if current_dist_signed < 0 {
-        out_result.norm_time = 1;
-        return false;
-    }
+    return out_result.depth > 0;
 
-    current_dist := current_dist_signed;
-    out_result.contact_normal = rect_b_normal;
-
-    // solve t = 0 contacts.
-    if current_dist < contact_radius {
-        out_result.norm_time = 0;
-        out_result.contact_depth_if_time_is_zero = contact_radius - current_dist;
-        out_result.a_local_space_contact_point = -out_result.contact_normal * sphere_a.radius;
-        out_result.b_local_space_contact_point = world_space_to_local_space(sweep_begin_projected_to_rect - body_b.center, rect_b_normal, rect_b_axis_up, rect_b_axis_right);
-        return true;
-    }
-
-    // heading away from rect's plane
-    sweep_signed_dist_along_normal := dot(sphere_a_sweep_diff, rect_b_normal);
-    if sweep_signed_dist_along_normal >= 0 {
-        out_result.norm_time = 1;
-        return false;
-    }
-
-    sweep_dist_sq := length_squared(sphere_a_sweep_diff);
-    // we don't have a contact at = 0 and we're only moving imperceptibly if at all, so no contact
-    // todo: this may cause bugs if things move *very* slowly. how to address?
-    if sweep_dist_sq < VERY_SMALL_NUMBER {
-        out_result.norm_time = 1;
-        return false;
-    }
-
-    // reprojection is needed here for raycasting. we don't know that the point on the rect wasn't clamped
-    // it seems wasteful to project to the plane after projecting to the rect... but actually zero instructions are saved when doing it in reverse as far as I can tell.
-    sweep_begin_projected_to_plane, signed_dist_to_plane_projection := project_point_onto_plane(body_a.center, body_b.center, rect_b_normal);
-    dist_to_plane_projection := abs(signed_dist_to_plane_projection);
-
-    // the ratio of the line intersection's sidelength to the segment's sidelength can be used to scale the segment difference so as to represent the ray intersection hypotenuse minus the distance s.t. the sphere is touching the rect rather than its center being on the rect (without any normalization / sqrt)
-    sweep_dist_along_normal := -sweep_signed_dist_along_normal;
-    buffered_dist_to_plane_projection := dist_to_plane_projection - contact_radius;
-    out_result.norm_time = buffered_dist_to_plane_projection / sweep_dist_along_normal;
-
-    if out_result.norm_time <= 0 || out_result.norm_time >= 1 {
-        out_result.norm_time = 1;
-        return false;
-    }
-
-    sphere_location_at_point_of_contact := sphere_a_sweep_begin + sphere_a_sweep_diff * out_result.norm_time;
-    out_result.a_local_space_contact_point = -out_result.contact_normal * sphere_a.radius;
-    b_world_space_contact_point := sphere_location_at_point_of_contact + out_result.a_local_space_contact_point;
-    out_result.b_local_space_contact_point = world_space_to_local_space(b_world_space_contact_point - body_b.center, rect_b_normal, rect_b_axis_up, rect_b_axis_right);
-
-    return true;
 } @capture_body_as_struct 
 
 get_aabb_extent :: (shape: Collision_Shape, axis_fore: Vector3, axis_up: Vector3, axis_right: Vector3) -> Vector3 {
     if #complete shape.type == {
+    case .NONE;
+        assert(false);
+        return .{};
     case .SPHERE;
         using shape.sphere;
         return .{radius, radius, radius};
@@ -602,28 +688,6 @@ get_aabb_extent :: (shape: Collision_Shape, axis_fore: Vector3, axis_up: Vector3
         return .{FLOAT32_MAX, FLOAT32_MAX, FLOAT32_MAX};
     }
 }
-
-// get_bounding_sphere_radius :: (collider: Collider) -> float {
-//     if #complete collider.type == {
-//     case .SPHERE;
-//         using collider.sphere;
-//         return radius;
-//     case .CAPSULE;
-//         using collider.capsule;
-//         return half_height; 
-//     case .RECT;
-//         using collider.rect;
-//         return sqrt(square(half_width) + square(half_height));
-//     case .BOX;
-//         using collider.box;
-//         return sqrt(square(half_width) + square(half_length) + square(half_height));
-//     case .AABB;
-//         using collider.aabb;
-//         return sqrt(square(half_width) + square(half_length) + square(half_height));
-//     case .HALF_SPACE;
-//         return FLOAT32_MAX;
-//     }
-// }
 
 get_aabb :: inline (shape: Collision_Shape, position: Vector3, orientation: Quaternion, out_aabb: *AABB)  {
     axis_fore, axis_up, axis_right: Vector3 = ---;
@@ -656,9 +720,13 @@ collision_grid_dimensions: Int_Vector2;
 collision_cell_dimensions: Vector2;
 inv_collision_cell_dimensions: Vector2;
 
-collision_overlap_groups: Pool([..]Pair(s16));
-collision_group_indices: []s16;
+time_step_accumulator := 0.0;
 
-// collisions_allocator: Bump_Allocator;
+contact_pairs: [..]Contact_Pair;
+
+// collision_group_indices: []s16;
+
+seen_entity_in_group: Bit_Array(1);
 
 color_group_random_state: Random_State;
+altered_cells: [..]s32;

@@ -2,10 +2,11 @@
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
 DO_PROFILING :: true;
+COLLISION_DEBUG :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: false;
+GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 
 #run {
     // make sure environment is set up
@@ -107,12 +108,23 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
     // force the compiler to wait for compiler_wait_for_message() calls so that the compilation process can be customized during compilation
     compiler_begin_intercept(w);
 
-    add_build_string(tprint("BUILDVAR_DO_PROFILING :: %;", DO_PROFILING), w);
+    // buildvars
+    add_build_string(tprint(
+#string HERE
+BUILDVAR_DO_PROFILING :: %;
+BUILDVAR_COLLISION_DEBUG :: %;
+HERE, 
+        DO_PROFILING,
+        COLLISION_DEBUG
+    ), w);
+
     add_build_string(tprint("Compiler :: #import \"Compiler\";\nBUILDVAR_BUILD_CONFIG :: Compiler.Optimization_Type.%;", optimization), w);
 
     add_build_file("src/prebuild/scope_timer.jai", w);
     // add the definition of get_scope_timer_id() to compilation. its id counter is declared in this file, so it is only usable during compilation.
     add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);
+
+    add_build_file("src/prebuild/entity_construction.jai", w);
 
     add_build_file("src/game.jai", w);
 

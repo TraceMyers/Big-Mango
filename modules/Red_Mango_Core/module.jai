@@ -32,6 +32,7 @@ UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
 #load "no_allocator.jai";
 #load "color.jai";
 #load "common_types.jai";
+#load "long_flag_array.jai";
 
 // useful token to represent an index to an array, the elements of which are uniquely id'd. so, you use
 // the index to get the element, and the id to verify that the element is the expected one. this approach

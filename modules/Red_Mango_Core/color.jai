@@ -93,7 +93,7 @@ to_color4f :: inline (color4b: Color4b) -> Color4f {
     return float_color;
 }
 
-random_color4f :: inline (r_bounds := Vector2.{0.4, 0.9}, g_bounds := Vector2.{0.4, 0.9}, b_bounds := Vector2.{0.4, 0.9}, a := 1.0, random_state : *Random_State = null) -> Color4f {
+random_color4f :: inline (r_bounds := Vector2.{0.2, 0.8}, g_bounds := Vector2.{0.2, 0.8}, b_bounds := Vector2.{0.2, 0.8}, a := 1.0, random_state : *Random_State = null) -> Color4f {
     if random_state == null {
         random_state = *context.random_state;
     }

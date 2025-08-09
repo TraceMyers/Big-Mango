@@ -153,12 +153,6 @@ copy_range_inside_array :: (array: []$T, dst: s64, src: s64, count: s64) {
     }
 }
 
-array_add :: (array: *[]$T, items: ..T) {
-    for items {
-        array_add(array, it);
-    }
-}
-
 // dst: |-----|
 // src:    |-----|
 

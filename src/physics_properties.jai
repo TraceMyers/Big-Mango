@@ -37,11 +37,12 @@ Physics_Properties :: struct {
     friction_bias := 0.0;
     // todo: linear accel discrete (or continuous?) function
     friction_multiplier := 1.0;
-    linear_acceleration := 250.0;
+    linear_acceleration := 190.0;
     accel_opposite_direction_multiplier := 2.0;
     fast_start_speed_max := 5.0;
     fast_start_speed_multiplier := 3.0;
     linear_speed_max := 30.0;
+    fall_speed_max := 100.0;
     gravity_accel := 150.0;
     jump_delta_velocity := 50.0;
     body_elasticity := 0.1;
@@ -55,8 +56,6 @@ Physics_Properties_Dynamic :: struct {
 
 #insert #run define_enum(..PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS, "Physics_Properties_Template", u16);
 #insert #run define_array(..PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS, "PHYSICS_PROPERTIES_TEMPLATES", Physics_Properties, true);
-
-
 
 // the idea here is that two equally elastic things meeting each other should not bounce off of each other AND two inelastic things should not also bounce. this is achieved by mapping input to output like so:
 // (0,0) -> 0; (1,1) -> 0; (1,0)-> 1; (0,1) -> 1

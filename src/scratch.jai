@@ -7,11 +7,6 @@ _scratch :: (stage: Boot_Stage) -> bool {
         // moving window to top monitor only *after* swapchain creation. something in that process creates a very jittery framerate if the swapchain is created when the window is positioned within that monitor's rect.
         move_window(.{90, -1300});
     }
-    {
-        fixed_delta_time = 1.0/80.0;
-        // fixed_delta_time = 1.0 / 60.0;
-        // fixed_delta_time = 1.0 / 1000.0;
-    }
     // ground entity
     {
         context.ground = spawn_entity(.STATIC_ENVIRONMENT, name="ground", physics_properties_template=.GROUND, make_physics_properties_dynamic=true);
@@ -76,6 +71,8 @@ _scratch :: (stage: Boot_Stage) -> bool {
     {
         context.player_entity = spawn_entity_human(name="player", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
 
+        // context.player_entity.collision_channels.* = 0;
+
         // context.player_entity.ai.update = scratch_ai_update;
         // context.player_entity.movement_flags |= .CONTROL_ATTACHED_CAMERA;
         // context.player_entity.movement_flags |= .MOVE_RELATIVE_TO_CAMERA;
@@ -83,34 +80,25 @@ _scratch :: (stage: Boot_Stage) -> bool {
         // context.player_entity.ai.input_oscillation_max_time = 5;
         // context.player_entity.ai.input_direction = .DOWN;
 
-        {
-            context.player_entity.body.shape.type = .SPHERE;
-            using context.player_entity.body.shape.sphere;
-            radius = 10;
-        }
-
-        {
-            using context.player_entity.physics_properties;
-            mass = 1.0;
-            body_elasticity = 0.0;
-        }
+        set_body_shape_and_mass(context.player_entity.ref, .{type=.SPHERE, sphere=.{radius=10}}, 1);
 
         // array_add(*physics_debugger_entity_ids, context.player_entity.ref.id);
 
         reorient_mesh_quat: Quaternion;
         set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
 
+        lfa_set(context.player_entity.flags, .APPLY_GRAVITY);
+        // lfa_unset(context.player_entity.flags, .MOVED_BY_PHYSICS);
 
         mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
-        set_entity_meshes(context.player_entity.ref, .{mesh, .{tint=.{0.7,0.7,0.9,1.0}}}, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
+        set_entity_meshes(context.player_entity.ref, .{mesh, .{tint=.{0.7,0.7,0.9,1.0}}});
 
-        context.player_entity.center.xy = .{40,40};
-        context.player_entity.center.z = 50.0;
+        context.player_entity.center.xy = .{0,0};
+        context.player_entity.center.z = 5.0;
     }
-    for 0..1000
+    for 0..20
     {
         ai_entity := spawn_entity_human(name="ai guy", physics_properties_template=.SPHERE_MAN, make_physics_properties_dynamic=true);
-        ai_entity.ai.update = scratch_ai_update;
         ai_entity.ai.input_oscillation_max_time = 5;
         ai_entity.ai.input_oscillation_timer = random_get_within_range(0, 5);
         val := it & 0x3;
@@ -123,23 +111,39 @@ _scratch :: (stage: Boot_Stage) -> bool {
         case 2;
             ai_entity.ai.input_direction = ifx it & 1 == 0 then .UP else .DOWN;
         }
-        ai_entity.shape.type = .SPHERE;
-        ai_entity.shape.sphere.radius = 10;
-        SPREAD :: 500.0;
-        HALF_SPREAD :: SPREAD * 0.5;
-        ai_entity.center.xy += Vector2.{random_get_zero_to_one() * SPREAD - HALF_SPREAD, random_get_zero_to_one() * SPREAD - HALF_SPREAD};
-        
-        ai_entity.movement_flags |= .ACCELERATE_IN_3D;
 
-        set_entity_meshes(ai_entity.ref, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.5}}});
+        radius := 10.0;
+        set_body_shape_and_mass(ai_entity.ref, .{type=.SPHERE, sphere=.{radius=radius}}, 1);
+
+        lfa_set(ai_entity.flags, .DRAW_COLLIDER_HEIGHT_LINE);
+        lfa_set(ai_entity.flags, .PHYSICS_DRIVEN_ROTATION);
+        lfa_set(ai_entity.flags, .APPLY_GRAVITY);
+
+        // set_entity_meshes(ai_entity.ref, .{sphere_mesh_mid_poly, .{tint=.{0.6, 0.1, 0.9, 0.2}}});
+        ai_entity.center.xy = .{};
+        // ai_entity.center.z = 5.0;
+        ai_entity.center.z = context.player_entity.center.z + context.player_entity.shape.half_height + ai_entity.shape.sphere.radius * 2.0 * it.(float) + ai_entity.shape.sphere.radius + 0.1 * it.(float);
     }
     return true;
 }
 
 scratch_think :: () {
-    player_half_height := context.player_entity.body.shape.half_height;
-    player_center := context.player_entity.center + Vector3.{z=player_half_height};
-    end_pt := project_point_onto_plane(context.player_entity.center, .{}, .{0,0,1});
+    entity_ct := get_entity_count();
+
+    color_state: Random_State;
+    seeded_height_line_color: bool;
+
+    for 0..entity_ct-1 {
+        body := get_body_at(it);
+        if lfa_is_set(*entity_flags[it], .DRAW_COLLIDER_HEIGHT_LINE) {
+            if !seeded_height_line_color {
+                random_seed(*color_state, 512);
+                seeded_height_line_color = true;
+            }
+            draw_line_with_points(body.center, body.center + up_direction_at(it) * body.shape.half_height, random_color4f(random_state=*color_state));
+            draw_line(body.center, body.center - up_direction_at(it) * body.shape.half_height, .{r=1,g=1,b=1});
+        }
+    }
 
     // rotate(*ground, WORLD_UP, delta_time*0.25);
 }

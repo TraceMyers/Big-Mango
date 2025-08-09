@@ -16,10 +16,10 @@ scope_push_indent :: () #expand {
 
 // todo: metaprogram or whatever
 dev_ui_opacities := float.[
-    0.4,
-    0.4,
-    0.4,
-    0.8
+    0.2,
+    0.2,
+    0.2,
+    0.2
 ];
 
 Dev_UI_Module :: enum {

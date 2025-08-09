@@ -1,8 +1,8 @@
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // config
 
+UNLIT :: true;
 ENABLE_VALIDATION_LAYERS :: true;
-UNLIT :: false;
 
 LINES_MAX :: 65_536;
 MESHES_MAX :: 4096;
@@ -184,13 +184,20 @@ render_frame :: () {
     draw_lines(cmd, *vp_mat);
     draw_spheres(cmd, *vp_mat);
 
+    random_seed(*collision_mesh_color_state, 257);
     entity_ct := get_entity_count();
     for 0..entity_ct-1 {
+        entity := get_entity_at(it);
+        #if DRAW_COLLISION_MESHES {
+            collider_color := random_color4f(a=0.25, random_state=*collision_mesh_color_state);
+        }
+        if entity.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE then continue;
+        #if DRAW_COLLISION_MESHES {
+            draw_collision_mesh(cmd, entity, *vp_mat, collider_color);
+        }
         meshes := get_entity_meshes_at(it);
         if meshes.count == 0 then continue;
         for *emesh : meshes {
-            entity := get_entity_at(it);
-            if entity.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE then continue;
             draw_mesh(cmd, entity, emesh, *vp_mat);
         }
     }
@@ -984,7 +991,7 @@ create_primitives :: () {
     }
     {
         cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
-        cube_mesh.primitive_type = .CUBE;
+        cube_mesh.primitive_type = .BOX;
     }
     {
         SPHERE_RADIUS :: 1.0;
@@ -1773,7 +1780,14 @@ create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.
     return capsule_mesh;
 }
 
-get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
+get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 0.0) -> *Mesh {
+    if triangulize_distance == 0 {
+        cylinder_side_surface_area := 2 * PI * radius * height;
+        sphere_surface_area := 4 * PI * square(radius);
+        total_surface_area := cylinder_side_surface_area + sphere_surface_area;
+        TARGET_TRIANGLE_COUNT :: 1024;
+        triangulize_distance = total_surface_area / TARGET_TRIANGLE_COUNT;
+    }
     capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
     mesh := get_existing_mesh(capsule_name);
     if mesh == null then mesh = create_capsule_mesh(height, radius, triangulize_distance);
@@ -1794,7 +1808,7 @@ get_or_create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) ->
     return create_mesh(name, vertices, indices);
 }
 
-create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Mesh_Primitive_Type = 0) -> *Mesh {
+create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
     // just a convention to make sure the preloads are consistent and intentional. all preload names start with an underscore.
     assert(starts_with(name, "_"));
 
@@ -2621,26 +2635,60 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
+draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4, color: Color4f) {
+    shape := *entity.shape;
+    albedo := Mesh_Albedo.{.CONSTANT, color};
+    if shape.type == {
+    case .NONE;
+    case .SPHERE;
+        emesh := Entity_Mesh.{sphere_mesh_mid_poly, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    case .CAPSULE;
+        using shape.capsule;
+        // todo: make a capsule mesh shader that actually works so this doesn't have to risk a million capsule meshes being made
+        capsule_mesh := get_or_create_capsule_mesh(half_height*2.0, radius);
+        emesh := Entity_Mesh.{capsule_mesh, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    case .RECT;
+        emesh := Entity_Mesh.{plane_mesh, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    case .BOX;
+        emesh := Entity_Mesh.{cube_mesh, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    case .AABB;
+        emesh := Entity_Mesh.{cube_mesh, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    case .HALF_SPACE;
+        emesh := Entity_Mesh.{plane_mesh, albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat);
+    }
+}
+
 draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_projection: *Matrix4) {
     mesh := emesh.data;
     model := make_translation_matrix4(entity.center);
     rot := rotation_matrix(Matrix4, entity.orientation);
     model *= rot;
 
-    if mesh.primitive_type == 0 {
+    if mesh.primitive_type == .NONE {
         // todo: entity 3d scale
         draw_mesh(cmd, mesh, *model, *entity.orientation, view_projection, emesh.albedo, 1);
         return;
     }
 
     scale: Matrix4 = ---;
-    if mesh.primitive_type == {
-    case .CUBE;
+    if #complete mesh.primitive_type == {
+    case .NONE;
+    case .CAPSULE;
+        scale = Matrix4_Identity;
+    case .AABB; #through;
+    case .BOX;
         box := *entity.body.shape.box;
         scale = make_scale_matrix4(.{box.half_width*2.0, box.half_length*2.0, box.half_height*2.0});
     case .SPHERE;
         sphere := *entity.body.shape.sphere;
         scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
+    case .HALF_SPACE; #through;
     case .RECT;
         rect := *entity.body.shape.rect;
         scale = make_scale_matrix4(.{rect.half_width*2.0, 1.0, rect.half_height*2.0});
@@ -3128,16 +3176,10 @@ Mesh_Albedo :: struct {
     tint := Color4f.{1,1,1,1};
 }
 
-Mesh_Primitive_Type :: enum u8 {
-    SPHERE :: 1;
-    CUBE;
-    RECT;
-};
-
 Mesh :: struct {
     vbo: Mesh_Data_Buffer;
     ibo: Mesh_Data_Buffer;
-    primitive_type: Mesh_Primitive_Type = 0;
+    primitive_type: Collision_Shape_Type = 0;
 }
 
 Hashed_Mesh :: struct {
@@ -3545,6 +3587,8 @@ sphere_mesh_high_poly: *Mesh;
 
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
+
+collision_mesh_color_state: Random_State;
 
 // jai compiler will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 

@@ -35,10 +35,10 @@ main :: () {
         respond_to_scope_timer_commands();
         scope_timer("game frame", true);
         update_input();
+        process_entity_input();
         scratch_think();
         entity_ai_updates();
         solve_contacts();
-        move_stuff();
         draw_dev_ui();
         end_frame();
     }
@@ -104,6 +104,7 @@ end_frame :: () {
     if fixed_delta_time != 0.0 {
         delta_time = fixed_delta_time;
     }
+    delta_time *= delta_time_multiplier;
 
     delta_times[dt_index] = delta_time;
     render_times[dt_index] = render_dt;
@@ -262,10 +263,10 @@ report_scope_times :: () {
         }
 
         for trackers {
-            log("[%]", scope_timers[it_index].name);
             if it.cpu_time_deltas.count < 1 {
                 continue;
             }
+            log("[%]", scope_timers[it_index].name);
             scope_min, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
             frame_min, frame_median, frame_high_percentile := get_array_stats(it.frame_cpu_time_deltas);
             log(
@@ -296,7 +297,8 @@ Boot_Stage :: enum {
     SHUTDOWN;
 }
 
-fixed_delta_time := 0.0;
+fixed_delta_time := 0.0; @command_line
+delta_time_multiplier := 1.0; @command_line
 
 window: Window_Type;
 console_window: Window_Type;
@@ -321,6 +323,22 @@ simulation_times: [DELTA_TIME_COUNT]float32;
 render_times: [DELTA_TIME_COUNT]float32;
 dt_index: s32;
 
+breakpoint_switch_0: bool;
+breakpoint_switch_9: bool;
+breakpoint_switch_8: bool;
+breakpoint_switch_7: bool;
+
+switch_break :: () {
+    if breakpoint_switch_0 {
+        debug_break();
+    } else if breakpoint_switch_9 {
+        debug_break();
+    } else if breakpoint_switch_8 {
+        debug_break();
+    } else if breakpoint_switch_7 {
+        debug_break();
+    }
+}
 
 #import "Basic"()();
 #import "String";

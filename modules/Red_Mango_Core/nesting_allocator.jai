@@ -7,10 +7,42 @@
 
 VALIDATION_PATTERN : u8 : 0xa0;
 
+Nested_Allocation :: struct {
+    allocation_ref: Nested_Allocation_Ref;
+    count: s32;
+}
+
+Nested_Dynamic_Allocation :: struct {
+    allocation_ref: Nested_Allocation_Ref;
+    count: s32;
+    allocated: s32;
+}
+
 Nesting_Allocator_Collection :: struct {
     small_allocator: Nesting_Allocator(16);
     medium_allocator: Nesting_Allocator(1024);
     large_allocator: Nesting_Allocator(1024*256);
+}
+
+Nested_Allocation_Info :: struct {
+    list: s16;
+    outer_chunk: u16;
+    inner_chunk_count: u16;
+    inner_chunk: u8;
+    using metadata: union {
+        bin: enum u8 {
+            STANDALONE;
+            SMALL;
+            MEDIUM;
+            LARGE;
+        }
+        bit_pattern: u8 = ---;
+    }
+}
+
+Nested_Allocation_Ref :: struct {
+    data: *void;
+    info: Nested_Allocation_Info;
 }
 
 nack_initialize :: (using allocator: *Nesting_Allocator_Collection, parent_allocator: Allocator, small_list_count := 16, medium_list_count := 4, large_list_count := 0) {
@@ -53,30 +85,10 @@ nack_free :: (using allocator: *Nesting_Allocator_Collection, ref: *Nested_Alloc
     }
 }
 
-Nested_Allocation_Info :: struct {
-    list: s16;
-    outer_chunk: u16;
-    inner_chunk_count: u16;
-    inner_chunk: u8;
-    using metadata: union {
-        bin: enum u8 {
-            STANDALONE;
-            SMALL;
-            MEDIUM;
-            LARGE;
-        }
-        bit_pattern: u8 = ---;
-    }
-}
-
 basic_validity_check :: inline (using ref: Nested_Allocation_Ref) -> bool {
     return data != null && info.list >= 0 && (info.bit_pattern & 0xf0) == VALIDATION_PATTERN;
 }
 
-Nested_Allocation_Ref :: struct {
-    data: *void;
-    info: Nested_Allocation_Info;
-}
 
 Nesting_Allocator_Outer_Chunk :: struct ($MIN_ALLOCATION_SIZE: s64) {
     inner_chunks: [64][MIN_ALLOCATION_SIZE]u8;

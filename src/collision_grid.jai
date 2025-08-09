@@ -29,7 +29,7 @@ world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
     diff := world_pos - collision_grid_origin;
     diff *= inv_collision_cell_dimensions;
     ivec := to_int_vector2(diff);
-    return clamp(ivec, .{}, collision_grid_dimensions);
+    return clamp(ivec, .{}, collision_grid_dimensions-1);
 }
 
 collision_grid_index :: inline (pos: Int_Vector2) -> s32 {
@@ -167,25 +167,26 @@ add_to_collision_cell :: inline (entity_index: s16, x: s64, y: s64, grid_index: 
 }
 
 remove_from_collision_cell_do_remove :: inline (array: []s16, remove_index: s16) #expand {
-    #if COLLISION_DEBUG {
-        found_match := false;
-        assert(`count.* > 0);
+    matched_count: s8 = 0;
+    #if BUILDVAR_COLLISION_DEBUG {
+        collision_assert(`count.* > 0);
     }
     for 0..`count.*-1 {
         if array[it] == remove_index {
             array[it] = array[`count.*-1];
-            #if COLLISION_DEBUG {
-                assert(!found_match);
-                found_match = true;
+            #if BUILDVAR_COLLISION_DEBUG {
+                collision_assert(matched_count == 0);
+                matched_count += 1;
             } else {
+                matched_count += 1;
                 break;
             }
         }
     }
-    `count.* -= 1;
+    `count.* -= matched_count;
 }
 
-find_overlaps_in_cell :: inline (self_index: s16, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
+find_overlaps_in_cell :: (self_index: s16, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
     find_overlaps_data := data.(*Find_Overlaps_Data);
     iteration_collision_overlaps := find_overlaps_data.collision_overlaps;
 
@@ -194,7 +195,7 @@ find_overlaps_in_cell :: inline (self_index: s16, x: s64, y: s64, grid_index: s3
     for other_index : cell {
         // to guarantee no duplicate pairs, higher-indexed entities collect overlaps with lower-indexed entities (also don't overlap with self)
         // this has the added benefit of making sure the 'other' entity here has done their grid iteration first, giving it the chance to set its' 'skip' flag.
-        if self_index >= other_index && (entity_collision_bodies[other_index].collision_flags & .SKIPPED_GRID_ITERATE) == 0 { 
+        if self_index >= other_index && !lfa_is_set(*entity_flags[other_index], .SKIPPED_GRID_ITERATE) { 
             continue;
         }
         if (entity_collision_channels[self_index] & entity_collision_channels[other_index]) == 0 {
@@ -212,19 +213,24 @@ find_overlaps_in_cell :: inline (self_index: s16, x: s64, y: s64, grid_index: s3
         // other_displacement := other_body.velocity * delta_time;
         // other_swept_aabb := sweep_aabb(other_aabb, other_displacement);
         if is_overlap_aabb_aabb(self_swept_aabb, other_aabb) {
-            pair := Pair(s16).{self_index, xx other_index};
+            pair: Contact_Pair = ---;
+            if get_physics_properties_at(self_index).mass == IMMOVABLE_ENTITY_MASS {
+                pair = .{a=xx other_index, b=self_index};
+            } else {
+                pair = .{a=self_index, b=xx other_index};
+            }
             array_add(iteration_collision_overlaps, pair);
         }
     }
 }
 
-collision_grid_iterate :: (entity_index: s16, data: *void, $inner_loop_proc: (entity_a: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
+collision_grid_iterate :: (entity_index: s16, time_step: float, data: *void, $inner_loop_proc: (entity_a: s16, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
     scope_timer();
     self_body := *entity_collision_bodies[entity_index];
     self_aabb := get_aabb_at(entity_index);
 
     // account for velocity
-    self_displacement := self_body.velocity * delta_time;
+    self_displacement := self_body.velocity * time_step;
     self_swept_aabb := sweep_aabb(.{self_aabb.center, self_aabb.extent}, self_displacement);
 
     grid_pos_min := world_to_collision_grid_position(self_swept_aabb.center.xy - self_swept_aabb.extent.xy);

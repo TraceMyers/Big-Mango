@@ -1,7 +1,7 @@
 
 SMALLISH_NUMBER     :: 0.003;
 SMALL_NUMBER        :: 0.0001;
-VERY_SMALL_NUMBER   :: 0.000001;
+VERY_SMALL_NUMBER   :: 0.0000003;
 SMALLEST_OF_NUMBERS :: 0.00000003; // (not really)
 
 INV_PI          :: 1.0 / PI;
@@ -57,7 +57,7 @@ world_direction :: (dir: Direction) -> Vector3 {
     }
 }
 
-local_direction :: (dir: Direction, orientation: Quaternion) -> Vector3 {
+relative_direction :: (dir: Direction, orientation: Quaternion) -> Vector3 {
     if #complete dir == {
     case .UP;
         return up_direction(*orientation);
@@ -68,9 +68,9 @@ local_direction :: (dir: Direction, orientation: Quaternion) -> Vector3 {
     case .RIGHT;
         return right_direction(*orientation);
     case .FORE;
-        return fore_direcion(*orientation);
+        return fore_direction(*orientation);
     case .BACK;
-        return -fore_direcion(*orientation);
+        return -fore_direction(*orientation);
     }
 }
 
@@ -1116,6 +1116,25 @@ linear_decompress_float_21bit :: (u: u64, $min_value: float, $max_value: float) 
     FLOAT_RANGE :: #run (max_value - min_value);
     norm := u.(float) * INV_21_BITS_MAX;
     return min_value + norm * FLOAT_RANGE;
+}
+
+// note that because this is done step-wise, it degrades the amount at each step, not the initial value. meaning, it doesn't actually lose 'proportion_lost_per_second' per second. that name only makes sense if you consider what is happening in the moment of application.
+degrade_over_time :: (x: *$T/VectorAndFloatTypes, proportion_lost_per_second: float, time_step: float) {
+    keep_proportion_per_second := 1 - proportion_lost_per_second;
+    delta := x.* * (keep_proportion_per_second * time_step);
+    #if #run array_find(VectorTypes, T) {
+        if length_squared(delta) > length_squared(x) {
+            x.* = .{};
+        } else {
+            x.* -= delta;
+        }
+    } else {
+        if delta > x {
+            x.* = 0;
+        } else {
+            x.* -= delta;
+        }
+    }
 }
 
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }

@@ -1,5 +1,5 @@
 
-DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
+DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON_PLAYER;
 control_mode := DEFAULT_CONTROL_MODE;
 prev_control_mode := Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
 input_focus := Input_Focus.GAME;
@@ -107,6 +107,14 @@ update_input :: () {
                         if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
                             toggle(*mouse_look_locked);
                         }
+                    case #char "0";
+                        breakpoint_switch_0 = !breakpoint_switch_0;
+                    case #char "9";
+                        breakpoint_switch_9 = !breakpoint_switch_9;
+                    case #char "8";
+                        breakpoint_switch_8 = !breakpoint_switch_8;
+                    case #char "7";
+                        breakpoint_switch_7 = !breakpoint_switch_7;
                     }
                     if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
                         if it.key_code == {
@@ -136,8 +144,6 @@ update_input :: () {
             rm_error("failed to get window dimensions after resize");
         }
     }
-
-    process_entity_input();
 }
 
 get_window_dimensions :: () -> Int_Vector2 {
