@@ -1,0 +1,9 @@
+marketing angles:
+- made by a solo dev (and yet so polished and featureful!)
+    - contrast to UE 5 games wrt stutter
+    - master of optimization
+- an immersive sim in the tradition of ion storm (deus ex) and arkane austin games (prey/deathloop)
+    - in particular, arkane austin's closure means there are a lot of games like *you* who are missing something
+    - (can't match scope and graphical quality, but) the spirit of gameplay that allows for an encourages thoughtful combinations of mechancs/systems in a (late 90's/early 2k's scope) slate of open world environments (basically large levels with lots of options - more in the vein of deus ex than human revolution (no VENTS EVERYWHERE AND STUPID DOOR HACKING GAME)).
+- a gimmick (pick one):
+    - smart ai; an advancement in real-time video game ai technology implicitly linked to things like GOAP (Fear/a million games) and the nemesis system.

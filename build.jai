@@ -1,12 +1,12 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-DO_PROFILING :: true;
+DO_PROFILING :: false;
 COLLISION_DEBUG :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: true;
+GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {
     // make sure environment is set up
@@ -123,8 +123,6 @@ HERE,
     add_build_file("src/prebuild/scope_timer.jai", w);
     // add the definition of get_scope_timer_id() to compilation. its id counter is declared in this file, so it is only usable during compilation.
     add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);
-
-    add_build_file("src/prebuild/entity_construction.jai", w);
 
     add_build_file("src/game.jai", w);
 
@@ -272,6 +270,10 @@ process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64
 }
 
 generate_command_line_code :: (gen_float_command_line_var_procs: [..]string, gen_bool_command_line_var_procs: [..]string, command_line_proc_names: [..]string, w: Workspace) {
+    if gen_float_command_line_var_procs.count == 0 && gen_bool_command_line_var_procs.count == 0 {
+        return;
+    }
+
     builder: String_Builder;
 
     for varname : gen_float_command_line_var_procs {
@@ -518,3 +520,5 @@ HERE;
 #import "String";
 #import "xxHash";
 Program_Print :: #import "Program_Print";
+
+// #load "src/prebuild/entity_construction.jai";

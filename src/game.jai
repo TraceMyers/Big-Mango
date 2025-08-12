@@ -1,5 +1,6 @@
 
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
+// TODO: global entity pointers need to be re-set every frame like before
 
 main :: () {
     rm_log("starting...", header="STARTUP");
@@ -34,12 +35,15 @@ main :: () {
     while !quit {
         respond_to_scope_timer_commands();
         scope_timer("game frame", true);
+        begin_frame();
         update_input();
         process_entity_input();
         scratch_think();
         entity_ai_updates();
+        update_thinks();
         solve_contacts();
         draw_dev_ui();
+        do_debug_draws();
         end_frame();
     }
 
@@ -82,6 +86,12 @@ respond_to_scope_timer_commands :: inline () {
     }
 }
 
+begin_frame :: () {
+    scope_timer();
+
+    array_reserve(*entity_removal_queue, 128);
+}
+
 end_frame :: () {
     scope_timer();
 
@@ -96,7 +106,7 @@ end_frame :: () {
     game_frame_count += 1;
 
     // doing this after game_frame_count advances so the data are correct for the next generation of entities
-    set_global_entities();
+    // set_global_entities();
 
     new_time := seconds_since_init();
     delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
@@ -328,14 +338,14 @@ breakpoint_switch_9: bool;
 breakpoint_switch_8: bool;
 breakpoint_switch_7: bool;
 
-switch_break :: () {
-    if breakpoint_switch_0 {
+switch_break :: (val := -1) {
+    if (val == -1 || val == 0) && breakpoint_switch_0 {
         debug_break();
-    } else if breakpoint_switch_9 {
+    } else if (val == -1 || val == 9) && breakpoint_switch_9 {
         debug_break();
-    } else if breakpoint_switch_8 {
+    } else if (val == -1 || val == 8) && breakpoint_switch_8 {
         debug_break();
-    } else if breakpoint_switch_7 {
+    } else if (val == -1 || val == 7) && breakpoint_switch_7 {
         debug_break();
     }
 }
@@ -344,7 +354,6 @@ switch_break :: () {
 #import "String";
 #import "Red_Mango_Core"()();
 #import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=true, USE_LOCAL_VULKAN_DYNAMIC_LIB=true);
-// #import "Vulkan_With_VMA"()(MEMORY_ALLOCATOR_DEBUG=false, USE_LOCAL_VULKAN_DYNAMIC_LIB=true);
 #import "Window_Creation";
 #import "Math";
 #import "File";
@@ -364,13 +373,10 @@ Input :: #import "Input";
 Zlib :: #import "zlib";
 
 #load "constants.jai";
-#load "physics_properties.jai";
+// #load "physics_properties.jai";
 #load "input.jai";
 #load "vulkan.jai";
 #load "imgui/imgui_impl.jai";
-#load "entity_types.jai";
-#load "entity.jai";
-#load "entity_creature.jai";
 #load "camera.jai";
 #load "load_assets.jai";
 #load "world.jai";
@@ -378,13 +384,18 @@ Zlib :: #import "zlib";
 #load "allocators.jai";
 #load "physics_new.jai";
 #load "draw.jai";
-#load "entity_control.jai";
-// #load "raycast.jai";
+#load "raycast.jai";
 #load "add_to_context.jai";
-#load "collision_types.jai";
 #load "collision.jai";
 #load "collision_grid.jai";
 #load "ai/ai.jai";
+#load "think.jai";
+
+#load "collision_types.jai";
+
+#load "entities/entity.jai";
+#load "entities/entity_control.jai";
+#load "entities/spawn_entity.jai";
 // #load "overlap.jai";
 
 kernel32 :: #system_library "kernel32";

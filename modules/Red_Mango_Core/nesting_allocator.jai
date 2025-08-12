@@ -7,13 +7,18 @@
 
 VALIDATION_PATTERN : u8 : 0xa0;
 
+Nested_Allocation_Ref :: struct {
+    data: *void;
+    info: Nested_Allocation_Info;
+}
+
 Nested_Allocation :: struct {
-    allocation_ref: Nested_Allocation_Ref;
+    ref: Nested_Allocation_Ref;
     count: s32;
 }
 
 Nested_Dynamic_Allocation :: struct {
-    allocation_ref: Nested_Allocation_Ref;
+    ref: Nested_Allocation_Ref;
     count: s32;
     allocated: s32;
 }
@@ -40,9 +45,74 @@ Nested_Allocation_Info :: struct {
     }
 }
 
-Nested_Allocation_Ref :: struct {
-    data: *void;
-    info: Nested_Allocation_Info;
+Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {
+    FIELD_TYPE :: #run -> Type { if T == string then return string; else return []T; };
+    field: FIELD_TYPE;
+    allocation: Nested_Allocation;
+}
+
+array_unordered_remove_by_index :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), i: s32, allow_shrink := true) {
+    new_count := array.field.count - 1;
+    assert(new_count >= 0);
+    if allow_shrink && array.allocation.count > 8 && array.allocation.count > new_count / 4 {
+        assert(basic_validity_check(array.allocation.ref));
+        new_allocated_count := new_count / 2;
+        array_resize(array, allocator, xx new_allocated_count);
+    }
+    if i != array.field.count - 1 {
+        array.field[i] = array.field[array.field.count-1];
+    }
+    array.field.count = new_count;
+}
+
+array_add :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), item: T) 
+#modify {
+    return T != string;
+} {
+    new_count := array.field.count + 1;
+    if array.allocation.count < new_count {
+        new_allocated_count := ceil_to_pow2(new_count);
+        array_resize(array, allocator, xx new_allocated_count);
+    }
+    array.field.count = new_count;
+    array.field[array.field.count-1] = item;
+}
+
+array_append :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), items: array.FIELD_TYPE) {
+    new_count := array.field.count + field.count;
+    if array.allocation.count < new_count {
+        new_allocated_count := ceil_to_pow2(new_count);
+        array_resize(array, allocator, xx new_allocated_count);
+    }
+    old_count := array.field.count;
+    array.field.count = new_count;
+    for 0..items.count-1 {
+        array.field[it+old_count] = items[it];
+    }
+}
+
+array_set :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), items: array.FIELD_TYPE) {
+    array_resize(array, allocator, xx items.count);
+    array.field.count = items.count;
+    for 0..items.count-1 {
+        array.field[it] = items[it];
+    }
+}
+
+array_resize :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), new_count: s32) {
+    assert(new_count >= 0);
+    new_ref := ifx new_count > 0 then na_alloc(allocator, new_count * size_of(T)) else .{};
+    if basic_validity_check(array.allocation.ref) {
+        copy_count := min(array.field.count, new_count);
+        if copy_count > 0 {
+            memcpy(new_ref.data, array.allocation.ref.data, copy_count * size_of(T));
+        }
+        na_free(allocator, *array.allocation.ref);
+    }
+    array.allocation.ref = new_ref;
+    array.allocation.count = xx new_count;
+    array.field.data = array.allocation.ref.data;
+    array.field.count = new_count;
 }
 
 nack_initialize :: (using allocator: *Nesting_Allocator_Collection, parent_allocator: Allocator, small_list_count := 16, medium_list_count := 4, large_list_count := 0) {

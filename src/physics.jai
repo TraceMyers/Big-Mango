@@ -811,7 +811,7 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
 // ---- maybe use later stuff
 
 // --------------------------------------------------------------------------------------------------------------------------------- ccd
-// solve_potential_contact_sphere_sphere :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
+// solve_potential_contact_sphere_sphere :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
 //     sphere_a := *body_a.shape.sphere;
 //     sphere_b := *body_b.shape.sphere;
 
@@ -891,7 +891,7 @@ solve_collision_sphere_sphere :: (pos_a_beg: Vector3, pos_a_end: Vector3, forwar
 //     return is_contact;
 // } @capture_body_as_struct
 
-// solve_potential_contact_sphere_rect :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
+// solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
 //     sphere_a    := *body_a.shape.sphere;
 //     rect_b      := *body_b.shape.rect;
 

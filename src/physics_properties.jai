@@ -33,20 +33,7 @@ PHYSICS_PROPERTY_TEMPLATE_CREATE_INFOS :: Enumarray_Create_Info.[
 MAX_MASS :: 8192.0;
 
 Physics_Properties :: struct {
-    mass := 1.0;
-    friction_bias := 0.0;
-    // todo: linear accel discrete (or continuous?) function
-    friction_multiplier := 1.0;
-    linear_acceleration := 190.0;
-    accel_opposite_direction_multiplier := 2.0;
-    fast_start_speed_max := 5.0;
-    fast_start_speed_multiplier := 3.0;
-    linear_speed_max := 30.0;
-    fall_speed_max := 100.0;
-    gravity_accel := 150.0;
-    jump_delta_velocity := 50.0;
-    body_elasticity := 0.1;
-    default_collision_channels: Collision_Channels = .DEFAULT;
+
 }
 
 Physics_Properties_Dynamic :: struct {

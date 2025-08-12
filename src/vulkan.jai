@@ -1,7 +1,7 @@
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // config
 
-UNLIT :: true;
+UNLIT :: false;
 ENABLE_VALIDATION_LAYERS :: true;
 
 LINES_MAX :: 65_536;
@@ -155,12 +155,6 @@ render_frame :: () {
     draw_extent.height = draw_image.extent.height;
 
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
-    vp_mat: Matrix4 = ---;
-    if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
-        vp_mat = view_projection_matrix(context.camera_1, viewport);
-    } else {
-        vp_mat = view_projection_matrix(context.camera_2, viewport);
-    }
 
     prepare_lights();
 
@@ -181,24 +175,31 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    draw_lines(cmd, *vp_mat);
-    draw_spheres(cmd, *vp_mat);
+    if context.player_entity != null {
+        attached_camera := get_entity(context.player_entity.attached_camera);
+        if attached_camera != null {
+            vp_mat := view_projection_matrix(attached_camera, viewport);
 
-    random_seed(*collision_mesh_color_state, 257);
-    entity_ct := get_entity_count();
-    for 0..entity_ct-1 {
-        entity := get_entity_at(it);
-        #if DRAW_COLLISION_MESHES {
-            collider_color := random_color4f(a=0.25, random_state=*collision_mesh_color_state);
-        }
-        if entity.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE then continue;
-        #if DRAW_COLLISION_MESHES {
-            draw_collision_mesh(cmd, entity, *vp_mat, collider_color);
-        }
-        meshes := get_entity_meshes_at(it);
-        if meshes.count == 0 then continue;
-        for *emesh : meshes {
-            draw_mesh(cmd, entity, emesh, *vp_mat);
+            draw_lines(cmd, *vp_mat);
+            draw_spheres(cmd, *vp_mat);
+
+            random_seed(*collision_mesh_color_state, 257);
+            for *e : entities {
+                #if DRAW_COLLISION_MESHES {
+                    collider_color := random_color4f(a=0.25, random_state=*collision_mesh_color_state);
+                }
+                if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
+                    continue;
+                }
+                #if DRAW_COLLISION_MESHES {
+                    draw_collision_mesh(cmd, e, *vp_mat, collider_color);
+                }
+                meshes := e.meshes.field;
+                if meshes.count == 0 then continue;
+                for *emesh : meshes {
+                    draw_mesh(cmd, e, emesh, *vp_mat);
+                }
+            }
         }
     }
 
@@ -2641,30 +2642,30 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4,
     if shape.type == {
     case .NONE;
     case .SPHERE;
-        emesh := Entity_Mesh.{sphere_mesh_mid_poly, albedo};
+        emesh := Mesh_Instance.{sphere_mesh_mid_poly, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     case .CAPSULE;
         using shape.capsule;
         // todo: make a capsule mesh shader that actually works so this doesn't have to risk a million capsule meshes being made
         capsule_mesh := get_or_create_capsule_mesh(half_height*2.0, radius);
-        emesh := Entity_Mesh.{capsule_mesh, albedo};
+        emesh := Mesh_Instance.{capsule_mesh, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     case .RECT;
-        emesh := Entity_Mesh.{plane_mesh, albedo};
+        emesh := Mesh_Instance.{plane_mesh, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     case .BOX;
-        emesh := Entity_Mesh.{cube_mesh, albedo};
+        emesh := Mesh_Instance.{cube_mesh, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     case .AABB;
-        emesh := Entity_Mesh.{cube_mesh, albedo};
+        emesh := Mesh_Instance.{cube_mesh, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     case .HALF_SPACE;
-        emesh := Entity_Mesh.{plane_mesh, albedo};
+        emesh := Mesh_Instance.{plane_mesh, albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat);
     }
 }
 
-draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Entity_Mesh, view_projection: *Matrix4) {
+draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4) {
     mesh := emesh.data;
     model := make_translation_matrix4(entity.center);
     rot := rotation_matrix(Matrix4, entity.orientation);
@@ -3161,55 +3162,10 @@ Mesh_Vertex :: struct {
     normal: Vector3;
 }
 
-Mesh_Data_Buffer_Type :: enum u8 {
-    VERTEX; 
-    INDEX;
-}
-
-Mesh_Albedo_Type :: enum u8 {
-    TEXTURE;
-    CONSTANT;
-}
-
-Mesh_Albedo :: struct {
-    type: Mesh_Albedo_Type;
-    tint := Color4f.{1,1,1,1};
-}
-
-Mesh :: struct {
-    vbo: Mesh_Data_Buffer;
-    ibo: Mesh_Data_Buffer;
-    primitive_type: Collision_Shape_Type = 0;
-}
 
 Hashed_Mesh :: struct {
     hash: u64;
     mesh: Mesh;
-}
-
-Render_Buffer :: struct {
-    buffer: VkBuffer;
-    allocation: VmaAllocation;
-}
-
-Mesh_Index_Type :: enum u8 {
-    U16 :: VkIndexType.UINT16; 
-    U32 :: VkIndexType.UINT32;
-}
-
-Index_Buffer :: struct {
-    type: Mesh_Index_Type;
-    union {
-        _u16: []u16;
-        _u32: []u32 = ---;
-    }
-}
-
-Mesh_Data_Buffer :: struct {
-    using #as rb: Render_Buffer;
-    count: u32;
-    type: Mesh_Data_Buffer_Type;
-    index_type: Mesh_Index_Type;
 }
 
 Lights :: struct {
@@ -3238,6 +3194,52 @@ Sphere_Draw_Data :: struct {
     radius: float;
     color: Color4f;
     poly_count: Sphere_Poly_Count;
+}
+
+Mesh_Albedo_Type :: enum u8 {
+    TEXTURE;
+    CONSTANT;
+}
+
+Mesh_Albedo :: struct {
+    type: Mesh_Albedo_Type;
+    tint := Color4f.{1,1,1,1};
+}
+
+Mesh_Data_Buffer_Type :: enum u8 {
+    VERTEX; 
+    INDEX;
+}
+
+Mesh_Index_Type :: enum u8 {
+    U16 :: VkIndexType.UINT16; 
+    U32 :: VkIndexType.UINT32;
+}
+
+Index_Buffer :: struct {
+    type: Mesh_Index_Type;
+    union {
+        _u16: []u16;
+        _u32: []u32 = ---;
+    }
+}
+
+Mesh_Data_Buffer :: struct {
+    using #as rb: Render_Buffer;
+    count: u32;
+    type: Mesh_Data_Buffer_Type;
+    index_type: Mesh_Index_Type;
+}
+
+Mesh :: struct {
+    vbo: Mesh_Data_Buffer;
+    ibo: Mesh_Data_Buffer;
+    primitive_type: Collision_Shape_Type = 0;
+}
+
+Render_Buffer :: struct {
+    buffer: VkBuffer;
+    allocation: VmaAllocation;
 }
 
 lines: [..]Line_Data;

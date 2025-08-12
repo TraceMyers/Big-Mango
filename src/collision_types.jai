@@ -25,23 +25,9 @@ Collision_Shape :: struct {
     };
 }
 
-TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS, .SKIPPED_GRID_ITERATE];
-
-// the boundaries of this data are set around whatever is needed to calculate collisions.
-// this isn't world object model situation, but I still think "Body" is fitting.
-Collision_Body :: struct {
-    center: Vector3;
-    previous_center: Vector3;
-    velocity: Vector3;
-    shape: Collision_Shape;
-    orientation: Quaternion = QUATERNION_IDENTITY;
-    angular_velocity: Vector3;
-    inv_mass: float;
-}
-
 Contact_Pair :: struct {
-    a: s16;
-    b: s16;
+    a: Entity_Ref;
+    b: Entity_Ref;
     contact_normal: Vector3;
     contact_tangent: Vector3;
     normal_impulse_sum: float;
@@ -62,35 +48,10 @@ feed_contact_impulse :: inline (pair: *Contact_Pair, normal_magnitude: float, ta
     return out_normal_magnitude, out_tangent_magnitude;
 }
 
-Compressed_Axes :: struct {
-    fore: u64;
-    up: u64;
-    right: u64;
-}
-
 Axes :: struct {
     fore: Vector3;
     up: Vector3;
     right: Vector3;
-}
-
-compress_axes :: (quat: Quaternion, out_axes: *Compressed_Axes) {
-    fore    := fore_direction(*quat);
-    out_axes.fore   = linear_compress_norm_vector3(fore);
-    up      := up_direction(*quat);
-    out_axes.up     = linear_compress_norm_vector3(up);
-    right   := right_direction(*quat);
-    out_axes.right  = linear_compress_norm_vector3(right);
-}
-
-decompress_axes :: (compressed: *Compressed_Axes, fore: *Vector3, up: *Vector3, right: *Vector3) {
-    fore.*  = linear_decompress_norm_vector3(compressed.fore);
-    up.*    = linear_decompress_norm_vector3(compressed.up);
-    right.* = linear_decompress_norm_vector3(compressed.right);
-}
-
-decompress_axes :: inline (compressed: *Compressed_Axes, decompressed: *Axes) {
-    decompress_axes(compressed, *decompressed.fore, *decompressed.up, *decompressed.right);
 }
 
 Find_Overlaps_Data :: struct {
@@ -142,11 +103,13 @@ Collision_Grid_Cell_Flags :: enum_flags u8 {
     JUST_ALTERED;
 }
 
+Collision_Grid_Item :: Entity_Ref;
+
 Collision_Grid_Allocation :: union {
+    dynamic_array: Nested_Array(Collision_Grid_Item, COLLISION_GRID_ALLOCATOR_MIN_SIZE) = ---;
     inline_allocation: struct {
-        array: [7]s16;
-        count: s8;
-        zero_if_inline: u8; // overlaps with nesting allocation bit pattern & bin. if the allocation_ref has been set, this byte should be nonzero
+        array: [5]Collision_Grid_Item;
+        count: s32;
+        zero_if_inline: u8;
     };
-    allocation_ref: Nested_Allocation_Ref = ---;
 }

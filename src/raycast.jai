@@ -51,26 +51,22 @@ raycast_can_hit_back_face :: inline (using request: Raycast_Request, origin_insi
 } 
 
 raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
-    collider_data: Packed_Collider = ---;
-    // todo: grid + sphere intersection test
     cur_result: Raycast_Result = ---;
     out_result.* = .{hit_distance=FLOAT32_MAX};
-    for 0..entities.count-1 {
+    // todo: grid + sphere intersection test
+    for e : entities {
         cur_result.is_hit = false;
-        e_phys := *entity_physics_core[it];
-        e_props := get_physics_properties_at(it);
-        packed_collider := Packed_Collider.{e_props.body_collider, e_phys.position, e_phys.orientation};
-        if e_props.body_collider.type == {
+        if e.shape.type == {
         case .SPHERE;
-            raycast_sphere(request, packed_collider, *cur_result, it);
+            raycast_sphere(request, e.body, *cur_result);
         case .RECT;
-            raycast_rect(request, packed_collider, *cur_result, it);
+            // raycast_rect(request, packed_collider, *cur_result, it);
         case;
             continue;
         }
         if cur_result.is_hit && cur_result.hit_distance < out_result.hit_distance {
             out_result.* = cur_result;
-            out_result.hit_entity = .{xx it, entities[it].id};
+            out_result.hit_entity = e.ref;
         }
     }
     return out_result.is_hit;
@@ -89,12 +85,12 @@ raycast_sphere_hit_calculation :: inline (sphere_center: Vector3, sphere_radius:
     out_result.hit_distance = distance(ray_origin, out_result.hit_location);
 }
 
-raycast_sphere :: (using request: Raycast_Request, collider_data: Packed_Collider, out_result: *Raycast_Result, entity_index: s64) -> bool {
+raycast_sphere :: (using request: Raycast_Request, body: Physics_Body, out_result: *Raycast_Result) -> bool {
     assert(is_normalized(ray.direction, 0.0001));
     out_result.* = .{};
 
-    sphere_center    := collider_data.position;
-    sphere_radius    := collider_data.collider.sphere.radius;
+    sphere_center    := body.center;
+    sphere_radius    := body.shape.sphere.radius;
     sphere_radius_sq := square(sphere_radius);
 
     toward_ray_origin_diff := ray.origin - sphere_center;

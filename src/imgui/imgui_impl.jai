@@ -577,20 +577,20 @@ add_physics_debugger :: () {
 add_entity_pocket :: () {
     if CollapsingHeader("entity pocket") {
         if Button("capsule") {
-            entity := spawn_entity(.PERSON, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
-            test_ref := entity.ref;
-            entity_phys_props := get_entity_physics_properties(test_ref);
-            {
-                using entity_phys_props;
-                body_elasticity = 1.0;
-                // body_collider.type = .CAPSULE;
-                // body_collider.capsule.half_height = 10.0;
-                // body_collider.capsule.radius = 7.0;
-            }
-            // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
-            capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
-            set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
-            entity.center.z = 100.0;
+            // entity := spawn_entity(.PERSON, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
+            // test_ref := entity.ref;
+            // entity_phys_props := get_entity_physics_properties(test_ref);
+            // {
+            //     using entity_phys_props;
+            //     body_elasticity = 1.0;
+            //     // body_collider.type = .CAPSULE;
+            //     // body_collider.capsule.half_height = 10.0;
+            //     // body_collider.capsule.radius = 7.0;
+            // }
+            // // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
+            // capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
+            // set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
+            // entity.center.z = 100.0;
         }
     }
 }

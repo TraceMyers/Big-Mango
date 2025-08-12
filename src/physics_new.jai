@@ -1,55 +1,54 @@
 
 move_stuff :: (time_step: float) {
     scope_timer();
-    entity_ct := get_entity_count();
-    for 0..entity_ct-1 {
-        movement := get_movement_at(it);
-        body := get_body_at(it);
-        props := get_physics_properties_at(it);
-        body.previous_center = body.center;
+
+
+    for 0..entities.count-1 {
+        e := *entities[it];
+        e.previous_center = e.center;
 
         // friction (in future just handle in the physics solving)
-        if lfa_is_set(*entity_flags[it], .ACCELERATE_IN_3D) {
-            apply_friction(*body.velocity, props, time_step);
+        if is_set(*e.flags, .ACCELERATE_IN_3D) {
+            // apply_friction(*e.velocity, e.physics_properties.friction_multiplier, e.physics_properties.friction_bias, time_step);
         } else {
-            apply_friction(*body.velocity.xy, props, time_step);
+            apply_friction(*e.velocity.xy, e.physics_properties.friction_multiplier, e.physics_properties.friction_bias, time_step);
         }
 
-        body.center += body.velocity * time_step;
+        e.center += e.velocity * time_step;
 
         MAX_ANGULAR_SPEED :: 1.0;
-        angular_speed_sq := length_squared(body.angular_velocity);
+        angular_speed_sq := length_squared(e.angular_velocity);
         if angular_speed_sq > MAX_ANGULAR_SPEED {
             angular_speed := sqrt(angular_speed_sq);
-            body.angular_velocity *= MAX_ANGULAR_SPEED / angular_speed;
+            e.angular_velocity *= MAX_ANGULAR_SPEED / angular_speed;
         }
 
-        rotation_axis_scaled := body.angular_velocity * time_step;
+        rotation_axis_scaled := e.angular_velocity * time_step;
         rotation_axis_scalar_len_sq := length_squared(rotation_axis_scaled);
         if rotation_axis_scalar_len_sq > VERY_SMALL_NUMBER {
             rotation_magnitude := sqrt(rotation_axis_scalar_len_sq);
             rotation_axis := rotation_axis_scaled / rotation_magnitude;
-            rotate(*body.orientation, rotation_axis, rotation_magnitude);
+            rotate(e, rotation_axis, rotation_magnitude);
         }
 
-        if !lfa_is_set(*entity_flags[it], .ACCELERATE_IN_3D) {
-            new_speed_sq := length_squared(body.velocity.xy);
-            if new_speed_sq > square(props.linear_speed_max) {
+        if !is_set(*e.flags, .ACCELERATE_IN_3D) {
+            new_speed_sq := length_squared(e.velocity.xy);
+            if new_speed_sq > square(e.physics_properties.linear_speed_max) {
                 new_speed := sqrt(new_speed_sq);
-                body.velocity.xy *= props.linear_speed_max / new_speed;
+                e.velocity.xy *= e.physics_properties.linear_speed_max / new_speed;
             }
-            if abs(body.velocity.z) > props.fall_speed_max {
-                body.velocity.z = props.fall_speed_max * sign(body.velocity.z);
+            if abs(e.velocity.z) > e.physics_properties.fall_speed_max {
+                e.velocity.z = e.physics_properties.fall_speed_max * sign(e.velocity.z);
             }
         }
 
-        // if body.center.z <= Z_KILL_FLOOR {
-        //     queue_entity_deletion(entity_ref(it));
-        // }
+        if e.center.z <= Z_KILL_FLOOR {
+            queue_entity_removal(e.ref);
+        }
 
-        VELOCITY_REGULATION_DAMPEN_PER_SECOND :: 0.2; 
-        degrade_over_time(*body.velocity, VELOCITY_REGULATION_DAMPEN_PER_SECOND, time_step);
-        degrade_over_time(*body.angular_velocity, VELOCITY_REGULATION_DAMPEN_PER_SECOND, time_step);
+        VELOCITY_REGULATION_DAMPEN_PER_SECOND :: 0.1; 
+        degrade_over_time(*e.velocity, VELOCITY_REGULATION_DAMPEN_PER_SECOND, time_step);
+        degrade_over_time(*e.angular_velocity, VELOCITY_REGULATION_DAMPEN_PER_SECOND, time_step);
     }
 }
 
@@ -71,12 +70,12 @@ apply_acceleration :: (e: *Entity) {
 
     force := e.linear_input * (linear_accel * e.physics_properties.mass);
     if length_squared(force) > VERY_SMALL_NUMBER {
-        add_linear_impulse(e, force, 1./200);
+        add_linear_impulse(e, .{force, 1./100});
     }
     e.linear_input = .{};
 }
 
-apply_friction :: (velocity: *$T/VectorTypes, props: *Physics_Properties, time_step: float) {
+apply_friction :: (velocity: *$T/VectorTypes, friction_multiplier: float, friction_bias: float, time_step: float) {
     linear_speed_sq := length_squared(velocity.*);
     if linear_speed_sq > VERY_SMALL_NUMBER {
         linear_speed := sqrt(linear_speed_sq);
@@ -84,7 +83,7 @@ apply_friction :: (velocity: *$T/VectorTypes, props: *Physics_Properties, time_s
 
         // todo: material friction, static friction
         ground_friction := 0.4;
-        friction_coef := max(ground_friction * props.friction_multiplier + props.friction_bias, 0);
+        friction_coef := max(ground_friction * friction_multiplier + friction_bias, 0);
         friction_accel := friction_coef * 150.0; // todo: use gravity accel? but what about cameras?
         friction_delta := friction_accel * time_step;
 

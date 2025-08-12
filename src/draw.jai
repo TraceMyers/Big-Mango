@@ -1,20 +1,37 @@
 
-draw_line :: inline (start: Vector3, end: Vector3, color: Color4f) {
-    draw_line(start, end, color, color);
+do_debug_draws :: () {
+    for #v2 < 0..line_draws.count-1 {
+        line := *line_draws[it];
+        array_add(*lines, .{
+            .{
+                position = .{xyz=line.start,w=1},
+                color = line.start_color
+            }, 
+            .{
+                position = .{xyz=line.end,w=1},
+                color = line.end_color
+            }
+        });
+        if line.start_point_radius > 0 {
+            draw_sphere(line.start, line.start_point_radius, line.start_color);
+        }
+        if line.end_point_radius > 0 {
+            draw_sphere(line.end, line.end_point_radius, line.end_color);
+        }
+        line.time_remaining -= delta_time;
+        if line.time_remaining <= 0 {
+            array_unordered_remove_by_index(*line_draws, it);
+        }
+    }
 }
 
-draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f) {
+draw_line :: inline (start: Vector3, end: Vector3, color: Color4f, duration := 0.0) {
+    draw_line(start, end, color, color, duration);
+}
+
+draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, duration := 0.0, start_point_radius := 0.0, end_point_radius := 0.0) {
     if lines.count + 2 > LINES_MAX then return;
-    array_add(*lines, .{
-        .{
-            position = .{xyz=start,w=1},
-            color = start_color
-        }, 
-        .{
-            position = .{xyz=end,w=1},
-            color = end_color
-        }
-    });
+    array_add(*line_draws, .{start, end, start_color, end_color, start_point_radius, end_point_radius, duration});
 }
 
 draw_sphere :: (center: Vector3, radius: float, color: Color4f, poly_count := Sphere_Poly_Count.MEDIUM) {
@@ -36,27 +53,11 @@ draw_aabb :: (aabb: AABB, color: Color4f) {
 }
 
 draw_all_body_collider_aabbs :: () {
-    for 1..entity_patch_infos.count-1 {
-        if entity_patch_infos[it].patch_flags & .STATIC_MESH {
-            e := get_entity_at(it);
-            draw_aabb(e.body.shape, e.center, e.orientation, COLOR4F_RED);
-        }
+    for entities {
+        draw_aabb(it.shape, it.center, it.orientation, COLOR4F_RED);
     }
 }
 
-draw_line_with_points :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, start_point_color: Color4f, end_point_color: Color4f, point_radius := 0.4, omit_start_point := false, omit_end_point := false) {
-    draw_line(start, end, start_color, end_color);
-    if !omit_start_point {
-        draw_sphere(start, point_radius, start_point_color, .LOW);
-    }
-    if !omit_end_point {
-        draw_sphere(end, point_radius, end_point_color, .LOW);
-    }
-}
-
-draw_line_with_points :: inline (start: Vector3, end: Vector3, color: Color4f, point_radius := 0.4, omit_start_point := false, omit_end_point := false) {
-    draw_line_with_points(start, end, color, color, color, color, point_radius, omit_start_point, omit_end_point);
-}
 
 // draw_capsule :: (request: Capsule_Draw_Request) {
 //     array_add(*capsules_to_draw, request);
@@ -84,3 +85,15 @@ Capsule_Draw_Push_Constants :: struct {
     color_b: float;
     color_a: float;
 }
+
+Line_Draw :: struct {
+    start: Vector3;
+    end: Vector3;
+    start_color: Color4f;
+    end_color: Color4f;
+    start_point_radius: float;
+    end_point_radius: float;
+    time_remaining: float;
+}
+
+line_draws: [..]Line_Draw;

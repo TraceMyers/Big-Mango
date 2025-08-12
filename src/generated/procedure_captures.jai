@@ -36,7 +36,7 @@ Procedure_Capture_Data :: struct {
 
 Procedure_Capture_Duplicate :: struct {
 
-	solve_potential_contact_sphere_rect :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
+	solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
 		using procedure_capture_data.solve_potential_contact_sphere_rect;
 	    sphere_a    = *body_a.shape.sphere;
 	    rect_b      = *body_b.shape.rect;
@@ -64,7 +64,7 @@ Procedure_Capture_Duplicate :: struct {
 	
 	} @struct_capture_duplicate 
 	
-	solve_potential_contact_sphere_sphere :: (body_a: Collision_Body, axes_a: Axes, body_b: Collision_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
+	solve_potential_contact_sphere_sphere :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
 		using procedure_capture_data.solve_potential_contact_sphere_sphere;
 	    sphere_a    = *body_a.shape.sphere;
 	    sphere_b    = *body_b.shape.sphere;

@@ -11,6 +11,14 @@ bound_array :: inline (from_data: []$T) -> Bound_Array(T) {
     return buf;
 }
 
+bound_array_remove_at_swap :: inline (buf: *Bound_Array($T), i: s64) {
+    assert(buf.array.count > 0);
+    if i != buf.array.count-1 {
+        buf.array[i] = buf.array[buf.array.count-1];
+    }
+    buf.array.count -= 1;
+}
+
 bound_array_add :: inline (buf: *Bound_Array($T)) -> *T {
     assert(buf.array.count + 1 <= buf.max);
     buf.array.count += 1;

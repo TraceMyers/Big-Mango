@@ -17,7 +17,7 @@ Camera_Settings_Perspective :: struct {
     aspect_ratio := 0.0; // 0 for default
 }
 
-Entity_Camera :: struct {
+Camera :: struct {
     projection := Camera_Projection.NONE;
     using settings: union {
         orthographic: Camera_Settings_Orthographic = ---;
@@ -25,8 +25,8 @@ Entity_Camera :: struct {
     }
 }
 
-camera_make :: (projection: Camera_Projection) -> Entity_Camera {
-    c := Entity_Camera.{projection=projection};
+camera_make :: (projection: Camera_Projection) -> Camera {
+    c := Camera.{projection=projection};
     if #complete projection == {
     case .NONE;
         assert(false);
@@ -39,10 +39,10 @@ camera_make :: (projection: Camera_Projection) -> Entity_Camera {
 } 
 
 view_matrix :: (camera: *Entity) -> Matrix4 {
-    assert((camera.patch_flags & .CAMERA) != 0);
+    assert(is_set(*camera.flags, .USES_CAMERA));
     // making inverse of transform that takes the forward axis to the forward vector. we can get this effect
     // by just passing the relative normalized axes of the camera
-    rotation := make_matrix_from_rows(right_direction(camera), -up_direction(camera), -fore_direction(camera));
+    rotation := make_matrix_from_rows(camera.axes.right, -camera.axes.up, -camera.axes.fore);
     // 'moving the world' into place by removing the camera's position
     return translate(rotation, -camera.center);
 }
@@ -56,7 +56,7 @@ get_aspect_ratio :: inline (camera: *Entity, viewport: Vector2, $which := enum {
 }
 
 projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
-    assert((camera.patch_flags & .CAMERA) != 0);
+    assert(is_set(*camera.flags, .USES_CAMERA));
     if camera.projection == .ORTHOGRAPHIC {
         v := viewport / (2.0 * camera.orthographic.scale);
         return orthographic_projection_matrix(-v.x, v.x, -v.y, v.y, NEAR_PLANE, FAR_PLANE, true);
@@ -68,7 +68,7 @@ projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
 }
 
 view_projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
-    assert((camera.patch_flags & .CAMERA) != 0);
+    assert(is_set(*camera.flags, .USES_CAMERA));
     view := view_matrix(camera);
     proj := projection_matrix(camera, viewport);
     return proj * view;

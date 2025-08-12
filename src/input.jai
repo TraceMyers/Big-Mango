@@ -115,6 +115,10 @@ update_input :: () {
                         breakpoint_switch_8 = !breakpoint_switch_8;
                     case #char "7";
                         breakpoint_switch_7 = !breakpoint_switch_7;
+                    case .MOUSE_BUTTON_LEFT;
+                        if context.player_entity != null {
+                            set(*context.player_entity.flags, .USE_INTERACTION_QUEUED);
+                        }
                     }
                     if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
                         if it.key_code == {
