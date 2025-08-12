@@ -58,6 +58,11 @@ draw_all_body_collider_aabbs :: () {
     }
 }
 
+draw_crosshair_line :: (center: Vector3, center_dist: float, length: float, dir: Vector3) {
+    cross_inner_pt := center - dir * center_dist;
+    cross_outer_pt := cross_inner_pt - dir * length;
+    draw_line(cross_inner_pt, cross_outer_pt, .{r=1,g=1,b=1});
+}
 
 // draw_capsule :: (request: Capsule_Draw_Request) {
 //     array_add(*capsules_to_draw, request);

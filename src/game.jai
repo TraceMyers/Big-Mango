@@ -38,10 +38,10 @@ main :: () {
         begin_frame();
         update_input();
         process_entity_input();
-        scratch_think();
         entity_ai_updates();
         update_thinks();
         solve_contacts();
+        scratch_think();
         draw_dev_ui();
         do_debug_draws();
         end_frame();

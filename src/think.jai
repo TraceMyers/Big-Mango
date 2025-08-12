@@ -14,11 +14,12 @@ player_entity_think :: (e: *Entity) {
             set(*holding_entity.flags, .MOVED_BY_PHYSICS);
             set(*holding_entity.flags, .APPLY_GRAVITY);
             holding_entity.collision_channels = .DEFAULT;
+            holding_entity.velocity = e.velocity;
             add_linear_impulse(holding_entity, .{look_direction(e) * 10_000.0 * holding_entity.physics_properties.mass, 1./100.0});
             e.holding_entity = .{};
         } else {
-            request: Raycast_Request;
             result: Raycast_Result;
+            request: Raycast_Request;
             request.ray = .{look_origin(e), look_direction(e)};
             if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
                 e.holding_entity = get_entity(result.hit_entity).ref;

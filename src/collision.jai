@@ -9,18 +9,22 @@
 // cell size: 10 x 10 
 // world cell counts: 200 x 200 = 80_000
 
-// todo: woops I made the whole collision grid using backing data indices to represent entities, when I need to be using
-// reference indices. this problem comes to light when an entity is deleted.
-// note: i made the thing with the specific rule that backing data indices don't persist across frames, which is why the Entity_Ref exists and I forgot about the importance of it this whole time.
-
 // note:
 // quickest path to fun: 
 //(x)pick up object
-//(x)throw object (technically. doesn't feel great)
+//(x)throw object
 // - automatic door
 // - human moves through door if open
-// - physics button controlling automatic door
+// - physics button controlling door
 // - throw object at button
+
+// later
+// - planned jump; jumping is typically awkward. could I make decent way of doing jumps that isn't awkward but fits a real time first person thinky actionish vibe? closest thing I can think of is talos principle jump, but it's too puzzle-gamey. something in-between would be nice.
+// - there should be a basketball court in at least one level, and it should make use of the following gameplay elements:
+// (this is fun & cheap make-your-own-fun gameplay
+//      - throwing ball into hoop (normal)
+//      - throwing ball into hoop (using super throw)
+//      - jumping up and dropping ball into hoop (using super jump)
 
 AABB_OVERLAP_BUFFER :: 1.0;
 PHYSICS_FIXED_TIME_STEP :: 1.0 / 240.0;
@@ -206,16 +210,16 @@ solve_contact_velocities :: () {
                 velocity_b := entity_b.velocity + b_angular_velocity;
 
                 // todo: elasticity - is this right?
-                restitution := (entity_a.physics_properties.elasticity + entity_b.physics_properties.elasticity) * 0.5;
-
-                if entity_a == context.ball && entity_b == context.ground {
-                    switch_break();
-                }
+                assert(entity_a.physics_properties.elasticity >= 0 && entity_a.physics_properties.elasticity <= 1);
+                assert(entity_b.physics_properties.elasticity >= 0 && entity_b.physics_properties.elasticity <= 1);
+                restitution_pt1 := (entity_a.physics_properties.elasticity - entity_b.physics_properties.elasticity);
+                restitution_pt2 := (entity_a.physics_properties.elasticity + entity_b.physics_properties.elasticity) * 0.5;
+                // restitution := (restitution_pt1 + restitution_pt2) * 0.5;
+                restitution := restitution_pt2;
 
                 if entity_b.physics_properties.mass == IMMOVABLE_ENTITY_MASS {
                     normal_impulse_magnitude := min(dot(entity_a.velocity, contact_result.normal), 0) * (1 + restitution);
                     entity_a.velocity -= contact_result.normal * normal_impulse_magnitude;
-                    switch_break(9);
                     fucking_god_damn_it := 0;
                 } else {
                     effective_mass: float;

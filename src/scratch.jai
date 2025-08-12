@@ -73,6 +73,18 @@ scratch_think :: () {
         }
     }
 
+    if control_mode & FIRST_PERSON_CONTROL_MODE && context.player_entity != null {
+        attached_camera := try_get_entity(*context.player_entity.attached_camera);
+        if attached_camera != null {
+            pos_in_front := attached_camera.center + attached_camera.axes.fore;
+            draw_crosshair_line(pos_in_front, 0.1, 0.05, -attached_camera.axes.right);
+            draw_crosshair_line(pos_in_front, 0.1, 0.05, attached_camera.axes.right);
+            draw_crosshair_line(pos_in_front, 0.1, 0.05, -attached_camera.axes.up);
+            draw_crosshair_line(pos_in_front, 0.1, 0.05, attached_camera.axes.up);
+        }
+    }
+
+
     // spawn_timer -= delta_time;
     // if spawn_timer < 0 {
     //     ai_entity := spawn_human("ai guy", center = .{z=10});

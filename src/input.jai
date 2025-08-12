@@ -4,7 +4,9 @@ control_mode := DEFAULT_CONTROL_MODE;
 prev_control_mode := Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
 input_focus := Input_Focus.GAME;
 previous_input_focus: Input_Focus;
-mouse_look_locked: bool;
+
+cursor_locked_to_center: bool;
+cursor_visible: bool;
 
 Input_Focus :: enum {
     GAME;
@@ -33,8 +35,11 @@ _input :: (stage: Boot_Stage) -> bool {
         // get initial dimensions because we won't update this until the first resize
         if window != null {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
+            SetForegroundWindow(window);
+            Win32.SetCapture(window);
+            toggle_cursor_first_person_mode();
             return true;
-        } 
+        }
         return false;
     } else {
         return true;
@@ -105,7 +110,7 @@ update_input :: () {
                         control_mode = .FIRST_PERSON_CAMERA_ONLY;
                     case #char "M";
                         if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
-                            toggle(*mouse_look_locked);
+                            toggle_cursor_first_person_mode();
                         }
                     case #char "0";
                         breakpoint_switch_0 = !breakpoint_switch_0;
@@ -148,6 +153,28 @@ update_input :: () {
             rm_error("failed to get window dimensions after resize");
         }
     }
+
+    if cursor_locked_to_center {
+        window_rect: Win32.RECT;
+        Win32.GetWindowRect(window, *window_rect);
+        SetCursorPos(window_rect.left + (window_rect.right - window_rect.left) / 2, window_rect.top + (window_rect.bottom - window_rect.top) / 2);
+    }
+}
+
+toggle_cursor_first_person_mode :: () {
+    if cursor_locked_to_center {
+        cursor_locked_to_center = false;
+        cursor_visible = true;
+    } else {
+        cursor_locked_to_center = true;
+        cursor_visible = false;
+    }
+    Win32.ShowCursor(cursor_visible.(s32));
+}
+
+toggle_cursor_visible :: () {
+    toggle(*cursor_visible);
+    Win32.ShowCursor(cursor_visible.(s32));
 }
 
 get_window_dimensions :: () -> Int_Vector2 {
@@ -214,3 +241,8 @@ window_width: s32;
 window_height: s32;
 
 do_mouse_move := true;
+
+user32 :: #system_library "user32";
+SetCursorPos :: (x: s32, y: s32) -> Win32.BOOL #foreign user32;
+SetForegroundWindow :: (window: Win32.HWND) -> Win32. BOOL #foreign user32;
+SetFocus :: (window: Win32.HWND) -> Win32.BOOL #foreign user32;

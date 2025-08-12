@@ -70,7 +70,7 @@ handle_first_person_input :: (entity: *Entity, fp_camera: *Entity, camera_offset
         fp_camera.center = entity.center + camera_offset;
     }
 
-    if mouse_look_locked then return;
+    if !cursor_locked_to_center then return;
 
     rot_dt_speed := first_person_mouse_look_speed * delta_time;
     if abs(Input.mouse_delta_x) > 0 {
