@@ -13,7 +13,7 @@
 // quickest path to fun: 
 //(x)pick up object
 //(x)throw object
-// - automatic door
+//(x)door
 // - human moves through door if open
 // - physics button controlling door
 // - throw object at button
@@ -218,9 +218,30 @@ solve_contact_velocities :: () {
                 restitution := restitution_pt2;
 
                 if entity_b.physics_properties.mass == IMMOVABLE_ENTITY_MASS {
-                    normal_impulse_magnitude := min(dot(entity_a.velocity, contact_result.normal), 0) * (1 + restitution);
-                    entity_a.velocity -= contact_result.normal * normal_impulse_magnitude;
-                    fucking_god_damn_it := 0;
+                    speed_along_normal := min(dot(entity_a.velocity, contact_result.normal), 0);
+                    normal_impulse_magnitude := speed_along_normal * (1 + restitution);
+
+                    tangent_velocity := velocity_a + speed_along_normal * contact_result.normal;
+                    tangent_speed_sq := length_squared(tangent_velocity);
+                    tangent_speed: float;
+                    if tangent_speed_sq > VERY_SMALL_NUMBER {
+                        tangent_speed = sqrt(tangent_speed_sq);
+                        pair.contact_tangent = tangent_velocity / tangent_speed;
+                    } else {
+                        pair.contact_tangent = .{};
+                    }
+                    friction_impulse_magnitude := tangent_speed;
+
+                    friction_coef := 0.3;
+                    friction_impulse := -pair.contact_tangent * (friction_impulse_magnitude * friction_coef);
+                    normal_impulse := -contact_result.normal * normal_impulse_magnitude;
+                    // total_impulse := normal_impulse + friction_impulse;
+                    total_impulse := normal_impulse;
+
+                    entity_a.velocity += total_impulse; 
+                    // if is_set(*entity_a.flags, .PHYSICS_DRIVEN_ROTATION) {
+                    //     entity_a.angular_velocity += entity_a.inv_inertia_tensor * cross(a_to_point, total_impulse);
+                    // }
                 } else {
                     effective_mass: float;
                     if entity_a.shape.type == .SPHERE && entity_b.shape.type == .SPHERE {

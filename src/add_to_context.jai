@@ -5,4 +5,6 @@
 #add_context active_camera: *Entity;
 #add_context player_entity: *Entity;
 #add_context ball: *Entity;
+#add_context door: *Entity;
+#add_context ai_guy: *Entity;
 #add_context test_entities: [..]Entity_Ref;

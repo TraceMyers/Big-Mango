@@ -2,7 +2,6 @@
 move_stuff :: (time_step: float) {
     scope_timer();
 
-
     for 0..entities.count-1 {
         e := *entities[it];
         e.previous_center = e.center;

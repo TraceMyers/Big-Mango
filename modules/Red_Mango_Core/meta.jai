@@ -200,4 +200,14 @@ define_array :: ($create_infos: ..Enumarray_Create_Info, array_name: string, $st
     return builder_to_string(*builder);
 }
 
+collect_flags :: ($Flags_Type: Type) -> Flags_Type {
+    flags_type_info := Flags_Type.(*Type_Info_Enum);
+    assert((flags_type_info.enum_type_flags & .FLAGS) != 0);
+    collected: Flags_Type = 0;
+    for flags_type_info.values {
+        collected |= xx it;
+    }
+    return collected;
+}
+
 // ----------------------------------------------------------------------------------------------------------

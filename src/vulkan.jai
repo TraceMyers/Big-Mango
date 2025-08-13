@@ -183,16 +183,13 @@ render_frame :: () {
             draw_lines(cmd, *vp_mat);
             draw_spheres(cmd, *vp_mat);
 
-            random_seed(*collision_mesh_color_state, 257);
             for *e : entities {
-                #if DRAW_COLLISION_MESHES {
-                    collider_color := random_color4f(a=0.25, random_state=*collision_mesh_color_state);
-                }
+
                 if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
                     continue;
                 }
                 #if DRAW_COLLISION_MESHES {
-                    draw_collision_mesh(cmd, e, *vp_mat, collider_color);
+                    draw_collision_mesh(cmd, e, *vp_mat);
                 }
                 meshes := e.meshes.field;
                 if meshes.count == 0 then continue;
@@ -2636,9 +2633,9 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4, color: Color4f) {
+draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4) {
     shape := *entity.shape;
-    albedo := Mesh_Albedo.{.CONSTANT, color};
+    albedo := entity.collision_mesh_albedo;
     if shape.type == {
     case .NONE;
     case .SPHERE;
@@ -2789,7 +2786,8 @@ prepare_lights :: () {
     // sun_t := 0;
     // lights.sun_direction = rotate(down_vec, WORLD_FORE, sun_t);
     // lights.sun_direction = rotate(WORLD_FORE, WORLD_RIGHT, 0.5);
-    lights.sun_direction = WORLD_DOWN;
+    // lights.sun_direction = WORLD_DOWN;
+    lights.sun_direction = rotate(WORLD_DOWN, WORLD_RIGHT, 0.3);
     copy_cpu_memory_to_buffer(lights.buffer, as_string(lights.data));
 }
 
@@ -3589,8 +3587,6 @@ sphere_mesh_high_poly: *Mesh;
 
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
-
-collision_mesh_color_state: Random_State;
 
 // jai compiler will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 

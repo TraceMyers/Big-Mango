@@ -24,18 +24,18 @@ Entity :: struct {
     using body: Physics_Body;
     using controller: Controller;
     ai: AI;
+    door: Door;
 
-    think_proc: Think_Proc;
-
-    frame_counter: s32;
+    collision_mesh_albedo: Mesh_Albedo;
 
     holding_entity: Entity_Ref;
     attached_camera: Entity_Ref;
-    // todo: look_forward for anything controllable?
 
     name: Nested_Array(string, NAME_ALLOCATOR_MIN_BLOCK_SIZE);
     meshes: Nested_Array(Mesh_Instance, MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
     linear_impulses: Nested_Array(Linear_Physics_Impulse, LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
+
+    frame_counter: s32;
 }
 
 entities: [..]Entity;
@@ -75,12 +75,17 @@ _entities :: (stage: Boot_Stage) -> bool {
         program_runtime_initialize(*linear_impulses_allocator, na_chunk_list_size_large, linear_impulse_array_data_size);
 
         entity_removal_queue.allocator = temp;
+
+        random_seed(*collision_mesh_color_state, 257);
     }
     return true;
 }
 
 entity_frame_turnover :: () {
     flush_entity_removal_queue();
+    for *e : entities {
+        e.frame_counter += 1;
+    }
 }
 
 look_origin :: (e: *Entity) -> Vector3 {
@@ -194,6 +199,11 @@ remove_all_linear_impulses :: inline (e: *Entity) {
     }
 }
 
+set_orientation :: (e: *Entity, new_orientation: Quaternion) {
+    e.orientation = new_orientation;
+    get_axes(e.orientation, *e.axes.fore, *e.axes.up, *e.axes.right);
+}
+
 set_orientation :: (e: *Entity, forward: Vector3, up: Vector3) {
     set_orientation(*e.orientation, forward, up);
     e.axes.fore = forward;
@@ -270,6 +280,10 @@ Entity_Flags :: enum {
     QUEUED_FOR_DELETION;
     
     USE_INTERACTION_QUEUED;
+    DOOR_RECEIVED_INTERACTION;
+
+    PLAYER_ENTITY_THINK;
+    DOOR_THINK;
 }
 
 // ------------------------------------------------------------------------------------------------------------- components
@@ -316,6 +330,7 @@ Physics_Properties :: struct {
 // this isn't world object model situation, but I still think "Body" is fitting.
 Physics_Body :: struct {
     collision_channels: Collision_Channels = 0;
+    ray_channels: Ray_Channel = ALL_RAY_CHANNELS;
     center: Vector3;
     previous_center: Vector3;
     velocity: Vector3;
@@ -326,4 +341,25 @@ Physics_Body :: struct {
     collision_cell_hash: s64;
     axes: Axes;
     physics_properties: Physics_Properties;
+}
+
+Door :: struct {
+    pivot_location: Vector3;
+    closed_orientation := QUATERNION_IDENTITY;
+    pivot_local_offset: Vector3;
+    pivot_axis := WORLD_UP;
+    rotation_speed := PI / 2;
+    rotation_angle := PI / 2;
+    rotation_distance: float;
+    interaction_location: Vector3;
+    state: enum {
+        CLOSED;
+        OPEN_POSITIVE;
+        OPEN_NEGATIVE;
+        OPENING_NEGATIVE;
+        OPENING_POSITIVE;
+        CLOSING_POSITIVE;
+        CLOSING_NEGATIVE;
+    }
+    auto_reset_to_closed: bool;
 }

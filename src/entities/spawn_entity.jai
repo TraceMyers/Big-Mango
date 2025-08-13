@@ -41,6 +41,8 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
 
     get_axes(entity.orientation, *entity.axes.fore, *entity.axes.up, *entity.axes.right);
 
+    entity.collision_mesh_albedo = .{.CONSTANT, random_color4f(a=0.25, random_state=*collision_mesh_color_state)};
+
     return entity;
 }
 
@@ -48,6 +50,23 @@ remove_entity :: (ref: Entity_Ref) {
     deleting_entity := get_entity(ref);
     if deleting_entity.collision_cell_hash != INVALID_COLLISION_CELL_HASH {
         remove_entity_from_collision_grid(deleting_entity);
+    }
+
+    // todo: metaprogram some procedures to manage this stuff.
+    if deleting_entity == context.ground {
+        context.ground = null;
+    } else if deleting_entity == context.camera_1 {
+        context.camera_1 = null;
+    } else if deleting_entity == context.camera_2 {
+        context.camera_2 = null;
+    } else if deleting_entity == context.active_camera {
+        context.active_camera = null;
+    } else if deleting_entity == context.player_entity {
+        context.player_entity = null;
+    } else if deleting_entity == context.ball {
+        context.ball = null;
+    } else if deleting_entity == context.ai_guy {
+        context.ai_guy = null;
     }
 
     ref_layer_index := ref.index;
@@ -63,6 +82,24 @@ remove_entity :: (ref: Entity_Ref) {
         ref_layer_index_of_last_entity := entities[entities.count-1].ref.index;
         assert(is_item_in_use(*entity_ref_layer, ref_layer_index_of_last_entity));
         entities[data_index] = entities[entities.count-1];
+
+        // todo: metaprogram some procedures to manage this stuff.
+        if *entities[entities.count-1] == context.ground {
+            context.ground = *entities[data_index];
+        } else if *entities[entities.count-1] == context.camera_1 {
+            context.camera_1 = *entities[data_index];
+        } else if *entities[entities.count-1] == context.camera_2 {
+            context.camera_2 = *entities[data_index];
+        } else if *entities[entities.count-1] == context.active_camera {
+            context.active_camera = *entities[data_index];
+        } else if *entities[entities.count-1] == context.player_entity {
+            context.player_entity = *entities[data_index];
+        } else if *entities[entities.count-1] == context.ball {
+            context.ball = *entities[data_index];
+        } else if *entities[entities.count-1] == context.ai_guy {
+            context.ai_guy = *entities[data_index];
+        }
+
         entity_ref_layer[ref_layer_index_of_last_entity] = xx data_index;
     }
     entities.count -= 1;
@@ -92,3 +129,5 @@ spawn_camera :: (name: string, center := Vector3.{}, orientation := QUATERNION_I
     e.collision_channels = 0;
     return e;
 }
+
+collision_mesh_color_state: Random_State;

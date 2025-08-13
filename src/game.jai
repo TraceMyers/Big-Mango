@@ -1,6 +1,7 @@
 
 // TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
 // TODO: global entity pointers need to be re-set every frame like before
+// TODO: entity fabrication tool would be nice.
 
 main :: () {
     rm_log("starting...", header="STARTUP");

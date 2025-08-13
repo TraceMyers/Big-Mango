@@ -4,6 +4,13 @@
 
 RAYCAST_DEFAULT_MAX_DISTANCE :: 999_999.9;
 
+Ray_Channel :: enum_flags u64 {
+    DEFAULT_1;
+    DEFAULT_2;
+}
+
+ALL_RAY_CHANNELS :: #run collect_flags(Ray_Channel);
+
 Raycast_Result :: struct {
     hit_entity: Entity_Ref;
     hit_location: Vector3;
@@ -20,6 +27,7 @@ Raycast_Result :: struct {
 Raycast_Request :: struct {
     ray: Ray3;
     max_distance := -1.0;
+    channels := ALL_RAY_CHANNELS;
     origin_inside_collider_rules: struct {
         // where should the hit be if the origin is inside the collider?
         hit_where: enum u8 {
@@ -55,12 +63,15 @@ raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
     out_result.* = .{hit_distance=FLOAT32_MAX};
     // todo: grid + sphere intersection test
     for e : entities {
+        if (e.ray_channels & request.channels) == 0 {
+            continue;
+        }
         cur_result.is_hit = false;
         if e.shape.type == {
         case .SPHERE;
             raycast_sphere(request, e.body, *cur_result);
         case .RECT;
-            // raycast_rect(request, packed_collider, *cur_result, it);
+            raycast_rect(request, e.body, *cur_result);
         case;
             continue;
         }
@@ -86,7 +97,7 @@ raycast_sphere_hit_calculation :: inline (sphere_center: Vector3, sphere_radius:
 }
 
 raycast_sphere :: (using request: Raycast_Request, body: Physics_Body, out_result: *Raycast_Result) -> bool {
-    assert(is_normalized(ray.direction, 0.0001));
+    assert(is_normalized(ray.direction, 0.00001));
     out_result.* = .{};
 
     sphere_center    := body.center;
@@ -164,58 +175,58 @@ raycast_sphere :: (using request: Raycast_Request, body: Physics_Body, out_resul
     return out_result.is_hit;
 }
 
-// raycast_rect :: (using request: Raycast_Request, collider_data: Packed_Collider, out_result: *Raycast_Result, entity_index: s64) -> bool {
-//     assert(is_normalized(ray.direction, 0.0001));
-//     out_result.* = .{};
+raycast_rect :: (using request: Raycast_Request, body: Physics_Body, out_result: *Raycast_Result) -> bool {
+    assert(is_normalized(ray.direction, 0.0001));
+    out_result.* = .{};
 
-//     rect_center        := collider_data.position;
-//     rect_half_width    := collider_data.collider.rect.half_width;
-//     rect_half_height   := collider_data.collider.rect.half_height;
-//     rect_normal        := precalculated_fore_directions[entity_index];
-//     rect_height_vec    := precalculated_up_directions[entity_index];
-//     rect_width_vec     := cross(rect_height_vec, rect_normal);
+    rect_center        := body.center;
+    rect_half_width    := body.shape.rect.half_width;
+    rect_half_height   := body.shape.rect.half_height;
+    rect_normal        := body.axes.fore;
+    rect_height_vec    := body.axes.up;
+    rect_width_vec     := body.axes.right;
 
-//     ray_length := raycast_ray_length(request);
-//     can_hit_back_face := hit_back_face;
+    ray_length := raycast_ray_length(request);
+    can_hit_back_face := hit_back_face;
 
-//     ray_direction_cos_t := dot(rect_normal, ray.direction);
-//     aiming_for_backside := ray_direction_cos_t >= 0;
+    ray_direction_cos_t := dot(rect_normal, ray.direction);
+    aiming_for_backside := ray_direction_cos_t >= 0;
 
-//     if !aiming_for_backside || can_hit_back_face {
-//         origin_projection, projection_t := project_point_onto_plane(ray.origin, rect_center, rect_normal);
-//         // the two given dot products should have a product with a negative sign if a hit is possible. to see this, build out a table of the four possible combinations of [sign of dp of normals] and [sign of projection norm dist along plane normal]
-//         t_mix_test := ray_direction_cos_t * projection_t;
-//         if t_mix_test < 0 {
-//             // heading is valid
-//             origin_projection_diff := origin_projection - ray.origin;
-//             toward_projection_scaled_cos_t := dot(origin_projection_diff, ray.direction);
-//             assert(toward_projection_scaled_cos_t > 0);
+    if !aiming_for_backside || can_hit_back_face {
+        origin_projection, projection_t := project_point_onto_plane(ray.origin, rect_center, rect_normal);
+        // the two given dot products should have a product with a negative sign if a hit is possible. to see this, build out a table of the four possible combinations of [sign of dp of normals] and [sign of projection norm dist along plane normal]
+        t_mix_test := ray_direction_cos_t * projection_t;
+        if t_mix_test < 0 {
+            // heading is valid
+            origin_projection_diff := origin_projection - ray.origin;
+            toward_projection_scaled_cos_t := dot(origin_projection_diff, ray.direction);
+            assert(toward_projection_scaled_cos_t > 0);
 
-//             origin_projection_dist := abs(dot(origin_projection_diff, rect_normal));
-//             inv_cos_t := origin_projection_dist / toward_projection_scaled_cos_t;
-//             distance_to_intersection := origin_projection_dist * inv_cos_t; 
-//             if distance_to_intersection <= ray_length {
-//                 // ray intersects the infinite plane
-//                 hit_location := ray.origin + ray.direction * distance_to_intersection;
-//                 plane_center_to_hit_diff := hit_location - rect_center;
-//                 hit_distance_along_height_axis := abs(dot(plane_center_to_hit_diff, rect_height_vec));
-//                 hit_distance_along_width_axis := abs(dot(plane_center_to_hit_diff, rect_width_vec));
-//                 if hit_distance_along_height_axis <= rect_half_height && hit_distance_along_width_axis <= rect_half_width {
-//                     // infinite plane intersection is within the bounds of the finite plane
-//                     out_result.hit_location = hit_location;
-//                     out_result.hit_normal = rect_normal;
-//                     out_result.hit_distance = distance_to_intersection;
-//                     out_result.is_hit = true;
-//                     out_result.hit_back_face = aiming_for_backside;
-//                     if out_result.hit_back_face && !flip_back_face_hit_normal {
-//                         out_result.hit_normal *= -1.0;
-//                         out_result.normal_is_back_face = true;
-//                     }
-//                 }
-//             }
-//         }
-//     }
+            origin_projection_dist := abs(dot(origin_projection_diff, rect_normal));
+            inv_cos_t := origin_projection_dist / toward_projection_scaled_cos_t;
+            distance_to_intersection := origin_projection_dist * inv_cos_t; 
+            if distance_to_intersection <= ray_length {
+                // ray intersects the infinite plane
+                hit_location := ray.origin + ray.direction * distance_to_intersection;
+                plane_center_to_hit_diff := hit_location - rect_center;
+                hit_distance_along_height_axis := abs(dot(plane_center_to_hit_diff, rect_height_vec));
+                hit_distance_along_width_axis := abs(dot(plane_center_to_hit_diff, rect_width_vec));
+                if hit_distance_along_height_axis <= rect_half_height && hit_distance_along_width_axis <= rect_half_width {
+                    // infinite plane intersection is within the bounds of the finite plane
+                    out_result.hit_location = hit_location;
+                    out_result.hit_normal = rect_normal;
+                    out_result.hit_distance = distance_to_intersection;
+                    out_result.is_hit = true;
+                    out_result.hit_back_face = aiming_for_backside;
+                    if out_result.hit_back_face && !flip_back_face_hit_normal {
+                        out_result.hit_normal *= -1.0;
+                        out_result.normal_is_back_face = true;
+                    }
+                }
+            }
+        }
+    }
 
-//     out_result.normal_is_degenerate |= !is_normalized(out_result.hit_normal, SMALL_NUMBER);
-//     return out_result.is_hit;
-// }
+    out_result.normal_is_degenerate |= !is_normalized(out_result.hit_normal, SMALL_NUMBER);
+    return out_result.is_hit;
+}
