@@ -42,7 +42,7 @@ unset_multiple :: inline (arr: *Long_Flag_Array($T), enum_vals: []T) {
     }
 }
 
-check_all :: inline (array: *Long_Flag_Array($T), enum_vals: []T) {
+are_all_set :: inline (array: *Long_Flag_Array($T), enum_vals: []T) -> bool {
     for enum_vals {
         if !is_set(array, it) {
             return false;
@@ -51,7 +51,7 @@ check_all :: inline (array: *Long_Flag_Array($T), enum_vals: []T) {
     return true;
 }
 
-check_all :: inline (array: *Long_Flag_Array($T), enum_vals: []T) {
+are_any_set :: inline (array: *Long_Flag_Array($T), enum_vals: []T) -> bool {
     any_set := false;
     for enum_vals {
         any_set |= is_set(array, it);

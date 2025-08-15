@@ -11,7 +11,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
     {
         context.ground = spawn_entity("ground", .[]);
 
-        set_shape_and_mass(context.ground, .{type=.RECT, rect=.{200,200}}, IMMOVABLE_ENTITY_MASS);
+        set_shape_and_mass(context.ground, .{type=.RECT, rect=.{200, 200, false}}, IMMOVABLE_ENTITY_MASS);
         set_orientation(context.ground, .{0,0,1}, .{1,0,0});
 
         context.ground.physics_properties.elasticity = 0.4;
@@ -20,23 +20,17 @@ _scratch :: (stage: Boot_Stage) -> bool {
     // wall entity
     {
         wall := spawn_entity("wall", .[]);
-        set_shape_and_mass(wall, .{type=.RECT, rect=.{60, 200}}, IMMOVABLE_ENTITY_MASS);
+        set_shape_and_mass(wall, .{type=.RECT, rect=.{60, 200, true}}, IMMOVABLE_ENTITY_MASS);
         set_orientation(wall, .{y=-1}, .{z=1});
         wall.center = .{y=200};
     }
     // door entity
     {
-        context.door = spawn_entity("door", .[]);
-        half_height := 14.0;
-        half_width := half_height * (3./5);
-        set_shape_and_mass(context.door, .{type=.RECT, rect=.{half_height, half_width}}, IMMOVABLE_ENTITY_MASS);
-        set_orientation(context.door, .{y=-1}, .{z=1});
-        context.door.collision_mesh_albedo.tint = .{r=1};
-        context.door.center = .{y=100, z=half_height};
-        context.door.door.pivot_local_offset = .{x=half_width};
-        context.door.door.closed_orientation = context.door.orientation;
-        context.door.ray_channels = .DEFAULT_2;
-        set(*context.door.flags, .DOOR_THINK);
+        context.door = spawn_swinging_door(.{y=100}, .{y=-1}, .{r=1}, 80, 80 * (3./5));
+    }
+    // door 2, the sequel
+    {
+        spawn_swinging_door(.{y=100, x=60}, .{x=1}, .{b=1});
     }
     // camera init
     {
@@ -66,22 +60,48 @@ _scratch :: (stage: Boot_Stage) -> bool {
         context.ball.center.z = context.player_entity.center.z + context.player_entity.shape.half_height + context.ball.shape.sphere.radius;
         context.ball.physics_properties.elasticity = 1.0;
         context.ball.physics_properties.linear_speed_max = 1000;
-        context.ball.ray_channels = .DEFAULT_1;
+    }
+    // button
+    {
+        context.button = spawn_gadget(
+            "button", 
+            .{
+                gadget_type=.BUTTON, 
+                button=.{}
+            }, 
+            .{y=30, z=10}
+        );
+
+        radius := 0.5;
+        half_height := 0.8;
+
+        set_shape_and_mass(context.button, .{type=.CAPSULE, capsule=.{half_height, radius}}, IMMOVABLE_ENTITY_MASS);
+        context.button.collision_mesh_albedo.tint = .{g=0.8};
+        // set_orientation(context.button, .{z=1}, .{y=-1});
+        capsule_mesh := get_or_create_capsule_mesh(half_height*2, radius);
+        set_meshes(context.button, .[
+            .{data=cube_mesh, albedo=.{tint=.{r=1,g=1,b=1}}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
+            .{data=capsule_mesh, albedo=.{tint=.{r=1}}}
+        ]);
+        add_gadget_child(context.button, .{context.door.ref});
+        set(*context.button.flags, .NEVER_SHOW_COLLIDER_MESH);
+        set(*context.button.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT);
+        // set(*context.button.flags, .GADGET_ALWAYS_ACTIVE);
     }
     // ai guy
     {
-        context.ai_guy = spawn_human("derek");
-        context.ai_guy.center.xy = context.door.center.xy * 1.1;
-        context.ai_guy.center.z = context.ai_guy.shape.sphere.radius;
-        context.ai_guy.shape.type = .NONE;
-        context.ai_guy.collision_channels = 0;
-        set_orientation(context.ai_guy, .{y=-1}, .{z=1});
-        unset(*context.ai_guy.flags, .APPLY_GRAVITY);
-        set(*context.ai_guy.flags, .DOOR_THINK);
-        context.ai_guy.door.pivot_local_offset = .{x=-15};
-        context.ai_guy.door.closed_orientation = context.ai_guy.orientation;
-        context.ai_guy.door.rotation_angle = 2. * PI;
-        context.ai_guy.door.auto_reset_to_closed = true;
+        // context.ai_guy = spawn_human("derek");
+        // context.ai_guy.center.xy = context.door.center.xy * 1.1;
+        // context.ai_guy.center.z = context.ai_guy.shape.sphere.radius;
+        // context.ai_guy.shape.type = .NONE;
+        // context.ai_guy.collision_channels = 0;
+        // set_orientation(context.ai_guy, .{y=-1}, .{z=1});
+        // unset(*context.ai_guy.flags, .APPLY_GRAVITY);
+        // context.ai_guy.gadget_type = .DOOR;
+        // context.ai_guy.door.pivot_local_offset = .{x=-15};
+        // context.ai_guy.door.closed_orientation = context.ai_guy.orientation;
+        // context.ai_guy.door.rotation_angle = 2. * PI;
+        // context.ai_guy.door.auto_reset_to_closed = true;
     }
     return true;
 }
@@ -112,7 +132,6 @@ scratch_think :: () {
             draw_crosshair_line(pos_in_front, 0.1, 0.05, attached_camera.axes.up);
         }
     }
-
 
     // spawn_timer -= delta_time;
     // if spawn_timer < 0 {

@@ -26,6 +26,8 @@ COS_PI_OVER_4    :: 0.7071067;
 COS_PI_OVER_3    :: 0.5;
 COS_PI_OVER_2    :: 0.0;
 
+VECTOR3_ONES :: Vector3.{1,1,1};
+
 QUATERNION_IDENTITY :: Quaternion.{0,0,0,1};
 VectorTypes :: Type.[Vector2, Vector3, Vector4, Quaternion];  // Used for type restriction in normalize().
 Vector2Types :: Type.[Vector2, Int_Vector2];
@@ -274,10 +276,20 @@ set_orientation :: (out_orientation: *Quaternion, forward: Vector3, up: Vector3)
     out_orientation.* = make_quat(forward, up);
 }
 
+Axes :: struct {
+    fore: Vector3;
+    up: Vector3;
+    right: Vector3;
+}
+
 get_axes :: (orientation: Quaternion, forward: *Vector3, up: *Vector3, right: *Vector3) {
     forward.* = fore_direction(*orientation);
     up.* = up_direction(*orientation);
     right.* = normalize(cross(forward, up));
+}
+
+local_to_world :: inline (local: Vector3, world_axes: Axes) -> Vector3 {
+    return world_axes.right * local.x + world_axes.fore * local.y + world_axes.up * local.z;
 }
 
 rotate :: (in_out_orientation: *Quaternion, axis: Vector3, angle: float32) {

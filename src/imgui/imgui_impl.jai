@@ -342,6 +342,7 @@ add_left_sidebar :: (main_menu_height: float) -> float {
         add_camera_controls();
         add_physics_debugger();
         add_entity_pocket();
+        add_dev_ui_scratch_space();
     }
 
     return window_width;
@@ -591,6 +592,30 @@ add_entity_pocket :: () {
             // capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
             // set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
             // entity.center.z = 100.0;
+        }
+    }
+}
+
+add_dev_ui_scratch_space :: () {
+    if CollapsingHeader("scratch") {
+        scope_push_indent();
+        door_volume := try_get_entity(*context.door.gadget_interaction_volume);
+        Text("door is overlapped: %", is_set(*context.door.flags, .GADGET_EVENT_VOLUME_IS_OVERLAPPED));
+        Text("door is active: %", is_gadget_active(context.door));
+        Text("door is working: %", is_set(*context.door.flags, .GADGET_WORKING));
+        Text("door volume overlaps");
+        scope_push_indent();
+        if door_volume != null {
+            if door_volume.event_volume.overlaps.field.count == 0 {
+                Text("none");
+            } else for door_volume.event_volume.overlaps.field {
+                e := try_get_entity(*it.entity);
+                if e != null {
+                    Text("overlapper: %, can_interact %", e.name.field, is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS));
+                } else {
+                    Text("null entity");
+                }
+            }
         }
     }
 }

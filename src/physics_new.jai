@@ -42,7 +42,7 @@ move_stuff :: (time_step: float) {
         }
 
         if e.center.z <= Z_KILL_FLOOR {
-            queue_entity_removal(e.ref);
+            queue_entity_deletion(e.ref);
         }
 
         VELOCITY_REGULATION_DAMPEN_PER_SECOND :: 0.1; 

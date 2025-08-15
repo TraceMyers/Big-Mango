@@ -4,12 +4,12 @@
 
 RAYCAST_DEFAULT_MAX_DISTANCE :: 999_999.9;
 
-Ray_Channel :: enum_flags u64 {
-    DEFAULT_1;
-    DEFAULT_2;
+Ray_Channels :: enum_flags u64 {
+    DEFAULT;
+    GADGET;
 }
 
-ALL_RAY_CHANNELS :: #run collect_flags(Ray_Channel);
+ALL_RAY_CHANNELS :: #run collect_flags(Ray_Channels);
 
 Raycast_Result :: struct {
     hit_entity: Entity_Ref;
@@ -72,6 +72,8 @@ raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
             raycast_sphere(request, e.body, *cur_result);
         case .RECT;
             raycast_rect(request, e.body, *cur_result);
+        case .CAPSULE;
+            raycast_capsule(request, e.body, *cur_result);
         case;
             continue;
         }
@@ -224,6 +226,58 @@ raycast_rect :: (using request: Raycast_Request, body: Physics_Body, out_result:
                     }
                 }
             }
+        }
+    }
+
+    out_result.normal_is_degenerate |= !is_normalized(out_result.hit_normal, SMALL_NUMBER);
+    return out_result.is_hit;
+}
+
+raycast_capsule :: (using request: Raycast_Request, body: Physics_Body, out_result: *Raycast_Result) -> bool {
+    assert(is_normalized(ray.direction, 0.0001));
+    out_result.* = .{};
+
+    // a cylinder is just a line segment with a radius
+    line_segment_offset := body.axes.up * body.shape.capsule.half_height;
+    line_segment_bottom := body.center + line_segment_offset;
+    line_segment_top    := body.center - line_segment_offset;
+
+    ray_length := raycast_ray_length(request);
+    ray_end := request.ray.origin + request.ray.direction * ray_length;
+    can_hit_back_face := raycast_can_hit_back_face(request, true);
+
+    closest_pt_from_ray_origin,_ := closest_point_on_line(*request.ray.origin, *line_segment_bottom, *line_segment_top);
+    toward_origin_diff := request.ray.origin - closest_pt_from_ray_origin;
+    origin_dist_sq := length_squared(toward_origin_diff);
+
+    // $todo: make it so capsule raycasts correctly return the hit location, normal, etc..
+    if origin_dist_sq <= square(body.shape.capsule.radius) {
+        out_result.origin_inside_collider = true;
+        if can_hit_back_face {
+            if origin_inside_collider_rules.hit_where == .RAY_ORIGIN {
+                out_result.is_hit = true;
+                out_result.hit_location = ray.origin;
+                if origin_dist_sq >= VERY_SMALL_NUMBER  {
+                    out_result.hit_distance = sqrt(origin_dist_sq);
+                    out_result.hit_normal = toward_origin_diff / out_result.hit_distance;
+                }
+            } else if can_hit_back_face {
+                closest_pt_from_ray_end,_ := closest_point_on_line(*ray_end, *line_segment_bottom, *line_segment_top);
+                toward_ray_end_diff := ray_end - closest_pt_from_ray_end;
+                ray_end_dist_sq := length_squared(toward_ray_end_diff);
+
+                if ray_end_dist_sq >= square(body.shape.capsule.radius) {
+                    out_result.is_hit = true;
+
+                }
+            }
+        }
+    } else {
+        closest_pt_on_ray, closest_pt_on_line_segment: Vector3 = ---;
+        closest_point_on_each_line_segment(ray.origin, ray_end, line_segment_bottom, line_segment_top, *closest_pt_on_ray, *closest_pt_on_line_segment);
+        distance_sq := distance_squared(closest_pt_on_ray, closest_pt_on_line_segment);
+        if distance_sq <= square(body.shape.capsule.radius) {
+            out_result.is_hit = true;
         }
     }
 

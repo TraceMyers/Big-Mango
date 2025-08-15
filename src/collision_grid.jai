@@ -166,17 +166,24 @@ find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32,
 
     self := get_entity(self_ref);
     cell := get_collision_cell(grid_index);
+    self_is_event_volume := is_set(*self.flags, .USES_EVENT_VOLUME);
 
     for other_ref : cell {
         // to guarantee no duplicate pairs, higher-indexed entities collect overlaps with lower-indexed entities (also don't overlap with self)
         // this has the added benefit of making sure the 'other' entity here has done their grid iteration first, giving it the chance to set its' 'skip' flag.
         other := get_entity(other_ref);
 
-        if self_ref.index >= other_ref.index { 
-            continue;
-        }
-        if (self.collision_channels & other.collision_channels) == 0 {
-            continue;
+        if self_is_event_volume {
+            if (self.overlap_channels & other.overlap_channels) == 0 {
+                continue;
+            }
+        } else {
+            if self_ref.index >= other_ref.index { 
+                continue;
+            }
+            if (self.collision_channels & other.collision_channels) == 0 {
+                continue;
+            }
         }
         
         // check if we've already tried to find an overlap with the other guy
@@ -188,10 +195,14 @@ find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32,
         other_aabb := get_aabb(other);
         if is_overlap_aabb_aabb(self_swept_aabb, other_aabb) {
             pair: Contact_Pair = ---;
-            if self.physics_properties.mass == IMMOVABLE_ENTITY_MASS {
-                pair = .{a=other_ref, b=self_ref};
-            } else {
+            if self_is_event_volume {
                 pair = .{a=self_ref,  b=other_ref};
+            } else {
+                if self.physics_properties.mass == IMMOVABLE_ENTITY_MASS {
+                    pair = .{a=other_ref, b=self_ref};
+                } else {
+                    pair = .{a=self_ref,  b=other_ref};
+                }
             }
             array_add(iteration_collision_overlaps, pair);
         }

@@ -51,18 +51,42 @@ Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {
     allocation: Nested_Allocation;
 }
 
+maybe_shrink :: inline (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B)) {
+    if array.allocation.count >= 8 && array.allocation.count >= (array.field.count >> 2) {
+        assert(basic_validity_check(array.allocation.ref));
+        new_allocated_count := (array.field.count >> 1);
+        array_resize(array, allocator, xx new_allocated_count);
+    }
+}
+
 array_unordered_remove_by_index :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), i: s32, allow_shrink := true) {
     new_count := array.field.count - 1;
     assert(new_count >= 0);
-    if allow_shrink && array.allocation.count > 8 && array.allocation.count > new_count / 4 {
-        assert(basic_validity_check(array.allocation.ref));
-        new_allocated_count := new_count / 2;
-        array_resize(array, allocator, xx new_allocated_count);
-    }
+
     if i != array.field.count - 1 {
         array.field[i] = array.field[array.field.count-1];
     }
     array.field.count = new_count;
+
+    if allow_shrink {
+        maybe_shrink(array, allocator);
+    }
+}
+
+array_ordered_remove_by_index :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), i: s32, allow_shrink := true) {
+    new_count := array.field.count - 1;
+    assert(new_count >= 0);
+
+    if i < array.field.count - 1 {
+        for i..array.field.count-2 {
+            array.field[it] = array.field[it+1];
+        }
+    }
+    array.field.count = new_count;
+
+    if allow_shrink {
+        maybe_shrink(array, allocator);
+    }
 }
 
 array_add :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), item: T) 

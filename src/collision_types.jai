@@ -2,6 +2,12 @@
 Collision_Channels :: enum_flags u64 {
     DEFAULT;
 }
+ALL_COLLISION_CHANNELS :: #run collect_flags(Collision_Channels);
+
+Overlap_Channels :: enum_flags u64 {
+    DEFAULT;
+}
+ALL_OVERLAP_CHANNELS :: #run collect_flags(Overlap_Channels);
 
 Collision_Shape_Type :: enum u32 {
     NONE;
@@ -48,12 +54,6 @@ feed_contact_impulse :: inline (pair: *Contact_Pair, normal_magnitude: float, ta
     return out_normal_magnitude, out_tangent_magnitude;
 }
 
-Axes :: struct {
-    fore: Vector3;
-    up: Vector3;
-    right: Vector3;
-}
-
 Find_Overlaps_Data :: struct {
     collision_overlaps: *[..]Contact_Pair;
     already_overlapped: Bit_Array(1);
@@ -83,6 +83,7 @@ Box_Shape :: struct {
 Rect_Shape :: struct {
     half_height: float;
     half_width: float;
+    bidirectional_collision: bool;
 #place half_height;
     extent: Vector2 = ---;
 }

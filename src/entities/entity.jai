@@ -9,10 +9,15 @@ ENTITY_NAME_MAX_CHAR_COUNT :: 64;
 LINEAR_IMPULSES_MAX_COUNT :: 128;
 DEFAULT_LINEAR_IMPULSE_DURATION :: 1.0 / 90.0;
 IMMOVABLE_ENTITY_MASS :: 0.0;
+MAX_GADGET_CHILDREN_COUNT :: 256;
 
+EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE :: 16;
 NAME_ALLOCATOR_MIN_BLOCK_SIZE :: 8;
 MESHES_ALLOCATOR_MIN_BLOCK_SIZE :: 16;
 LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE :: 16;
+GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE :: #run ceil_to_pow2(size_of(Gadget_Interaction));
+GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE :: #run ceil_to_pow2(size_of(Gadget_Child));
+
 INVALID_COLLISION_CELL_HASH : s64 : -1;
 
 Think_Proc :: #type (*Entity);
@@ -23,8 +28,9 @@ Entity :: struct {
     using camera: Camera;
     using body: Physics_Body;
     using controller: Controller;
+    using gadget: Gadget;
     ai: AI;
-    door: Door;
+    event_volume: Event_Volume;
 
     collision_mesh_albedo: Mesh_Albedo;
 
@@ -39,13 +45,16 @@ Entity :: struct {
 }
 
 entities: [..]Entity;
-entity_removal_queue: [..]Entity_Ref;
+entity_deletion_queue: [..]Entity_Ref;
 entity_ref_layer: Pool(s32);
 entity_id_counter: u32;
 
 name_allocator: Nesting_Allocator(NAME_ALLOCATOR_MIN_BLOCK_SIZE);
 meshes_allocator: Nesting_Allocator(MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
 linear_impulses_allocator: Nesting_Allocator(LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
+event_overlap_allocator: Nesting_Allocator(EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
+gadget_interaction_allocator: Nesting_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
+gadget_children_allocator: Nesting_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
 
 Entity_Ref :: struct {
     index: s32;
@@ -73,8 +82,14 @@ _entities :: (stage: Boot_Stage) -> bool {
         program_runtime_initialize(*name_allocator, na_chunk_list_size, entity_name_data_size);
         linear_impulse_array_data_size := ENTITY_MAX_COUNT * size_of(Linear_Physics_Impulse) * 2;
         program_runtime_initialize(*linear_impulses_allocator, na_chunk_list_size_large, linear_impulse_array_data_size);
+        event_overlap_arrays_data_size := ENTITY_MAX_COUNT * size_of(Event_Overlap);
+        program_runtime_initialize(*event_overlap_allocator, na_chunk_list_size_large, event_overlap_arrays_data_size);
+        gadget_interaction_arrays_data_size := ENTITY_MAX_COUNT / 4 * size_of(Gadget_Interaction);
+        program_runtime_initialize(*gadget_interaction_allocator, na_chunk_list_size_large, gadget_interaction_arrays_data_size);
+        gadget_child_arrays_data_size := ENTITY_MAX_COUNT / 4 * size_of(Gadget_Child);
+        program_runtime_initialize(*gadget_children_allocator, na_chunk_list_size_large, gadget_child_arrays_data_size);
 
-        entity_removal_queue.allocator = temp;
+        entity_deletion_queue.allocator = temp;
 
         random_seed(*collision_mesh_color_state, 257);
     }
@@ -82,7 +97,7 @@ _entities :: (stage: Boot_Stage) -> bool {
 }
 
 entity_frame_turnover :: () {
-    flush_entity_removal_queue();
+    flush_entity_deletion_queue();
     for *e : entities {
         e.frame_counter += 1;
     }
@@ -193,10 +208,53 @@ remove_linear_impulse_at :: inline (e: *Entity, i: s64) {
     array_unordered_remove_by_index(*e.linear_impulses, *linear_impulses_allocator, xx i);
 }
 
+add_event_volume_overlap :: (e: *Entity, overlap: Entity_Ref) {
+    assert(e.ref != overlap);
+    assert(is_set(*e.flags, .USES_EVENT_VOLUME));
+    array_add(*e.event_volume.overlaps, *event_overlap_allocator, .{overlap, collision_frame, collision_frame});
+}
+
+remove_event_volume_overlap_at :: inline (e: *Entity, i: s64) {
+    assert(is_set(*e.flags, .USES_EVENT_VOLUME));
+    array_unordered_remove_by_index(*e.event_volume.overlaps, *event_overlap_allocator, xx i);
+}
+
+add_gadget_interaction :: (e: *Entity, interaction: Gadget_Interaction) {
+    assert(is_set(*e.flags, .USES_GADGET));
+    if e.gadget_interactions.field.count >= max_interactions(e.gadget_type) {
+        return;
+    }
+    array_add(*e.gadget_interactions, *gadget_interaction_allocator, interaction);
+}
+
+remove_gadget_interaction_at :: inline (e: *Entity, i: s64) {
+    assert(is_set(*e.flags, .USES_GADGET));
+    array_ordered_remove_by_index(*e.gadget_interactions, *gadget_interaction_allocator, xx i);
+}
+
+remove_all_gadget_interactions :: (e: *Entity) {
+    if e.gadget_interactions.allocation.count > 0 {
+        array_resize(*e.gadget_interactions, *gadget_interaction_allocator, 0);
+    }
+}
+
 remove_all_linear_impulses :: inline (e: *Entity) {
     if e.linear_impulses.allocation.count > 0 {
         array_resize(*e.linear_impulses, *linear_impulses_allocator, 0);
     }
+}
+
+add_gadget_child :: (e: *Entity, child: Gadget_Child) {
+    assert(is_set(*e.flags, .USES_GADGET));
+    if e.gadget_children.field.count >= MAX_GADGET_CHILDREN_COUNT {
+        return;
+    } 
+    array_add(*e.gadget_children, *gadget_children_allocator, child);
+}
+
+remove_gadget_child_at :: (e: *Entity, i: s64) {
+    assert(is_set(*e.flags, .USES_GADGET));
+    array_unordered_remove_by_index(*e.gadget_children, *gadget_children_allocator, xx i);
 }
 
 set_orientation :: (e: *Entity, new_orientation: Quaternion) {
@@ -234,7 +292,7 @@ interp_rotate :: (e: *Entity, target: Quaternion, speed: float32, delta_time: fl
     get_axes(e.orientation, *e.axes.fore, *e.axes.up, *e.axes.right);
 }
 
-queue_entity_removal :: (ref: Entity_Ref) {
+queue_entity_deletion :: (ref: Entity_Ref) {
     ref_copy := ref;
     e := try_get_entity(*ref_copy);
     // NOTE: a bug could happen here where if the entity is flagged, (but due to another bug never removed,) it can't be removed.
@@ -244,46 +302,17 @@ queue_entity_removal :: (ref: Entity_Ref) {
         return;
     }
     set(*e.flags, .QUEUED_FOR_DELETION);
-    for entity_removal_queue {
-        assert(it != e.ref);
+    for entity_deletion_queue {
+        assert(it.id != e.ref.id);
     }
-    array_add(*entity_removal_queue, e.ref);
+    array_add(*entity_deletion_queue, e.ref);
 }
 
-flush_entity_removal_queue :: () {
-    for entity_removal_queue {
-        remove_entity(it);
+flush_entity_deletion_queue :: () {
+    for entity_deletion_queue {
+        delete_entity(it);
     }
-    array_reset(*entity_removal_queue);
-}
-
-// ----------------------------------------------------------------------------------------------------------------- flags
-
-// Long_Flag_Array flags.
-Entity_Flags :: enum {
-    USES_CAMERA;
-    USES_AI;
-    // spawning
-    JUST_SPAWNED;
-    // physics
-    MOVED_BY_INPUT;
-    MOVED_BY_PHYSICS;
-    PHYSICS_DRIVEN_ROTATION;
-    APPLY_GRAVITY;
-    // collisions
-    COLLIDING_WITH_SOMETHING;
-    CHANGED_CELL_OCCUPATIONS;
-    // movement
-    ACCELERATE_IN_3D;
-    // debug draw
-    DRAW_COLLIDER_HEIGHT_LINE;
-    QUEUED_FOR_DELETION;
-    
-    USE_INTERACTION_QUEUED;
-    DOOR_RECEIVED_INTERACTION;
-
-    PLAYER_ENTITY_THINK;
-    DOOR_THINK;
+    array_reset(*entity_deletion_queue);
 }
 
 // ------------------------------------------------------------------------------------------------------------- components
@@ -295,6 +324,9 @@ Controller :: struct {
 Mesh_Instance :: struct {
     data: *Mesh;
     albedo: Mesh_Albedo;
+    scale := VECTOR3_ONES;
+    offset: Vector3;
+    orientation := Quaternion.{};
 }
 
 AI :: struct {
@@ -330,7 +362,8 @@ Physics_Properties :: struct {
 // this isn't world object model situation, but I still think "Body" is fitting.
 Physics_Body :: struct {
     collision_channels: Collision_Channels = 0;
-    ray_channels: Ray_Channel = ALL_RAY_CHANNELS;
+    ray_channels: Ray_Channels = ALL_RAY_CHANNELS;
+    overlap_channels: Overlap_Channels;
     center: Vector3;
     previous_center: Vector3;
     velocity: Vector3;
@@ -341,6 +374,75 @@ Physics_Body :: struct {
     collision_cell_hash: s64;
     axes: Axes;
     physics_properties: Physics_Properties;
+}
+
+Gadget_Type :: enum {
+    DOOR :: 0x1;
+    BUTTON;
+}
+
+is_gadget_active :: inline (gadget: *Entity) -> bool {
+    return are_any_set(*gadget.flags, .[.GADGET_EVENT_VOLUME_IS_OVERLAPPED, .GADGET_WORKING, .GADGET_ALWAYS_ACTIVE]) || gadget.gadget_interactions.field.count > 0;
+}
+
+gadget_can_take_interaction :: (using e: *Entity, interactionist: *Entity, is_parent_to_child_interaction := false) -> bool {
+    if is_parent_to_child_interaction {
+        if is_set(*e.flags, .GADGET_ALLOW_PARENT_TO_FORCE_INTERACTIONS) || is_set(*interactionist.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT) {
+            return true;
+        }
+    } 
+
+    if !is_gadget_active(e) {
+        return false;
+    }
+    if gadget_interactions.field.count >= max_interactions(gadget_type) {
+        return false;
+    }
+
+    interaction_volume := get_entity(*gadget_interaction_volume);
+    assert(is_set(*interaction_volume.flags, .USES_EVENT_VOLUME));
+    for interaction_volume.event_volume.overlaps.field {
+        if it.entity == interactionist.ref {
+            return true;
+        }
+    }
+    return false;
+}
+
+Gadget_Interaction_Flags :: enum_flags u32 {
+
+}
+
+Gadget_Interaction :: struct {
+    source_entity: Entity_Ref;
+    source_location: Vector3;
+    flags: Gadget_Interaction_Flags = 0;
+}
+
+Gadget_Child :: struct {
+    entity: Entity_Ref;
+}
+
+max_interactions :: (type: Gadget_Type) -> s32 {
+    if #complete type == {
+    case .DOOR;
+        return 2;
+    case .BUTTON;
+        return 2;
+    }
+}
+
+// a gadget is an interaction point with a box range and functionality attached
+// the constraints and properties of the interaction are decided by the gadget think proc
+Gadget :: struct {
+    gadget_type: Gadget_Type;
+    using gadget_data: union {
+        door: Door;
+        button: Button;
+    }
+    gadget_interaction_volume: Entity_Ref;
+    gadget_interactions: Nested_Array(Gadget_Interaction, GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
+    gadget_children: Nested_Array(Gadget_Child, GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);    
 }
 
 Door :: struct {
@@ -362,4 +464,77 @@ Door :: struct {
         CLOSING_NEGATIVE;
     }
     auto_reset_to_closed: bool;
+}
+
+Button :: struct {
+    press_distance := 0.28;
+    cycle_time_max := 0.3; // how long to complete a full press cycle
+    cycle_time_cur: float;
+}
+
+// may pass null in for 'overlapping'. that indicates that the entity left the volume on the same frame they were destroyed.
+Event_Volume_Overlap_Proc :: #type (volume: *Entity, notify: *Entity, overlapping: *Entity);
+
+Event_Overlap :: struct {
+    entity: Entity_Ref;
+    begin_overlap_frame: s32;
+    last_seen_on_frame: s32;
+}
+
+// uses the bounding box of the entity's collision shape for detecting aabb-aabb overlaps. so, pretty imprecise but that's typically fine for a trigger volume, or as I feel like calling it, an event volume. because it's an event.
+// if attached_to is not set, the event volume will delete itself.
+Event_Volume :: struct {
+    on_begin_overlap: Event_Volume_Overlap_Proc;
+    on_end_overlap: Event_Volume_Overlap_Proc;
+    attached_to: Entity_Ref;
+    offset_from_attachment: Vector3;
+    overlaps: Nested_Array(Event_Overlap, EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
+}
+
+set_event_volume_center :: inline (volume: *Entity, relative_to: *Entity, offset: Vector3) {
+    if is_set(*volume.flags, .EVENT_VOLUME_OFFSET_IS_LOCAL) {
+        volume.center = relative_to.center + local_to_world(offset, relative_to.axes);
+    } else {
+        volume.center = relative_to.center + offset;
+    }
+}
+
+update_event_volumes :: () {
+    for *e : entities {
+        if !is_set(*e.flags, .USES_EVENT_VOLUME) {
+            continue;
+        }
+
+        using e.event_volume;
+        
+        attached_to_entity := try_get_entity(*attached_to);
+        if attached_to_entity == null {
+            queue_entity_deletion(e.ref);     
+            continue;
+        }
+        // attached to an entity, so move with it.
+        set_event_volume_center(e, attached_to_entity, offset_from_attachment);
+        if overlaps.field.count == 0 {
+            continue;
+        }
+
+        any_overlaps_can_interact: bool;
+
+        for #v2 < 0..overlaps.field.count-1 {
+            overlap := *overlaps.field[it];
+            if overlap.begin_overlap_frame == collision_frame {
+                if on_begin_overlap != null {
+                    other_entity := try_get_entity(*overlap.entity);
+                    on_begin_overlap(e, attached_to_entity, other_entity);
+                }
+            } else if overlap.last_seen_on_frame != collision_frame {
+                other_entity := try_get_entity(*overlap.entity);
+                remove_event_volume_overlap_at(e, it);
+                if on_end_overlap != null {
+                    // may pass null in. that indicates that the entity left the volume on the same frame they were destroyed.
+                    on_end_overlap(e, attached_to_entity, other_entity);
+                }
+            }
+        }
+    }
 }

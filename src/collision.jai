@@ -59,6 +59,7 @@ solve_contacts :: () {
     if time_step_count <= 0 {
         return;
     }
+    collision_frame += 1;
 
     // draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
 
@@ -124,6 +125,7 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
     iteration_overlaps := temp_dynamic_array(Contact_Pair, 4096);
 
     find_overlaps_data: Find_Overlaps_Data;
+    find_overlaps_data.already_overlapped.items.allocator = temp;
     set_capacity(*find_overlaps_data.already_overlapped, entity_ref_layer.items.count);
 
     total_time_step := PHYSICS_FIXED_TIME_STEP * time_step_count.(float);
@@ -131,7 +133,11 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
     // todo: parallelize: each thread gets its own contact pairs array. that's really it.
     for *e : entities {
         if e.collision_channels == 0 {
-            continue;
+            if is_set(*e.flags, .USES_EVENT_VOLUME) {
+                if e.overlap_channels == 0 {
+                    continue;
+                }
+            } else continue;
         }
 
         // moved in grid: movers take responsibility for generating new overlaps
@@ -145,7 +151,26 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
             continue;
         }
 
-        array_append(*contact_pairs, iteration_overlaps);
+        // todo: if I want non-aabb event volumes, I could put this logic into narrow phase solving only for non-aabb volumes
+        if is_set(*e.flags, .USES_EVENT_VOLUME) {
+            for pair : iteration_overlaps {
+                found_existing_overlap: bool;
+                for *overlap : e.event_volume.overlaps.field {
+                    if pair.b == overlap.entity {
+                        found_existing_overlap = true;
+                        overlap.last_seen_on_frame = collision_frame;
+                        break;
+                    }
+                }
+                if !found_existing_overlap {
+                    add_event_volume_overlap(e, pair.b);
+                }
+            }
+        }
+
+        if e.collision_channels != 0 {
+            array_append(*contact_pairs, iteration_overlaps);
+        }
     }
 }
 
@@ -158,6 +183,7 @@ solve_contacts_narrow_phase :: (time_step_count: s32) {
         solve_contact_velocities();
         move_stuff(PHYSICS_FIXED_TIME_STEP);
         solve_contact_positions();
+        physics_frame += 1;
     }
 }
 
@@ -193,8 +219,16 @@ solve_contact_velocities :: () {
             entity_a := get_entity(pair.a);
             entity_b := get_entity(pair.b);
 
+
             contact_result: Contact_Result;
             if solve_potential_contact(entity_a.body, entity_a.axes, entity_b.body, entity_b.axes, PHYSICS_FIXED_TIME_STEP, *contact_result) {
+
+                if entity_a == context.ball && entity_b == context.door {
+                    a := 0;
+                    contact_result = .{};
+                    solve_potential_contact(entity_a.body, entity_a.axes, entity_b.body, entity_b.axes, PHYSICS_FIXED_TIME_STEP, *contact_result);
+                }
+
                 pair.contact_normal = contact_result.normal;
 
                 a_to_point := contact_result.point - entity_a.center;
@@ -438,7 +472,9 @@ solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body
     center_diff := body_a.center - body_b.center;
     distance_along_normal := dot(center_diff, axes_b.fore);
     if distance_along_normal < VERY_SMALL_NUMBER {
-        return false;
+        if !rect_b.bidirectional_collision {
+            return false;
+        }
     }
 
     up_dist := clamp(dot(center_diff, axes_b.up), -rect_b.half_height, rect_b.half_height);
@@ -535,3 +571,6 @@ seen_entity_in_group: Bit_Array(1);
 
 color_group_random_state: Random_State;
 altered_cells: [..]s32;
+
+collision_frame: s32;
+physics_frame: s32;

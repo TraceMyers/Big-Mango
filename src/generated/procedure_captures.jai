@@ -44,7 +44,9 @@ Procedure_Capture_Duplicate :: struct {
 	    center_diff = body_a.center - body_b.center;
 	    distance_along_normal = dot(center_diff, axes_b.fore);
 	    if distance_along_normal < VERY_SMALL_NUMBER {
-	        return false;
+	        if !rect_b.bidirectional_collision {
+	            return false;
+	        }
 	    }
 	
 	    up_dist = clamp(dot(center_diff, axes_b.up), -rect_b.half_height, rect_b.half_height);

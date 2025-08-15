@@ -18,6 +18,8 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
         ref = new_ref,
         body = .{
             collision_channels=.DEFAULT, 
+            ray_channels=.DEFAULT,
+            overlap_channels=.DEFAULT,
             center=center, 
             orientation=use_orientation, 
             physics_properties=physics_properties,
@@ -46,28 +48,35 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
     return entity;
 }
 
-remove_entity :: (ref: Entity_Ref) {
+delete_entity :: (ref: Entity_Ref) {
+    // ------------------------------- inline procedures
+    maybe_null_context_entity_pointer :: (e: *Entity) {
+        for context_entity_pointers {
+            if it.* == e {
+                it.* = null;
+            }
+        }
+    }
+
+    maybe_swap_context_entity_pointer_back :: (data_index: s64) {
+        for context_entity_pointers {
+            if it.* == null {
+                continue;
+            }
+            entity_data_index := it.* - entities.data;
+            if entity_data_index == entities.count - 1 {
+                it.* = *entities[data_index];
+            }
+        }
+    }
+    // -------------------------------------------------
+
     deleting_entity := get_entity(ref);
     if deleting_entity.collision_cell_hash != INVALID_COLLISION_CELL_HASH {
         remove_entity_from_collision_grid(deleting_entity);
     }
 
-    // todo: metaprogram some procedures to manage this stuff.
-    if deleting_entity == context.ground {
-        context.ground = null;
-    } else if deleting_entity == context.camera_1 {
-        context.camera_1 = null;
-    } else if deleting_entity == context.camera_2 {
-        context.camera_2 = null;
-    } else if deleting_entity == context.active_camera {
-        context.active_camera = null;
-    } else if deleting_entity == context.player_entity {
-        context.player_entity = null;
-    } else if deleting_entity == context.ball {
-        context.ball = null;
-    } else if deleting_entity == context.ai_guy {
-        context.ai_guy = null;
-    }
+    maybe_null_context_entity_pointer(deleting_entity);
 
     ref_layer_index := ref.index;
     return_item(*entity_ref_layer, ref_layer_index);
@@ -75,6 +84,9 @@ remove_entity :: (ref: Entity_Ref) {
     array_resize(*deleting_entity.name, *name_allocator, 0);
     array_resize(*deleting_entity.meshes, *meshes_allocator, 0);
     array_resize(*deleting_entity.linear_impulses, *linear_impulses_allocator, 0);
+    array_resize(*deleting_entity.event_volume.overlaps, *event_overlap_allocator, 0);
+    array_resize(*deleting_entity.gadget_interactions, *gadget_interaction_allocator, 0);
+    array_resize(*deleting_entity.gadget_children, *gadget_children_allocator, 0);
 
     data_index := deleting_entity - entities.data;
     assert(data_index >= 0 && data_index < entities.count);
@@ -83,22 +95,7 @@ remove_entity :: (ref: Entity_Ref) {
         assert(is_item_in_use(*entity_ref_layer, ref_layer_index_of_last_entity));
         entities[data_index] = entities[entities.count-1];
 
-        // todo: metaprogram some procedures to manage this stuff.
-        if *entities[entities.count-1] == context.ground {
-            context.ground = *entities[data_index];
-        } else if *entities[entities.count-1] == context.camera_1 {
-            context.camera_1 = *entities[data_index];
-        } else if *entities[entities.count-1] == context.camera_2 {
-            context.camera_2 = *entities[data_index];
-        } else if *entities[entities.count-1] == context.active_camera {
-            context.active_camera = *entities[data_index];
-        } else if *entities[entities.count-1] == context.player_entity {
-            context.player_entity = *entities[data_index];
-        } else if *entities[entities.count-1] == context.ball {
-            context.ball = *entities[data_index];
-        } else if *entities[entities.count-1] == context.ai_guy {
-            context.ai_guy = *entities[data_index];
-        }
+        maybe_swap_context_entity_pointer_back(data_index);
 
         entity_ref_layer[ref_layer_index_of_last_entity] = xx data_index;
     }
@@ -107,7 +104,7 @@ remove_entity :: (ref: Entity_Ref) {
 
 spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orientation := QUATERNION_IDENTITY) -> *Entity {
     default_props := Physics_Properties.{
-        linear_acceleration = 500,
+        linear_acceleration=500,
         linear_speed_max=35
     };
 
@@ -119,7 +116,9 @@ spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orien
     reorient_mesh_quat: Quaternion;
     set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
     mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
-    set_meshes(e, .[.{mesh, .{tint=.{0.7,0.7,0.9,1.0}}}]);
+    set_meshes(e, .[.{data=mesh, albedo=.{tint=.{0.7,0.7,0.9,1.0}}}]);
+
+    set(*e.flags, .CAN_INTERACT_WITH_GADGETS);
 
     return e;
 }
@@ -129,5 +128,38 @@ spawn_camera :: (name: string, center := Vector3.{}, orientation := QUATERNION_I
     e.collision_channels = 0;
     return e;
 }
+
+// also spawns an owned event volume
+spawn_gadget :: (name: string, in_gadget: Gadget, center := Vector3.{}, orientation := Quaternion.{}, event_volume_extent := Vector3.{10,10,10}, event_volume_offset := Vector3.{}, event_volume_offset_is_local := true) -> *Entity {
+    gadget := spawn_entity(name, .[.USES_GADGET], center=center, orientation=orientation);
+    gadget.gadget = in_gadget;
+    gadget.ray_channels = .GADGET;
+    gadget.overlap_channels = 0;
+
+    volume := spawn_entity(tprint("%'s event volume", name), .[.USES_EVENT_VOLUME]);
+    // initialize event volume that keeps track of which entities are within range
+    {
+        volume.ray_channels = 0;
+        volume.collision_channels = 0;
+        volume.overlap_channels = ALL_OVERLAP_CHANNELS;
+        set_shape_and_mass(volume, .{type=.AABB, aabb=.{extent=event_volume_extent}}, IMMOVABLE_ENTITY_MASS);
+        if event_volume_offset_is_local {
+            set(*volume.flags, .EVENT_VOLUME_OFFSET_IS_LOCAL);
+        }
+
+        using volume.event_volume;
+        on_begin_overlap = on_gadget_event_volume_begin_overlap;
+        on_end_overlap = on_gadget_event_volume_end_overlap;
+        attached_to = gadget.ref;
+        offset_from_attachment = event_volume_offset;
+
+        set_event_volume_center(volume, gadget, offset_from_attachment);
+    }
+
+    gadget.gadget_interaction_volume = volume.ref;
+
+    return gadget;
+}
+
 
 collision_mesh_color_state: Random_State;

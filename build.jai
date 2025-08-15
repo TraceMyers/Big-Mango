@@ -1,12 +1,12 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-DO_PROFILING :: false;
+PROFILERS_ACTIVE :: false;
 COLLISION_DEBUG :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: false;
+GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 
 #run {
     // make sure environment is set up
@@ -81,7 +81,6 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
     optimization: Optimization_Type;
     if build_release {
-        config_constant := "CFG_DEBUG :: false; CFG_OPTIMIZED :: true";
         build_options.backend = .LLVM;
         optimization = .VERY_OPTIMIZED;
         set_optimization(*build_options, optimization);
@@ -111,10 +110,10 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
     // buildvars
     add_build_string(tprint(
 #string HERE
-BUILDVAR_DO_PROFILING :: %;
+BUILDVAR_PROFILERS_ACTIVE :: %;
 BUILDVAR_COLLISION_DEBUG :: %;
 HERE, 
-        DO_PROFILING,
+        PROFILERS_ACTIVE,
         COLLISION_DEBUG
     ), w);
 

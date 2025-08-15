@@ -188,13 +188,19 @@ render_frame :: () {
                 if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
                     continue;
                 }
-                #if DRAW_COLLISION_MESHES {
-                    draw_collision_mesh(cmd, e, *vp_mat);
-                }
                 meshes := e.meshes.field;
                 if meshes.count == 0 then continue;
                 for *emesh : meshes {
                     draw_mesh(cmd, e, emesh, *vp_mat);
+                }
+            }
+
+            #if DRAW_COLLISION_MESHES {
+                for *e : entities {
+                    if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
+                        continue;
+                    }
+                    draw_collision_mesh(cmd, e, *vp_mat);
                 }
             }
         }
@@ -1773,7 +1779,7 @@ create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.
     generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
 
     capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
-    capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices);
+    capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices, .CAPSULE);
 
     return capsule_mesh;
 }
@@ -1784,7 +1790,7 @@ get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distanc
         sphere_surface_area := 4 * PI * square(radius);
         total_surface_area := cylinder_side_surface_area + sphere_surface_area;
         TARGET_TRIANGLE_COUNT :: 1024;
-        triangulize_distance = total_surface_area / TARGET_TRIANGLE_COUNT;
+        triangulize_distance = sqrt(total_surface_area / TARGET_TRIANGLE_COUNT);
     }
     capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
     mesh := get_existing_mesh(capsule_name);
@@ -1824,6 +1830,8 @@ create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16, primitive
     setup_mesh_data_for_flat_shading(vertices, indices, *modified_vertices);
     create_mesh_data_buffer(*mesh.ibo, indices, .INDEX);
     create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
+
+    mesh.primitive_type = primitive_type;
 
     array_add(*meshes, .{hash, mesh});
     return *meshes[meshes.count-1].mesh;
@@ -2419,7 +2427,7 @@ immediate_submit :: () {
 }
 
 immediate_quad :: (p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, color := Vector4.{1,1,1,1}, uv0 := Vector2.{0,0}, uv1 := Vector2.{1,0}, uv2 := Vector2.{1,1}, uv3 := Vector2.{0, 1}) {
-    if game_frame_count == 0 then return;
+    if game_frame == 0 then return;
     cmd := immediate_command_buffer;
     if immediate_mode == {
     case .TEXTURE;
@@ -2434,7 +2442,7 @@ immediate_quad :: (p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, color := 
 // actually be a learning experience, but doing it via vertex/fragment wouldn't really. anyway, I'm just
 // letting this be the way it is for now.
 immediate_draw_rect :: (rect: Rect_Draw) {
-    if game_frame_count == 0 then return;
+    if game_frame == 0 then return;
     cmd := immediate_command_buffer;
     vkCmdBindPipeline(cmd, .COMPUTE, rect_pipeline);
     vkCmdBindDescriptorSets(cmd, .COMPUTE, rect_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
@@ -2634,65 +2642,73 @@ draw_triangle :: (cmd: VkCommandBuffer, target: VkImage) {
 }
 
 draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4) {
+    if is_set(*entity.flags, .NEVER_SHOW_COLLIDER_MESH) {
+        return;
+    }
     shape := *entity.shape;
     albedo := entity.collision_mesh_albedo;
     if shape.type == {
     case .NONE;
     case .SPHERE;
-        emesh := Mesh_Instance.{sphere_mesh_mid_poly, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=sphere_mesh_mid_poly, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .CAPSULE;
         using shape.capsule;
         // todo: make a capsule mesh shader that actually works so this doesn't have to risk a million capsule meshes being made
         capsule_mesh := get_or_create_capsule_mesh(half_height*2.0, radius);
-        emesh := Mesh_Instance.{capsule_mesh, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=capsule_mesh, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .RECT;
-        emesh := Mesh_Instance.{plane_mesh, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=plane_mesh, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .BOX;
-        emesh := Mesh_Instance.{cube_mesh, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=cube_mesh, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .AABB;
-        emesh := Mesh_Instance.{cube_mesh, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=cube_mesh, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .HALF_SPACE;
-        emesh := Mesh_Instance.{plane_mesh, albedo};
-        draw_mesh(cmd, entity, *emesh, vp_mat);
+        emesh := Mesh_Instance.{data=plane_mesh, albedo=albedo};
+        draw_mesh(cmd, entity, *emesh, vp_mat, true);
     }
 }
 
-draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4) {
+draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4, is_collision_mesh := false) {
     mesh := emesh.data;
     model := make_translation_matrix4(entity.center);
     rot := rotation_matrix(Matrix4, entity.orientation);
     model *= rot;
 
-    if mesh.primitive_type == .NONE {
-        // todo: entity 3d scale
-        draw_mesh(cmd, mesh, *model, *entity.orientation, view_projection, emesh.albedo, 1);
-        return;
-    }
+    if is_collision_mesh {
+        scale: Matrix4 = ---;
+        if #complete mesh.primitive_type == {
+        case .NONE; #through;
+        case .CAPSULE;
+            scale = Matrix4_Identity;
+        case .AABB; #through;
+        case .BOX;
+            box := *entity.body.shape.box;
+            scale = make_scale_matrix4(.{box.half_width*2.0, box.half_length*2.0, box.half_height*2.0});
+        case .SPHERE;
+            sphere := *entity.body.shape.sphere;
+            scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
+        case .HALF_SPACE; #through;
+        case .RECT;
+            rect := *entity.body.shape.rect;
+            scale = make_scale_matrix4(.{rect.half_width*2.0, 1.0, rect.half_height*2.0});
+        }
+        // todo: add draw request to array and draw instanced
+        model *= scale;
+    } else {
+        local_translation := make_translation_matrix4(emesh.offset);
+        local_rotation := rotation_matrix(Matrix4, emesh.orientation);
+        local_scale := make_scale_matrix4(emesh.scale);
 
-    scale: Matrix4 = ---;
-    if #complete mesh.primitive_type == {
-    case .NONE;
-    case .CAPSULE;
-        scale = Matrix4_Identity;
-    case .AABB; #through;
-    case .BOX;
-        box := *entity.body.shape.box;
-        scale = make_scale_matrix4(.{box.half_width*2.0, box.half_length*2.0, box.half_height*2.0});
-    case .SPHERE;
-        sphere := *entity.body.shape.sphere;
-        scale = make_scale_matrix4(.{sphere.radius, sphere.radius, sphere.radius});
-    case .HALF_SPACE; #through;
-    case .RECT;
-        rect := *entity.body.shape.rect;
-        scale = make_scale_matrix4(.{rect.half_width*2.0, 1.0, rect.half_height*2.0});
+        model *= local_translation;
+        model *= local_rotation;
+        model *= local_scale;
     }
-    // todo: add draw request to array and draw instanced
-    model *= scale;
+    
     draw_mesh(cmd, mesh, *model, *entity.orientation, view_projection, emesh.albedo, 1);
 }
 

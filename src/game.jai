@@ -8,7 +8,7 @@ main :: () {
     defer rm_log("good exit", header="SHUTDOWN");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
 
-    #if BUILDVAR_DO_PROFILING {
+    #if BUILDVAR_PROFILERS_ACTIVE {
         scope_timer_stack_diffs.count = 0;
     }
 
@@ -42,6 +42,7 @@ main :: () {
         entity_ai_updates();
         update_thinks();
         solve_contacts();
+        update_event_volumes();
         scratch_think();
         draw_dev_ui();
         do_debug_draws();
@@ -57,7 +58,7 @@ pre_boot :: () {
     // call_rm_log_passthrough_only = true;
 
     Win32.QueryPerformanceFrequency(*cpu_frequency);
-    #if BUILDVAR_DO_PROFILING {
+    #if BUILDVAR_PROFILERS_ACTIVE {
         array_reserve(*scope_timers, 4096);
         array_reserve(*scope_timer_stack_diffs, 4096);
     }
@@ -70,6 +71,8 @@ pre_boot :: () {
     initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
     // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
     bump_allocator_initialize(*program_runtime_allocator);
+
+    entity_pointer_array_init();
 
     // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
     command_line_procedures = COMMAND_LINE_PROCEDURES;
@@ -90,7 +93,7 @@ respond_to_scope_timer_commands :: inline () {
 begin_frame :: () {
     scope_timer();
 
-    array_reserve(*entity_removal_queue, 128);
+    array_reserve(*entity_deletion_queue, 128);
 }
 
 end_frame :: () {
@@ -104,9 +107,9 @@ end_frame :: () {
     entity_frame_turnover();
 
     reset_temporary_storage();
-    game_frame_count += 1;
+    game_frame += 1;
 
-    // doing this after game_frame_count advances so the data are correct for the next generation of entities
+    // doing this after game_frame advances so the data are correct for the next generation of entities
     // set_global_entities();
 
     new_time := seconds_since_init();
@@ -122,13 +125,15 @@ end_frame :: () {
     simulation_times[dt_index] = simulation_dt;
     dt_index = increment_wrap(dt_index, 0, delta_times.count-1);
 
-    #if BUILDVAR_DO_PROFILING {{
+    #if BUILDVAR_PROFILERS_ACTIVE {{
         scope_timer("make scope timer allocations");
         scope_timer_stack_diffs_this_frame := scope_timer_stack_diffs.count - previous_scope_timer_stack_diffs_count;
         scope_timer_stack_diffs_remaining := scope_timer_stack_diffs.allocated - scope_timer_stack_diffs.count;
         estimated_frames_before_allocation := scope_timer_stack_diffs_this_frame.(float64) / scope_timer_stack_diffs_remaining.(float64);
-        if estimated_frames_before_allocation <= 10 {
-            array_reserve(*scope_timer_stack_diffs, 2 * scope_timer_stack_diffs.count);
+        if scope_timer_stack_diffs_this_frame > 0 {
+            if estimated_frames_before_allocation <= 10 {
+                array_reserve(*scope_timer_stack_diffs, 2 * scope_timer_stack_diffs.count);
+            }
         }
         previous_scope_timer_stack_diffs_count = scope_timer_stack_diffs.count;
     }}
@@ -167,7 +172,7 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
 }
 
 scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
-    #if BUILDVAR_DO_PROFILING {
+    #if BUILDVAR_PROFILERS_ACTIVE {
         proc_name :: #procedure_name();
         timer_name :: #run ifx name == "" then tprint("%", proc_name) else tprint("% :: %", proc_name, name);
         id :: #run get_scope_timer_id();
@@ -193,7 +198,7 @@ scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
 }
 
 report_scope_times :: () {
-    #if BUILDVAR_DO_PROFILING {
+    #if BUILDVAR_PROFILERS_ACTIVE {
         Timer_Tracker :: struct {
             cpu_time_deltas: [..]s64;
             frame_cpu_time_deltas: [..]s64;
@@ -278,7 +283,7 @@ report_scope_times :: () {
                 continue;
             }
             log("[%]", scope_timers[it_index].name);
-            scope_min, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
+            scope_mkin, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
             frame_min, frame_median, frame_high_percentile := get_array_stats(it.frame_cpu_time_deltas);
             log(
 #string HERE
@@ -314,7 +319,7 @@ delta_time_multiplier := 1.0; @command_line
 window: Window_Type;
 console_window: Window_Type;
 delta_time := 0.01;
-game_frame_count: s32;
+game_frame: s32;
 per_frame_time: float64;
 non_render_time: float64;
 cpu_frequency: s64;
@@ -391,13 +396,15 @@ Zlib :: #import "zlib";
 #load "collision_grid.jai";
 #load "ai/ai.jai";
 #load "think.jai";
+#load "event_overlap.jai";
 
 #load "collision_types.jai";
 
 #load "entities/entity.jai";
 #load "entities/entity_control.jai";
 #load "entities/spawn_entity.jai";
-// #load "overlap.jai";
+#load "entities/entity_flags.jai";
+#load "entities/prefabs.jai";
 
 kernel32 :: #system_library "kernel32";
 GetConsoleWindow :: () -> Win32.HWND #foreign kernel32;

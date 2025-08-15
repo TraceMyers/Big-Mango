@@ -1,6 +1,6 @@
 
 // todo: this should take unit axes and it can just have a convenience wrapper that takes quaternions
-is_overlap :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     if collider_a.type == {
     case .SPHERE;
         if collider_b.type == {
@@ -91,14 +91,14 @@ is_overlap :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, c
 
 // ------------------------------------------------------------------------------------------------------- sphere
 
-is_overlap_sphere_sphere :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_sphere :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a := *collider_a.sphere;
     sphere_b := *collider_b.sphere;
     combined_radii := sphere_a.radius + sphere_b.radius;
     return distance_squared(position_a, position_b) < square(combined_radii);
 }
 
-is_overlap_sphere_capsule :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_capsule :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a    := *collider_a.sphere;
     capsule_b   := *collider_b.capsule;
 
@@ -111,7 +111,7 @@ is_overlap_sphere_capsule :: (collider_a: Entity_Collider, position_a: Vector3, 
     return distance_squared(position_a, pt_on_seg) < square(combined_radii);
 }
 
-is_overlap_sphere_rect :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_rect :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a    := *collider_a.sphere;
     rect_b     := *collider_b.rect;
 
@@ -130,7 +130,7 @@ is_overlap_sphere_rect :: (collider_a: Entity_Collider, position_a: Vector3, axe
     return distance_squared(position_a, pt_on_rect) < square(sphere_a.radius);
 }
 
-is_overlap_sphere_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_box :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a    := *collider_a.sphere;
     box_b       := *collider_b.box;
     packaged_box := Box.{position_b, box_b.extent, axes_b.fore, axes_b.up, axes_b.right};
@@ -138,14 +138,14 @@ is_overlap_sphere_box :: (collider_a: Entity_Collider, position_a: Vector3, axes
     return distance_squared(position_a, pt_in_box) < square(sphere_a.radius);
 }
 
-is_overlap_sphere_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_aabb :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a    := *collider_a.sphere;
     aabb_b      := *collider_b.aabb;
     pt_in_box := closest_point_in_aabb(position_a, .{position_b, aabb_b.extent});
     return distance_squared(position_a, pt_in_box) < square(sphere_a.radius);
 }
 
-is_overlap_sphere_half_space :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_sphere_half_space :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     sphere_a    := *collider_a.sphere;
     plane_normal := axes_b.fore;
     _, signed_dist := project_point_onto_plane(position_a, position_b, plane_normal);
@@ -154,11 +154,11 @@ is_overlap_sphere_half_space :: (collider_a: Entity_Collider, position_a: Vector
 
 // ------------------------------------------------------------------------------------------------------- capsule
 
-is_overlap_capsule_sphere :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_sphere :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_sphere_capsule(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_capsule_capsule :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_capsule :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     capsule_a := *collider_a.capsule;
     capsule_b := *collider_b.capsule;
 
@@ -177,7 +177,7 @@ is_overlap_capsule_capsule :: (collider_a: Entity_Collider, position_a: Vector3,
     return distance_squared(pt_on_a, pt_on_b) < square(combined_radii);
 }
 
-is_overlap_capsule_rect :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_rect :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     capsule_a   := *collider_a.capsule;
     rect_b     := *collider_b.rect;
 
@@ -209,7 +209,7 @@ is_overlap_capsule_rect :: (collider_a: Entity_Collider, position_a: Vector3, ax
     return distance_squared(pt_on_a, pt_on_b) < square(capsule_a.radius);
 }
 
-is_overlap_capsule_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_box :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // capsule_a   := *collider_a.capsule;
     // box_b       := *collider_b.box;
 
@@ -231,7 +231,7 @@ is_overlap_capsule_box :: (collider_a: Entity_Collider, position_a: Vector3, axe
     return false;
 }
 
-is_overlap_capsule_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_aabb :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // capsule_a   := *collider_a.capsule;
     // box_b       := *collider_b.box;
 
@@ -249,7 +249,7 @@ is_overlap_capsule_aabb :: (collider_a: Entity_Collider, position_a: Vector3, ax
     return false;
 }
 
-is_overlap_capsule_half_space :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_capsule_half_space :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // capsule_a := *collider_a.capsule;
 
     // capsule_up_axis := up_direction(*axes_a);
@@ -269,15 +269,15 @@ is_overlap_capsule_half_space :: (collider_a: Entity_Collider, position_a: Vecto
 
 // ------------------------------------------------------------------------------------------------------- rect
 
-is_overlap_rect_sphere :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_rect_sphere :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_sphere_rect(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_rect_capsule :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_rect_capsule :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_capsule_rect(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_rect_rect :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_rect_rect :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // rect_a := *collider_a.rect;
     // recrect= *collider_b.plane;
  
@@ -304,7 +304,7 @@ is_overlap_rect_rect :: (collider_a: Entity_Collider, position_a: Vector3, axes_
 }
 
 // note: this algorithm doesn't work. (worked out counter-example on paper) it *could* be part of a bad iterative solution, but that's it.
-is_overlap_rect_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_rect_box :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // plane_a := *collider_a.plane;
     // box_b   := *collider_b.box;
 
@@ -332,7 +332,7 @@ is_overlap_rect_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a
     return false;
 }
 
-is_overlap_rect_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_rect_aabb :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // rect_a := *collider_a.plane;
     // box_b   := *collider_b.box;
 
@@ -355,19 +355,19 @@ is_overlap_rect_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_
 
 // ------------------------------------------------------------------------------------------------------- box
 
-is_overlap_box_sphere :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_box_sphere :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_sphere_box(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_box_capsule :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_box_capsule :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_capsule_box(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_box_rect :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_box_rect :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_rect_box(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_box_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_box_box :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // box_a := *collider_a.box;
     // box_b := *collider_b.box;
 
@@ -512,11 +512,11 @@ is_overlap_box_box :: (collider_a: Entity_Collider, position_a: Vector3, axes_a:
     return false;
 }
 
-is_overlap_box_aabb :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
-    return is_overlap_box_box(collider_b, position_b, axes_b, collider_a, position_a, QUATERNION_IDENTITY);
+is_overlap_box_aabb :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
+    return is_overlap_box_box(collider_b, position_b, axes_b, collider_a, position_a, axes_a, QUATERNION_IDENTITY);
 }
 
-is_overlap_box_half_space :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_box_half_space :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // box_a := *collider_a.box;
 
     // box_fore, box_up, box_right: Vector3 = ---;
@@ -536,23 +536,23 @@ is_overlap_box_half_space :: inline (collider_a: Entity_Collider, position_a: Ve
 
 // ------------------------------------------------------------------------------------------------------- aabb
 
-is_overlap_aabb_sphere :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_sphere :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_sphere_aabb(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_aabb_capsule :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_capsule :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_capsule_aabb(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_aabb_rect :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_rect :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_rect_aabb(collider_b, position_b, axes_b, collider_a, position_a, axes_a);
 }
 
-is_overlap_aabb_box :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_box :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     return is_overlap_box_box(collider_b, position_b, QUATERNION_IDENTITY, collider_a, position_a, axes_a);
 }
 
-is_overlap_aabb_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_aabb :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     aabb_a := *collider_a.aabb;
     aabb_b := *collider_b.aabb;
     abs_pos_diff := abs(position_a - position_b);
@@ -561,7 +561,7 @@ is_overlap_aabb_aabb :: (collider_a: Entity_Collider, position_a: Vector3, axes_
         && abs_pos_diff.z < aabb_a.half_height + aabb_b.half_height;
 }
 
-is_overlap_aabb_half_space :: inline (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+is_overlap_aabb_half_space :: inline (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
     // box_a := *collider_a.box;
 
     // plane_normal := fore_direction(*axes_b);
@@ -576,7 +576,7 @@ is_overlap_aabb_half_space :: inline (collider_a: Entity_Collider, position_a: V
     return false;
 }
 
-// is_overlap_box_box_my_take :: (collider_a: Entity_Collider, position_a: Vector3, axes_a: Axes, collider_b: Entity_Collider, position_b: Vector3, axes_b: Axes) -> bool {
+// is_overlap_box_box_my_take :: (collider_a: Collision_Shape, position_a: Vector3, axes_a: Axes, collider_b: Collision_Shape, position_b: Vector3, axes_b: Axes) -> bool {
 //     box_a := *collider_a.box;
 //     box_b := *collider_b.box;
 
