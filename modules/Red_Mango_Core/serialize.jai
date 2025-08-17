@@ -182,6 +182,52 @@ serialize_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// nested arrays
+
+serialize :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S)) 
+#modify {
+    return is_serial_primitive(T);
+} {
+    if rw_mode == .WRITE {
+        serialize_nested_array(buffer, array, nesting_allocator, .WRITE);
+    } else {
+        serialize_nested_array(buffer, array, nesting_allocator, .READ);
+    }
+}
+
+serialize_nested_array :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S), $mode: Rw_Mode) 
+#modify {
+    return is_serial_primitive(T);
+} {
+    array_count: s32 = xx array.field.count;
+    serialize_primitive(buffer, *array_count, mode);
+    serialize_nested_array_data(buffer, array, nesting_allocator, array_count, mode);
+}
+
+serialize_nested_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S), array_count: s32, $mode: Rw_Mode) 
+#modify {
+    return is_serial_primitive(T);
+} {
+    validate_read_write();
+    if array_count == 0 {
+        return;
+    }
+    align_head_up_for_type(buffer, T);
+    array_size := size_of(T) * array_count;
+    new_head := head + array_size;
+    check_new_head(buffer, new_head);
+    #if mode == .WRITE {
+        memcpy(memory.data + head, array.field.data, array_size);
+    } else {
+        if array.field.count != array_count {
+            array_resize(array, nesting_allocator, array_count);
+        }
+        memcpy(array.field.data, memory.data + head, array_size);
+    }
+    head = new_head;
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // strings
 
 serialize :: (using buffer: *Serializer($alloc_m, $align_m), str: *string) {

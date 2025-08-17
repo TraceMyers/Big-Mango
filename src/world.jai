@@ -227,6 +227,8 @@ save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     }
 
     // maybe better to just to slowly & carefully expand the saving & loading support for data that appears stable and would be immediately useful rather than trying to generally serialize all world data. that seems like an endless black hole of work the more I think about it.
+    // $todo: HOWEVER, being able to generally encode pointers (ONLY THOSE WITHIN THE BLOCK) as offsets from the virtual allocation head would be VERY useful.
+    // $todo: just a single flat pool for the whole program... there's a lot of power in that.
 
     for *e : entities {
         id := e.id;
@@ -234,6 +236,8 @@ save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
         if rw_mode == .READ {
             assert(id == e.id);
         }
+
+        // todo: serialize flags
 
         serialize(*record, (*e.center).(*u8), size_of(type_of(e.center)));
 
@@ -253,7 +257,24 @@ save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
             serialize(*record, (*it.scale).(*u8), size_of(type_of(it.scale)));
             serialize(*record, (*it.offset).(*u8), size_of(type_of(it.offset)));
             serialize(*record, (*it.orientation).(*u8), size_of(type_of(it.orientation)));
-            
+        }
+
+        // a little extra extra validation
+        uses_gadget : u8 = xx is_set(*e.flags, .USES_GADGET);
+        serialize(*record, *uses_gadget, 1);
+        if rw_mode == .READ {
+            assert(uses_gadget == xx is_set(*e.flags, .USES_GADGET));
+        }
+
+        if uses_gadget {
+            serialize(*record, (*e.gadget).(*u8), size_of(type_of(e.gadget)));
+            if rw_mode == .READ {
+                // just restored some bad pointers. clear them.
+                e.gadget_interactions = .{};
+                e.gadget_children = .{};
+            }
+            serialize(*record, *e.gadget_interactions, *gadget_interaction_allocator);
+            serialize(*record, *e.gadget_children, *gadget_children_allocator);
         }
     }
 
