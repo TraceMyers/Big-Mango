@@ -16,41 +16,45 @@ process_entity_input :: (e: *Entity) {
 }
 
 process_entity_input :: () {
+    using context.world;
+
+    player_entity := try_get_entity(*player_entity_ref);
+    camera_1 := try_get_entity(*camera_1_ref);
+    camera_2 := try_get_entity(*camera_2_ref);
+
+    if player_entity == null then return;
     if input_focus != .GAME then return;
+
     if control_mode == .FIRST_PERSON_CAMERA_ONLY {
-        context.active_camera = context.camera_2;
-        if context.camera_2 != null {
-            set(*context.camera_2.flags, .ACCELERATE_IN_3D);
-            handle_first_person_input(context.camera_2, null, .{}, true);
+        if camera_2 != null {
+            set(*camera_2.flags, .ACCELERATE_IN_3D);
+            handle_first_person_input(camera_2, null, .{}, true);
         }
     } else if control_mode == .FIRST_PERSON_PLAYER {
-        attached_camera := get_entity(context.player_entity.attached_camera);
-        context.active_camera = attached_camera;
-        if context.player_entity != null && attached_camera != null {
-            unset(*context.player_entity.flags, .ACCELERATE_IN_3D);
-            first_person_camera_offset := Vector3.{z=context.player_entity.body.shape.half_height * 0.92};
-            handle_first_person_input(context.player_entity, attached_camera, first_person_camera_offset, false);
-            handle_player_input(context.player_entity);
+        attached_camera := get_entity(player_entity.attached_camera);
+        if player_entity != null && attached_camera != null {
+            unset(*player_entity.flags, .ACCELERATE_IN_3D);
+            first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
+            handle_first_person_input(player_entity, attached_camera, first_person_camera_offset, false);
+            handle_player_input(player_entity);
         }
     } else if control_mode == .FIRST_PERSON_PLAYER_FREE_FLY {
-        context.active_camera = context.camera_1;
-        if context.player_entity != null && context.camera_1 != null {
-            set(*context.player_entity.flags, .ACCELERATE_IN_3D);
-            first_person_camera_offset := Vector3.{z=context.player_entity.body.shape.half_height * 0.92};
-            handle_first_person_input(context.player_entity, context.camera_1, first_person_camera_offset, true);
-            handle_player_input(context.player_entity);
+        if player_entity != null && camera_1 != null {
+            set(*player_entity.flags, .ACCELERATE_IN_3D);
+            first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
+            handle_first_person_input(player_entity, camera_1, first_person_camera_offset, true);
+            handle_player_input(player_entity);
         }
     } else { // ortho
-        context.active_camera = context.camera_2;
-        if context.player_entity != null && context.camera_2 != null {
-            unset(*context.player_entity.flags, .ACCELERATE_IN_3D);
-            handle_ortho_input(context.player_entity, context.camera_2);
-            handle_player_input(context.player_entity);
+        if player_entity != null && camera_2 != null {
+            unset(*player_entity.flags, .ACCELERATE_IN_3D);
+            handle_ortho_input(player_entity, camera_2);
+            handle_player_input(player_entity);
         }
     }
 
-    if context.player_entity != null {
-        apply_acceleration(context.player_entity);
+    if player_entity != null {
+        apply_acceleration(player_entity);
     }
 }
 
@@ -163,17 +167,19 @@ handle_camera_relative_movement :: (entity: *Entity, rel_camera: *Entity, move_i
 
     move_dir: Vector3;
 
-    if Input.input_button_states[#char "W"] & .DOWN {
-        move_dir += axis_fore;
-    }
-    if Input.input_button_states[#char "S"] & .DOWN {
-        move_dir -= axis_fore;
-    }
-    if Input.input_button_states[#char "D"] & .DOWN {
-        move_dir += axis_right;
-    }
-    if Input.input_button_states[#char "A"] & .DOWN {
-        move_dir -= axis_right;
+    if window_is_active() && (Input.input_button_states[Input.Key_Code.CTRL] & .DOWN) == 0 {
+        if Input.input_button_states[#char "W"] & .DOWN {
+            move_dir += axis_fore;
+        }
+        if Input.input_button_states[#char "S"] & .DOWN {
+            move_dir -= axis_fore;
+        }
+        if Input.input_button_states[#char "D"] & .DOWN {
+            move_dir += axis_right;
+        }
+        if Input.input_button_states[#char "A"] & .DOWN {
+            move_dir -= axis_right;
+        }
     }
 
     // paranoid/safe
@@ -233,5 +239,5 @@ input_set_move :: (args: []Command_Line_Argument) {
 
 teleport_player_to_free_fly_camera :: (args: []Command_Line_Argument) {
     init_command_line_proc_or_return(args, 0);
-    context.player_entity.center = context.camera_2.center;
+    get_entity(context.world.player_entity_ref).center = get_entity(context.world.camera_2_ref).center;
 } @command_line

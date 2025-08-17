@@ -7,7 +7,7 @@ Scope_Timer_Stack_Diff :: struct {
     cpu_time: s64;
     timer_id: u32;
     is_scope_begin: bool;
-    is_game_frame: bool;
+    is_program_frame: bool;
 }
 
 // todo: should be able to start/stop profiling, which means there should be multiple profiling sessions.

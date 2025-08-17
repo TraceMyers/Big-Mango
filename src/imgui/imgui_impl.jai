@@ -599,10 +599,11 @@ add_entity_pocket :: () {
 add_dev_ui_scratch_space :: () {
     if CollapsingHeader("scratch") {
         scope_push_indent();
-        door_volume := try_get_entity(*context.door.gadget_interaction_volume);
-        Text("door is overlapped: %", is_set(*context.door.flags, .GADGET_EVENT_VOLUME_IS_OVERLAPPED));
-        Text("door is active: %", is_gadget_active(context.door));
-        Text("door is working: %", is_set(*context.door.flags, .GADGET_WORKING));
+        door := get_entity(context.world.door_ref);
+        door_volume := try_get_entity(*door.gadget_interaction_volume);
+        Text("door is overlapped: %", is_set(*door.flags, .GADGET_EVENT_VOLUME_IS_OVERLAPPED));
+        Text("door is active: %", is_gadget_active(door));
+        Text("door is working: %", is_set(*door.flags, .GADGET_WORKING));
         Text("door volume overlaps");
         scope_push_indent();
         if door_volume != null {
@@ -611,7 +612,7 @@ add_dev_ui_scratch_space :: () {
             } else for door_volume.event_volume.overlaps.field {
                 e := try_get_entity(*it.entity);
                 if e != null {
-                    Text("overlapper: %, can_interact %", e.name.field, is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS));
+                    Text("overlapper: %, can_interact %", e.name.field, is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY));
                 } else {
                     Text("null entity");
                 }

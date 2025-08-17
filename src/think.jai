@@ -1,6 +1,6 @@
 
 update_thinks :: () {
-    for *e : entities {
+    for *e : context.world.entities {
         if is_set(*e.flags, .PLAYER_ENTITY_THINK) {
             player_entity_think(e);
         }
@@ -28,13 +28,12 @@ player_entity_think :: (e: *Entity) {
 
             request.channels = .DEFAULT;
             if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
-                hit_entity := get_entity(result.hit_entity);
-                if hit_entity == context.ball {
-                    e.holding_entity = hit_entity.ref;
+                if result.hit_entity == context.world.ball_ref {
+                    e.holding_entity = result.hit_entity;
                 }
             }
 
-            if is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS) {
+            if is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY) {
                 result = .{};
                 request.channels = .GADGET;
                 request.hit_back_face = true;
@@ -42,7 +41,7 @@ player_entity_think :: (e: *Entity) {
                     hit_entity := get_entity(result.hit_entity);
                     assert(is_set(*hit_entity.flags, .USES_GADGET));
                     if gadget_can_take_interaction(hit_entity, e) {
-                        add_gadget_interaction(hit_entity, .{e.ref, e.center, 0});
+                        add_gadget_interaction(hit_entity, .{input=.{source_entity=e.ref, source_location=e.center}});
                     }
                 }
             }
@@ -73,12 +72,39 @@ gadget_think :: (e: *Entity) {
         return;
     }
 
+    take_interaction: *Gadget_Interaction;
+
+    if gadget_can_respond_to_interaction(e) {
+        for *e.gadget_interactions.field {
+            if per_frame_time >= it.end_time {
+                take_interaction = it;
+                break;
+            }
+
+            time_passed := per_frame_time - it.begin_time;
+            time_total := it.end_time - it.begin_time;
+            norm_time := clamp(time_passed / time_total, 0.0, 1.0);
+            start_location := it.source_location;
+            end_location := e.center;
+            position_on_path := start_location + (end_location - start_location) * norm_time;
+
+            move_norm := normalize(end_location - start_location);
+            draw_line(position_on_path - move_norm * 2.5, position_on_path + move_norm * 2.5, .{r=1,g=1,b=1});
+            draw_sphere(position_on_path, 0.38, .{r=1,g=1,b=1}, .LOW);
+        }
+    }
+
     gadget_working, emit_interact_to_children: bool;
     if e.gadget_type == {
     case .DOOR;
-        gadget_working, emit_interact_to_children = gadget_door_think(e);
+        gadget_working, emit_interact_to_children = gadget_door_think(e, take_interaction);
     case .BUTTON;
-        gadget_working, emit_interact_to_children = gadget_button_think(e);
+        gadget_working, emit_interact_to_children = gadget_button_think(e, take_interaction);
+    }
+
+    if take_interaction != null {
+        index := take_interaction - e.gadget_interactions.field.data;
+        remove_gadget_interaction_at(e, index);
     }
 
     if gadget_working {
@@ -96,70 +122,87 @@ gadget_think :: (e: *Entity) {
                 continue;
             }
             if gadget_can_take_interaction(child, e, true) {
-                add_gadget_interaction(child, .{e.ref, e.center, 0});
+                delay := get_gadget_interaction_delay_with_gadget(e, child);
+                add_gadget_interaction(child, .{input=.{e.ref, e.center, delay, 0}});
             }
         }
     }
 }
 
-gadget_door_think :: (using e: *Entity) -> working: bool, emit_interact_to_children: bool {
+gadget_can_respond_to_interaction :: (using e: *Entity) -> bool {
+    if #complete e.gadget_type == {
+    case .DOOR;
+        return door.state == .CLOSED || door.state == .OPEN_POSITIVE || door.state == .OPEN_NEGATIVE;
+    case .BUTTON;
+        return true;
+    }
+}
+
+gadget_door_think :: (using e: *Entity, interaction: *Gadget_Interaction) -> working: bool, emit_interact_to_children: bool {
     working: bool;
     emit_interact: bool;
 
+    if interaction != null {
+        working = true;
+        door.rotation_distance = 0;
+        door.pivot_location = center + door.pivot_local_offset.x * axes.right + door.pivot_local_offset.y * axes.fore * door.pivot_local_offset.z * axes.up;
+        if door.state == .CLOSED {
+            toward_interaction := interaction.source_location - center;
+            in_positive_direction := dot(toward_interaction, axes.fore) > 0;
+            door.state = ifx in_positive_direction then .OPENING_POSITIVE else .OPENING_NEGATIVE;
+        } else if door.state == .OPEN_POSITIVE {
+            door.state = .CLOSING_NEGATIVE;
+        } else if door.state == .OPEN_NEGATIVE {
+            door.state = .CLOSING_POSITIVE;
+        }
+    }
+
     if door.state == .CLOSED || door.state == .OPEN_POSITIVE || door.state == .OPEN_NEGATIVE {
-        // $rm_optimization: don't have to set these every frame.
+        // $rm_micro_optimization: don't have to set these every frame.
         working = false;
         door.rotation_distance = 0;
         door.pivot_location = center + door.pivot_local_offset.x * axes.right + door.pivot_local_offset.y * axes.fore * door.pivot_local_offset.z * axes.up;
-
-        if gadget_interactions.field.count > 0 {
-            working = true;
-            interaction := *gadget_interactions.field[0];
-            if door.state == .CLOSED {
-                toward_interaction := interaction.source_location - center;
-                in_positive_direction := dot(toward_interaction, axes.fore) > 0;
-                door.state = ifx in_positive_direction then .OPENING_POSITIVE else .OPENING_NEGATIVE;
-            } else if door.state == .OPEN_POSITIVE {
-                door.state = .CLOSING_NEGATIVE;
-            } else {
-                door.state = .CLOSING_POSITIVE;
-            }
-            remove_gadget_interaction_at(e, 0);
-            emit_interact = true;
-        }
     } else {
         working = true;
         rotation_direction: float;
         end_state: type_of(door.state);
         end_orientation: Quaternion;
+        begin_orientation: Quaternion;
 
         if door.state == .OPENING_POSITIVE {
             end_state = .OPEN_POSITIVE;
             rotation_direction = 1.0;
+            begin_orientation = door.closed_orientation;
             end_orientation = door.closed_orientation;
             rotate(*end_orientation, door.pivot_axis, door.rotation_angle * rotation_direction);
         } else if door.state == .OPENING_NEGATIVE {
             end_state = .OPEN_NEGATIVE;
             rotation_direction = -1.0;
+            begin_orientation = door.closed_orientation;
             end_orientation = door.closed_orientation;
             rotate(*end_orientation, door.pivot_axis, door.rotation_angle * rotation_direction);
         } else if door.state == .CLOSING_POSITIVE {
             end_state = .CLOSED;
             rotation_direction = 1.0;
+            begin_orientation = door.closed_orientation;
             end_orientation = door.closed_orientation;
+            rotate(*begin_orientation, door.pivot_axis, -door.rotation_angle * rotation_direction);
         } else { // CLOSING_NEGATIVE
             end_state = .CLOSED;
             rotation_direction = -1.0;
+            begin_orientation = door.closed_orientation;
             end_orientation = door.closed_orientation;
+            rotate(*begin_orientation, door.pivot_axis, -door.rotation_angle * rotation_direction);
         }
 
         rotation_delta := door.rotation_speed * delta_time;
         door.rotation_distance += rotation_delta;
-        rotation_delta_signed := rotation_delta * rotation_direction;
+        norm_distance := max(door.rotation_distance / door.rotation_angle, 0);
 
-        if door.rotation_distance >= door.rotation_angle {
+        if norm_distance >= 1.0 {
             set_orientation(e, end_orientation);
             door.state = end_state;
+            emit_interact = true;
             if (door.state == .OPEN_POSITIVE || door.state == .OPEN_NEGATIVE) {
                 if door.auto_reset_to_closed {
                     door.state = .CLOSED;
@@ -167,7 +210,8 @@ gadget_door_think :: (using e: *Entity) -> working: bool, emit_interact_to_child
                 }
             }
         } else {
-            rotate(e, door.pivot_axis, rotation_delta_signed);
+            // by doing an interp rotate rather than a stepped rotate, we avoid accruing float error over our plentiful harvest of frames
+            interp_rotate(e, begin_orientation, end_orientation, norm_distance);
         }
 
         new_pivot_location := center + door.pivot_local_offset.x * axes.right + door.pivot_local_offset.y * axes.fore * door.pivot_local_offset.z * axes.up;
@@ -178,33 +222,31 @@ gadget_door_think :: (using e: *Entity) -> working: bool, emit_interact_to_child
     return working, emit_interact;
 }
 
-gadget_button_think :: (using e: *Entity) -> working: bool, emit_interact_to_children: bool {
+gadget_button_think :: (using e: *Entity, interaction: *Gadget_Interaction) -> working: bool, emit_interact_to_children: bool {
     working: bool;
     emit_interact: bool;
 
-    // $todo: buttons can't work 100% correctly if they can't use a parent entity's location as a reference. this could be done
-    // by just having a parent 'origin' object
-
-    if gadget_interactions.field.count > 0 {
-        interaction := *gadget_interactions.field[0];
-        remove_gadget_interaction_at(e, 0);
-        emit_interact = true;
-
+    if interaction != null {
         norm2_cycle_time_cur := clamp((button.cycle_time_cur / button.cycle_time_max) * 2.0, 0, 2);
-
         if norm2_cycle_time_cur < 1.0 {
-            norm2_cycle_time_cur += 0.8;
+            norm2_cycle_time_cur += 0.75;
         } else {
             norm2_cycle_time_cur = min(2.0 - norm2_cycle_time_cur, 1.0);
         }
-
         button.cycle_time_cur = norm2_cycle_time_cur * 0.5 * button.cycle_time_max;
     }
 
     if button.cycle_time_cur != 0 {
         working = true;
 
+        havent_emitted_signal := button.cycle_time_cur < button.cycle_time_max * 0.5;
         button.cycle_time_cur += delta_time;
+        should_emit_signal := button.cycle_time_cur >= button.cycle_time_max * 0.5;
+
+        if havent_emitted_signal && should_emit_signal {
+            emit_interact = true;
+        }
+
         norm2_cycle_time_cur := clamp((button.cycle_time_cur / button.cycle_time_max) * 2.0, 0, 2);
 
         norm_dist: float;

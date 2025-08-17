@@ -1,5 +1,7 @@
 
 spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties := Physics_Properties.{}) -> *Entity {
+    using context.world;
+
     assert(name != "");
     entity_id_counter += 1;
 
@@ -49,34 +51,12 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
 }
 
 delete_entity :: (ref: Entity_Ref) {
-    // ------------------------------- inline procedures
-    maybe_null_context_entity_pointer :: (e: *Entity) {
-        for context_entity_pointers {
-            if it.* == e {
-                it.* = null;
-            }
-        }
-    }
-
-    maybe_swap_context_entity_pointer_back :: (data_index: s64) {
-        for context_entity_pointers {
-            if it.* == null {
-                continue;
-            }
-            entity_data_index := it.* - entities.data;
-            if entity_data_index == entities.count - 1 {
-                it.* = *entities[data_index];
-            }
-        }
-    }
-    // -------------------------------------------------
+    using context.world;
 
     deleting_entity := get_entity(ref);
     if deleting_entity.collision_cell_hash != INVALID_COLLISION_CELL_HASH {
         remove_entity_from_collision_grid(deleting_entity);
     }
-
-    maybe_null_context_entity_pointer(deleting_entity);
 
     ref_layer_index := ref.index;
     return_item(*entity_ref_layer, ref_layer_index);
@@ -94,8 +74,6 @@ delete_entity :: (ref: Entity_Ref) {
         ref_layer_index_of_last_entity := entities[entities.count-1].ref.index;
         assert(is_item_in_use(*entity_ref_layer, ref_layer_index_of_last_entity));
         entities[data_index] = entities[entities.count-1];
-
-        maybe_swap_context_entity_pointer_back(data_index);
 
         entity_ref_layer[ref_layer_index_of_last_entity] = xx data_index;
     }
@@ -118,7 +96,7 @@ spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orien
     mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
     set_meshes(e, .[.{data=mesh, albedo=.{tint=.{0.7,0.7,0.9,1.0}}}]);
 
-    set(*e.flags, .CAN_INTERACT_WITH_GADGETS);
+    set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY);
 
     return e;
 }
@@ -158,8 +136,11 @@ spawn_gadget :: (name: string, in_gadget: Gadget, center := Vector3.{}, orientat
 
     gadget.gadget_interaction_volume = volume.ref;
 
+    if in_gadget.gadget_type == {
+    case .DOOR;
+    case .BUTTON;
+        gadget.delay_interacting_with_gadgets = .{type=.BY_DISTANCE, value=.{by_distance=.{constant=0.1, time_per_unit=0.003}}};
+    }
+
     return gadget;
 }
-
-
-collision_mesh_color_state: Random_State;

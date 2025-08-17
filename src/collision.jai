@@ -44,14 +44,8 @@ Z_KILL_FLOOR :: -100.0;
     collision_assert :: (b: bool) #expand {}
 }
 
-_collision :: (stage: Boot_Stage) -> bool {
-    if stage == .STARTUP {
-        array_reserve(*altered_cells, 4096);
-    }
-    return true;
-}
-
 solve_contacts :: () {
+    using context.world;
     scope_timer();
 
     time_step_accumulator += delta_time;
@@ -77,12 +71,13 @@ solve_contacts :: () {
     solve_contacts_narrow_phase(time_step_count);
 
     TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS];
-    for e : entities {
+    for e : context.world.entities {
         unset_multiple(*e.flags, TRANSIENT_COLLISION_FLAGS);
     }
 }
 
 remove_entity_from_collision_grid :: (e: *Entity) {
+    using context.world;
     hash_upper := e.collision_cell_hash >> 32;
     grid_pos_min := collision_grid_index_to_grid_position(xx hash_upper);
     hash_lower := e.collision_cell_hash & 0xffff_ffff;
@@ -92,10 +87,11 @@ remove_entity_from_collision_grid :: (e: *Entity) {
 }
 
 update_collision_grid_cell_occupations :: () {
+    using context.world;
     scope_timer();
     defer array_reset_keeping_memory(*altered_cells);
 
-    for *e : entities {
+    for *e : context.world.entities {
         if e.collision_channels == 0 {
             continue;
         }
@@ -120,18 +116,19 @@ update_collision_grid_cell_occupations :: () {
 }
 
 solve_contacts_broad_phase :: (time_step_count: s32) {
+    using context.world;
     scope_timer();
 
     iteration_overlaps := temp_dynamic_array(Contact_Pair, 4096);
 
     find_overlaps_data: Find_Overlaps_Data;
     find_overlaps_data.already_overlapped.items.allocator = temp;
-    set_capacity(*find_overlaps_data.already_overlapped, entity_ref_layer.items.count);
+    set_capacity(*find_overlaps_data.already_overlapped, context.world.entity_ref_layer.items.count);
 
     total_time_step := PHYSICS_FIXED_TIME_STEP * time_step_count.(float);
 
     // todo: parallelize: each thread gets its own contact pairs array. that's really it.
-    for *e : entities {
+    for *e : context.world.entities {
         if e.collision_channels == 0 {
             if is_set(*e.flags, .USES_EVENT_VOLUME) {
                 if e.overlap_channels == 0 {
@@ -175,6 +172,7 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
 }
 
 solve_contacts_narrow_phase :: (time_step_count: s32) {
+    using context.world;
     scope_timer();
 
     for 0..time_step_count-1 {
@@ -188,8 +186,9 @@ solve_contacts_narrow_phase :: (time_step_count: s32) {
 }
 
 apply_impulses :: () {
+    using context.world;
     scope_timer();
-    for *e : entities {
+    for *e : context.world.entities {
         if is_set(*e.flags, .APPLY_GRAVITY) {
             e.velocity.z -= e.physics_properties.gravity_accel * PHYSICS_FIXED_TIME_STEP;
         }
@@ -213,21 +212,15 @@ apply_impulses :: () {
 }
 
 solve_contact_velocities :: () {
+    using context.world;
     scope_timer();
     for 0..COLLISION_VELOCITY_ITERATION_COUNT-1 {
         for *pair : contact_pairs {
             entity_a := get_entity(pair.a);
             entity_b := get_entity(pair.b);
 
-
             contact_result: Contact_Result;
             if solve_potential_contact(entity_a.body, entity_a.axes, entity_b.body, entity_b.axes, PHYSICS_FIXED_TIME_STEP, *contact_result) {
-
-                if entity_a == context.ball && entity_b == context.door {
-                    a := 0;
-                    contact_result = .{};
-                    solve_potential_contact(entity_a.body, entity_a.axes, entity_b.body, entity_b.axes, PHYSICS_FIXED_TIME_STEP, *contact_result);
-                }
 
                 pair.contact_normal = contact_result.normal;
 
@@ -321,6 +314,7 @@ solve_contact_velocities :: () {
 }
 
 solve_contact_positions :: () {
+    using context.world;
     scope_timer();
     for 0..COLLISION_POSITION_ITERATION_COUNT-1 {
         for pair : contact_pairs {
@@ -348,6 +342,7 @@ solve_contact_positions :: () {
 }
 
 warm_start_contacts :: () {
+    using context.world;
     scope_timer();
     for *pair : contact_pairs {
         entity_a := try_get_entity(*pair.a);
@@ -554,23 +549,3 @@ get_aabb :: inline (entity: *Entity) -> AABB {
 }
 
 COLLISION_GRID_ALLOCATOR_MIN_SIZE :: 32;
-
-collision_grid: []Collision_Grid_Allocation;
-collision_grid_cell_flags: []Collision_Grid_Cell_Flags;
-collision_grid_allocator: Nesting_Allocator(COLLISION_GRID_ALLOCATOR_MIN_SIZE);
-collision_grid_origin: Vector2;
-collision_grid_dimensions: Int_Vector2;
-collision_cell_dimensions: Vector2;
-inv_collision_cell_dimensions: Vector2;
-
-time_step_accumulator := 0.0;
-
-contact_pairs: [..]Contact_Pair;
-
-seen_entity_in_group: Bit_Array(1);
-
-color_group_random_state: Random_State;
-altered_cells: [..]s32;
-
-collision_frame: s32;
-physics_frame: s32;

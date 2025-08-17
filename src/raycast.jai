@@ -62,7 +62,7 @@ raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
     cur_result: Raycast_Result = ---;
     out_result.* = .{hit_distance=FLOAT32_MAX};
     // todo: grid + sphere intersection test
-    for e : entities {
+    for e : context.world.entities {
         if (e.ray_channels & request.channels) == 0 {
             continue;
         }

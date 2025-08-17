@@ -43,8 +43,10 @@ Serializer_Align_Mode :: enum u8 {
     PARAMETER;
 }
 
-set_rw_mode :: (using buffer: *Serializer($alloc_m, $align_m), m: Rw_Mode) {
+// should be called after pad_for_checksum is set, if it is being set
+set_rw_mode :: (using buffer: *Serializer($alloc_m, $align_m), m: Rw_Mode, use_checksum := true) {
     rw_mode = m;
+    pad_for_checksum = use_checksum;
     if pad_for_checksum {
         head = SERIALIZER_CHECKSUM_SIZE;
     } else {
@@ -57,6 +59,11 @@ reset :: (using buffer: *Serializer($alloc_m, $align_m), keep_allocation := true
         reset(*memory);
     }
     set_rw_mode(buffer, .WRITE);
+}
+
+write_entire_file :: (name: string, buffer: *Serializer($alloc_m, $align_m)) -> bool {
+    str := string.{buffer.head, buffer.memory.data};
+    return write_entire_file(name, str);
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -204,9 +211,9 @@ serialize_string :: (using buffer: *Serializer($alloc_m, $align_m), str: *string
 
 serialize :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s32) {
     if rw_mode == .WRITE {
-        serialize_bytes(buffer, data, .WRITE);
+        serialize_bytes(buffer, data, count, .WRITE);
     } else {
-        serialize_bytes(buffer, data, .READ);
+        serialize_bytes(buffer, data, count, .READ);
     }
 }
 
@@ -240,7 +247,7 @@ imprint_checksum :: (using buffer: *Serializer($alloc_m, $align_m)) {
 calculate_checksum :: (using buffer: *Serializer($alloc_m, $align_m), out: *[4]u32) {
     assert(pad_for_checksum);
     assert(memory.count > SERIALIZER_CHECKSUM_SIZE);
-    assert(head > SERIALIZER_CHECKSUM_SIZE);
+    assert(head >= SERIALIZER_CHECKSUM_SIZE);
     bufstr := string.{head - SERIALIZER_CHECKSUM_SIZE, memory.data + SERIALIZER_CHECKSUM_SIZE};
     {
         scope_set_allocator(temp);
@@ -275,8 +282,6 @@ check_new_head :: (using buffer: *Serializer($alloc_m, $align_m), new_head: s32)
     }
 }
 
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
-
 advance_head :: inline (using buffer: *Serializer($alloc_m, $align_m), by_count: s32) {
     new_head := head + by_count;
     assert(by_count > 0);
@@ -298,6 +303,8 @@ align_head_up_for_array :: (using buffer: *Serializer($alloc_m, $align_m), $T: T
     case .BYTE;
     }
 }
+
+#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 write_primitive :: inline (using buffer: *Serializer($alloc_m, $align_m), primitive: *$T) {
     #if #complete align_mode == {

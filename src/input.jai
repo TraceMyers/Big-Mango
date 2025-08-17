@@ -85,10 +85,16 @@ update_input :: () {
 
     prev_control_mode = control_mode;
 
-    for Input.events_this_frame {
+    active_window := Win32.GetActiveWindow();
+    if active_window == window {
+        window_active_for_frame_count += 1;
+    } else {
+        window_active_for_frame_count = 0;
+    }
+
+    if window_is_active() then for Input.events_this_frame {
         imgui_process_event(it);
         if it.type == .QUIT then quit = true;
-
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
@@ -120,9 +126,16 @@ update_input :: () {
                         breakpoint_switch_8 = !breakpoint_switch_8;
                     case #char "7";
                         breakpoint_switch_7 = !breakpoint_switch_7;
+                    case #char "L";
+                        context_index = (!context_index).(s32);
                     case .MOUSE_BUTTON_LEFT;
-                        if context.player_entity != null {
-                            set(*context.player_entity.flags, .USE_INTERACTION_QUEUED);
+                        player_entity := try_get_entity(*context.world.player_entity_ref);
+                        if player_entity != null {
+                            set(*player_entity.flags, .USE_INTERACTION_QUEUED);
+                        }
+                    case #char "S";
+                        if it.modifier_flags.ctrl_pressed {
+                            save(context.world);
                         }
                     }
                     if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
@@ -154,7 +167,7 @@ update_input :: () {
         }
     }
 
-    if cursor_locked_to_center {
+    if window_is_active() && cursor_locked_to_center {
         window_rect: Win32.RECT;
         Win32.GetWindowRect(window, *window_rect);
         SetCursorPos(window_rect.left + (window_rect.right - window_rect.left) / 2, window_rect.top + (window_rect.bottom - window_rect.top) / 2);
@@ -179,6 +192,10 @@ toggle_cursor_visible :: () {
 
 get_window_dimensions :: () -> Int_Vector2 {
     return .{window_width, window_height};
+}
+
+window_is_active :: inline () -> bool {
+    return window_active_for_frame_count > 2;
 }
 
 rm_log_callback :: (text: string) {
@@ -239,6 +256,7 @@ set_control_mode :: (args: []Command_Line_Argument) {
 
 window_width: s32;
 window_height: s32;
+window_active_for_frame_count: s32;
 
 do_mouse_move := true;
 

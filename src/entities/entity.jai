@@ -44,18 +44,6 @@ Entity :: struct {
     frame_counter: s32;
 }
 
-entities: [..]Entity;
-entity_deletion_queue: [..]Entity_Ref;
-entity_ref_layer: Pool(s32);
-entity_id_counter: u32;
-
-name_allocator: Nesting_Allocator(NAME_ALLOCATOR_MIN_BLOCK_SIZE);
-meshes_allocator: Nesting_Allocator(MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
-linear_impulses_allocator: Nesting_Allocator(LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
-event_overlap_allocator: Nesting_Allocator(EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
-gadget_interaction_allocator: Nesting_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
-gadget_children_allocator: Nesting_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
-
 Entity_Ref :: struct {
     index: s32;
     id: u32;
@@ -69,36 +57,9 @@ operator == :: inline (a: Entity_Ref, b: Entity_Ref) -> bool {
     return a.index == b.index && a.id == b.id;
 }
 
-_entities :: (stage: Boot_Stage) -> bool {
-    if stage == .STARTUP {
-        program_runtime_reserve(*entities, ENTITY_MAX_COUNT);
-        program_runtime_initialize(*entity_ref_layer, ENTITY_MAX_COUNT);
-
-        na_chunk_list_size := 4096 * 16;
-        na_chunk_list_size_large := 4096 * 32;
-        mesh_ptrs_array_data_size := ENTITY_MAX_COUNT * ENTITY_MESHES_MAX_COUNT * size_of(Mesh_Instance);
-        program_runtime_initialize(*meshes_allocator, na_chunk_list_size, mesh_ptrs_array_data_size);
-        entity_name_data_size := ENTITY_MAX_COUNT * ENTITY_NAME_MAX_CHAR_COUNT;
-        program_runtime_initialize(*name_allocator, na_chunk_list_size, entity_name_data_size);
-        linear_impulse_array_data_size := ENTITY_MAX_COUNT * size_of(Linear_Physics_Impulse) * 2;
-        program_runtime_initialize(*linear_impulses_allocator, na_chunk_list_size_large, linear_impulse_array_data_size);
-        event_overlap_arrays_data_size := ENTITY_MAX_COUNT * size_of(Event_Overlap);
-        program_runtime_initialize(*event_overlap_allocator, na_chunk_list_size_large, event_overlap_arrays_data_size);
-        gadget_interaction_arrays_data_size := ENTITY_MAX_COUNT / 4 * size_of(Gadget_Interaction);
-        program_runtime_initialize(*gadget_interaction_allocator, na_chunk_list_size_large, gadget_interaction_arrays_data_size);
-        gadget_child_arrays_data_size := ENTITY_MAX_COUNT / 4 * size_of(Gadget_Child);
-        program_runtime_initialize(*gadget_children_allocator, na_chunk_list_size_large, gadget_child_arrays_data_size);
-
-        entity_deletion_queue.allocator = temp;
-
-        random_seed(*collision_mesh_color_state, 257);
-    }
-    return true;
-}
-
 entity_frame_turnover :: () {
     flush_entity_deletion_queue();
-    for *e : entities {
+    for *e : context.world.entities {
         e.frame_counter += 1;
     }
 }
@@ -168,6 +129,7 @@ set_shape_and_mass :: (e: *Entity, shape: Collision_Shape, mass := 1.0) {
 }
 
 get_entity :: (ref: Entity_Ref) -> *Entity {
+    using context.world;
     i := entity_ref_layer[ref.index];
     entity := *entities[i];
     assert(entity.id == ref.id);
@@ -175,6 +137,7 @@ get_entity :: (ref: Entity_Ref) -> *Entity {
 }
 
 try_get_entity :: inline (ref: *Entity_Ref) -> *Entity {
+    using context.world;
     if ref.index >= entity_ref_layer.items.count {
         ref.* = .{};
         return null;
@@ -193,33 +156,40 @@ try_get_entity :: inline (ref: *Entity_Ref) -> *Entity {
 }
 
 set_name :: inline (e: *Entity, name: string) {
+    using context.world;
     array_set(*e.name, *name_allocator, name);
 }
 
 set_meshes :: inline (e: *Entity, meshes: []Mesh_Instance) {
+    using context.world;
     array_set(*e.meshes, *meshes_allocator, meshes);
 }
 
 add_linear_impulse :: inline (e: *Entity, impulse: Linear_Physics_Impulse) {
+    using context.world;
     array_add(*e.linear_impulses, *linear_impulses_allocator, impulse);
 }
 
 remove_linear_impulse_at :: inline (e: *Entity, i: s64) {
+    using context.world;
     array_unordered_remove_by_index(*e.linear_impulses, *linear_impulses_allocator, xx i);
 }
 
 add_event_volume_overlap :: (e: *Entity, overlap: Entity_Ref) {
+    using context.world;
     assert(e.ref != overlap);
     assert(is_set(*e.flags, .USES_EVENT_VOLUME));
     array_add(*e.event_volume.overlaps, *event_overlap_allocator, .{overlap, collision_frame, collision_frame});
 }
 
 remove_event_volume_overlap_at :: inline (e: *Entity, i: s64) {
+    using context.world;
     assert(is_set(*e.flags, .USES_EVENT_VOLUME));
     array_unordered_remove_by_index(*e.event_volume.overlaps, *event_overlap_allocator, xx i);
 }
 
 add_gadget_interaction :: (e: *Entity, interaction: Gadget_Interaction) {
+    using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
     if e.gadget_interactions.field.count >= max_interactions(e.gadget_type) {
         return;
@@ -228,23 +198,27 @@ add_gadget_interaction :: (e: *Entity, interaction: Gadget_Interaction) {
 }
 
 remove_gadget_interaction_at :: inline (e: *Entity, i: s64) {
+    using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
     array_ordered_remove_by_index(*e.gadget_interactions, *gadget_interaction_allocator, xx i);
 }
 
 remove_all_gadget_interactions :: (e: *Entity) {
+    using context.world;
     if e.gadget_interactions.allocation.count > 0 {
         array_resize(*e.gadget_interactions, *gadget_interaction_allocator, 0);
     }
 }
 
 remove_all_linear_impulses :: inline (e: *Entity) {
+    using context.world;
     if e.linear_impulses.allocation.count > 0 {
         array_resize(*e.linear_impulses, *linear_impulses_allocator, 0);
     }
 }
 
 add_gadget_child :: (e: *Entity, child: Gadget_Child) {
+    using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
     if e.gadget_children.field.count >= MAX_GADGET_CHILDREN_COUNT {
         return;
@@ -253,6 +227,7 @@ add_gadget_child :: (e: *Entity, child: Gadget_Child) {
 }
 
 remove_gadget_child_at :: (e: *Entity, i: s64) {
+    using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
     array_unordered_remove_by_index(*e.gadget_children, *gadget_children_allocator, xx i);
 }
@@ -292,6 +267,16 @@ interp_rotate :: (e: *Entity, target: Quaternion, speed: float32, delta_time: fl
     get_axes(e.orientation, *e.axes.fore, *e.axes.up, *e.axes.right);
 }
 
+interp_rotate :: (e: *Entity, origin: Quaternion, target: Quaternion, norm: float32) {
+    e.orientation = interp_rotate(origin, target, norm);
+    get_axes(e.orientation, *e.axes.fore, *e.axes.up, *e.axes.right);
+}
+
+interp_rotate :: (e: *Entity, origin: Quaternion, target: Quaternion, speed: float32, delta_time: float32) {
+    e.orientation = interp_rotate(origin, target, speed, delta_time);
+    get_axes(e.orientation, *e.axes.fore, *e.axes.up, *e.axes.right);
+}
+
 queue_entity_deletion :: (ref: Entity_Ref) {
     ref_copy := ref;
     e := try_get_entity(*ref_copy);
@@ -302,17 +287,17 @@ queue_entity_deletion :: (ref: Entity_Ref) {
         return;
     }
     set(*e.flags, .QUEUED_FOR_DELETION);
-    for entity_deletion_queue {
+    for context.world.entity_deletion_queue {
         assert(it.id != e.ref.id);
     }
-    array_add(*entity_deletion_queue, e.ref);
+    array_add(*context.world.entity_deletion_queue, e.ref);
 }
 
 flush_entity_deletion_queue :: () {
-    for entity_deletion_queue {
+    for context.world.entity_deletion_queue {
         delete_entity(it);
     }
-    array_reset(*entity_deletion_queue);
+    array_reset(*context.world.entity_deletion_queue);
 }
 
 // ------------------------------------------------------------------------------------------------------------- components
@@ -414,13 +399,47 @@ Gadget_Interaction_Flags :: enum_flags u32 {
 }
 
 Gadget_Interaction :: struct {
-    source_entity: Entity_Ref;
-    source_location: Vector3;
-    flags: Gadget_Interaction_Flags = 0;
+    using input: struct {
+        source_entity: Entity_Ref;
+        source_location: Vector3;
+        end_time: float;
+        flags: Gadget_Interaction_Flags = 0;
+    }
+    begin_time: float;
 }
 
 Gadget_Child :: struct {
     entity: Entity_Ref;
+}
+
+// $todo: delays should be combinable. delays irl are serialized one after another.
+Gadget_Interaction_Delay :: struct {
+    type: enum {
+        CONSTANT :: 0x0;
+        BY_DISTANCE;
+    }
+    using value: union {
+        constant := 0.0;
+        by_distance: struct {
+            constant: float = ---;
+            time_per_unit: float = ---; // $todo: distance units?
+        }
+    }
+}
+
+get_gadget_interaction_delay_with_gadget :: (e: *Entity, interacting_with: *Entity) -> float {
+    assert(is_set(*e.flags, .USES_GADGET));
+    assert(is_set(*interacting_with.flags, .USES_GADGET));
+
+    using e.delay_interacting_with_gadgets;
+
+    if #complete type == {
+    case .CONSTANT;
+        return constant;
+    case .BY_DISTANCE;
+        return by_distance.constant + distance(e.center, interacting_with.center) * by_distance.time_per_unit;
+    }
+    return 0;
 }
 
 max_interactions :: (type: Gadget_Type) -> s32 {
@@ -433,6 +452,7 @@ max_interactions :: (type: Gadget_Type) -> s32 {
 }
 
 // a gadget is an interaction point with a box range and functionality attached
+// gadgets can have children; when gadgets are interacted with, they try to interact with their children. this allows for creating a network of interactions, or a loop, even.
 // the constraints and properties of the interaction are decided by the gadget think proc
 Gadget :: struct {
     gadget_type: Gadget_Type;
@@ -443,6 +463,7 @@ Gadget :: struct {
     gadget_interaction_volume: Entity_Ref;
     gadget_interactions: Nested_Array(Gadget_Interaction, GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
     gadget_children: Nested_Array(Gadget_Child, GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);    
+    delay_interacting_with_gadgets: Gadget_Interaction_Delay;
 }
 
 Door :: struct {
@@ -454,7 +475,7 @@ Door :: struct {
     rotation_angle := PI / 2;
     rotation_distance: float;
     interaction_location: Vector3;
-    state: enum {
+    state: enum u8 {
         CLOSED;
         OPEN_POSITIVE;
         OPEN_NEGATIVE;
@@ -500,6 +521,7 @@ set_event_volume_center :: inline (volume: *Entity, relative_to: *Entity, offset
 }
 
 update_event_volumes :: () {
+    using context.world;
     for *e : entities {
         if !is_set(*e.flags, .USES_EVENT_VOLUME) {
             continue;

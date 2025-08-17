@@ -140,12 +140,6 @@ render_frame :: () {
         }
     }
 
-    // ship line draws to line draw buffer
-    if lines.count > 0 {
-        copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
-    }
-    defer array_reset_keeping_memory(*lines);
-
     image_index := acquire_next_swapchain_image(current_frame);
     flush_deletion_queue(current_frame.deletion_queue);
     render_target := swapchain.images[image_index];
@@ -175,36 +169,24 @@ render_frame :: () {
     transition_image(cmd, draw_image.vk_obj, .GENERAL, .COLOR_ATTACHMENT_OPTIMAL);
     begin_rendering(cmd);
 
-    if context.player_entity != null {
-        attached_camera := get_entity(context.player_entity.attached_camera);
-        if attached_camera != null {
-            vp_mat := view_projection_matrix(attached_camera, viewport);
-
-            draw_lines(cmd, *vp_mat);
-            draw_spheres(cmd, *vp_mat);
-
-            for *e : entities {
-
-                if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
-                    continue;
-                }
-                meshes := e.meshes.field;
-                if meshes.count == 0 then continue;
-                for *emesh : meshes {
-                    draw_mesh(cmd, e, emesh, *vp_mat);
-                }
-            }
-
-            #if DRAW_COLLISION_MESHES {
-                for *e : entities {
-                    if context.player_entity != null && e.id == context.player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
-                        continue;
-                    }
-                    draw_collision_mesh(cmd, e, *vp_mat);
-                }
-            }
+    vp_mat := Matrix4_Identity;
+    if context.world != null {
+        camera := get_world_main_camera(context.world);
+        if camera != null {
+            vp_mat = view_projection_matrix(camera, viewport);
         }
     }
+
+    // ship line draws to line draw buffer
+    if lines.count > 0 {
+        copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
+    }
+    defer array_reset_keeping_memory(*lines);
+
+    draw_lines(cmd, *vp_mat);
+    draw_spheres(cmd, *vp_mat);
+
+    add_world_draw_commands(cmd, context.world, vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -2427,7 +2409,7 @@ immediate_submit :: () {
 }
 
 immediate_quad :: (p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, color := Vector4.{1,1,1,1}, uv0 := Vector2.{0,0}, uv1 := Vector2.{1,0}, uv2 := Vector2.{1,1}, uv3 := Vector2.{0, 1}) {
-    if game_frame == 0 then return;
+    if program_frame == 0 then return;
     cmd := immediate_command_buffer;
     if immediate_mode == {
     case .TEXTURE;
@@ -2442,7 +2424,7 @@ immediate_quad :: (p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, color := 
 // actually be a learning experience, but doing it via vertex/fragment wouldn't really. anyway, I'm just
 // letting this be the way it is for now.
 immediate_draw_rect :: (rect: Rect_Draw) {
-    if game_frame == 0 then return;
+    if program_frame == 0 then return;
     cmd := immediate_command_buffer;
     vkCmdBindPipeline(cmd, .COMPUTE, rect_pipeline);
     vkCmdBindDescriptorSets(cmd, .COMPUTE, rect_pipeline_layout, 0, 1, *draw_image_descriptors, 0, null);
@@ -3256,8 +3238,7 @@ Render_Buffer :: struct {
     allocation: VmaAllocation;
 }
 
-lines: [..]Line_Data;
-sphere_draws: [..]Sphere_Draw_Data;
+sphere_draws: [..]Sphere_Draw_Data; // $todo: this isn't real but it should be
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods
@@ -3557,8 +3538,6 @@ graphics_pipeline_layout: VkPipelineLayout;
 line_pipeline: VkPipeline;
 line_pipeline_layout: VkPipelineLayout;
 
-line_vbo: Mesh_Data_Buffer;
-
 rect_pipeline: VkPipeline;
 rect_pipeline_layout: VkPipelineLayout;
 
@@ -3583,6 +3562,9 @@ transfer_fence: VkFence;
 transfer_command_buffer: VkCommandBuffer;
 transfer_command_pool: VkCommandPool;
 
+lines: [..]Line_Data; // $todo: rename to line_draws
+line_vbo: Mesh_Data_Buffer;
+
 shader_hash_table: [..]Shader_Hash_Item;
 
 lights: Lights;
@@ -3593,8 +3575,6 @@ init_success := true;
 
 clear_color := Vector4.{0,0,0,1};
 
-meshes: [..]Hashed_Mesh;
-
 cube_mesh: *Mesh;
 plane_mesh: *Mesh;
 sphere_mesh_low_poly: *Mesh;
@@ -3603,6 +3583,8 @@ sphere_mesh_high_poly: *Mesh;
 
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
+
+meshes: [..]Hashed_Mesh;
 
 // jai compiler will null-terminate statically allocoated 'string' values and '*u8' values, but the strings in a []string don't appear to be null-terminated, thus the (*u8).[] arrays
 

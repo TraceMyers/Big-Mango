@@ -53,7 +53,7 @@ draw_aabb :: (aabb: AABB, color: Color4f) {
 }
 
 draw_all_body_collider_aabbs :: () {
-    for entities {
+    for context.world.entities {
         draw_aabb(it.shape, it.center, it.orientation, COLOR4F_RED);
     }
 }

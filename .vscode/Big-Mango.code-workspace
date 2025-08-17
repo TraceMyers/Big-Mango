@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../../../compilers/jai-beta-2-014/jai/modules"
+		},
+		{
+			"path": "../../../../compilers/jai-beta-2-016/jai/examples/skeletal-animation"
 		}
 	],
 	"settings": {}

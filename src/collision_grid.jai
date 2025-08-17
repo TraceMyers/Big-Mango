@@ -1,50 +1,27 @@
 
 // todo: figure out & test rectifying the cell allocations
 
-_collision_grid :: (stage: Boot_Stage) -> bool {
-    if stage == .STARTUP {
-        init_collision_grid(.{}, .{100, 100}, .{25, 25});
-    }
-    return true;
-}
-
-init_collision_grid :: (center: Vector2, dimensions: Int_Vector2, cell_dimensions: Vector2) {
-    flt_dimensions := to_vector2(dimensions);
-    half_world_dimensions := (flt_dimensions * cell_dimensions) * 0.5;
-    collision_grid_origin = center - half_world_dimensions;
-    collision_grid_dimensions = dimensions;
-    collision_cell_dimensions = cell_dimensions;
-    inv_collision_cell_dimensions = 1.0 / cell_dimensions;
-    cell_count := dimensions.x * dimensions.y;
-    program_runtime_allocate(*collision_grid, cell_count);
-    program_runtime_allocate(*collision_grid_cell_flags, cell_count);
-    memset(collision_grid_cell_flags.data, 0, cell_count * size_of(Collision_Grid_Cell_Flags));
-
-    na_chunk_list_size := 4096 * 16;
-    max_data_size := ENTITY_MAX_COUNT * size_of(Collision_Grid_Item) * 4;
-    program_runtime_initialize(*collision_grid_allocator, na_chunk_list_size, max_data_size);
-}
-
 world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
-    diff := world_pos - collision_grid_origin;
-    diff *= inv_collision_cell_dimensions;
+    diff := world_pos - context.world.collision_grid_origin;
+    diff *= context.world.inv_collision_cell_dimensions;
     ivec := to_int_vector2(diff);
-    return clamp(ivec, .{}, collision_grid_dimensions-1);
+    return clamp(ivec, .{}, context.world.collision_grid_dimensions-1);
 }
 
 collision_grid_index :: inline (pos: Int_Vector2) -> s32 {
-    y_part := pos.y * collision_grid_dimensions.x;
+    y_part := pos.y * context.world.collision_grid_dimensions.x;
     x_part := pos.x;
     return x_part + y_part;
 }
 
 collision_grid_index_to_grid_position :: inline (i: s32) -> Int_Vector2 {
-    y_part := i / collision_grid_dimensions.x;
-    x_part := i - y_part * collision_grid_dimensions.x;
+    y_part := i / context.world.collision_grid_dimensions.x;
+    x_part := i - y_part * context.world.collision_grid_dimensions.x;
     return .{x_part, y_part};
 }
 
 rectify_collision_cell_allocation :: (grid_index: s32) {
+    using context.world;
     alloc := *collision_grid[grid_index];
     if alloc.inline_allocation.zero_if_inline == 0 then return;
 
@@ -68,6 +45,7 @@ rectify_collision_cell_allocation :: (grid_index: s32) {
 }
 
 get_collision_cell :: inline (grid_index: s32) -> []Entity_Ref {
+    using context.world;
     alloc := *collision_grid[grid_index];
     if alloc.inline_allocation.zero_if_inline == 0 {
         out_array : []Entity_Ref = ---;
@@ -82,6 +60,7 @@ get_collision_cell :: inline (grid_index: s32) -> []Entity_Ref {
 }
 
 remove_from_collision_cell :: (entity_ref: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
+    using context.world;
     alloc := *collision_grid[grid_index];
 
     // mark this cell as altered so that its allocation can be rectified later
@@ -103,6 +82,7 @@ remove_from_collision_cell :: (entity_ref: Entity_Ref, x: s64, y: s64, grid_inde
 }
 
 add_to_collision_cell :: (ref: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void) {
+    using context.world;
     alloc := *collision_grid[grid_index];
 
     // mark this cell as altered so that its allocation can be rectified later
@@ -161,6 +141,7 @@ remove_from_collision_cell_do_remove :: (array: []Entity_Ref, remove_ref: Entity
 }
 
 find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32, self_swept_aabb: AABB, data: *void) { 
+    using context.world;
     find_overlaps_data := data.(*Find_Overlaps_Data);
     iteration_collision_overlaps := find_overlaps_data.collision_overlaps;
 
@@ -210,6 +191,7 @@ find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32,
 }
 
 collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
+    using context.world;
     scope_timer();
     self := get_entity(entity_ref);
     self_aabb := get_aabb(self);
@@ -230,6 +212,7 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void
 }
 
 collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2, swept_aabb: AABB, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) {
+    using context.world;
     for x : grid_pos_min.x..grid_pos_max.x {
         for y : grid_pos_min.y..grid_pos_max.y {
             grid_index := collision_grid_index(.{x.(s32), y.(s32)});
@@ -239,6 +222,7 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: In
 }
 
 draw_collision_grid :: (at_height: float, color: Color4f) {
+    using context.world;
     scope_timer();
     for x : 0..collision_grid_dimensions.x {
         top := collision_grid_origin + Vector2.{x.(float), 0} * collision_cell_dimensions;

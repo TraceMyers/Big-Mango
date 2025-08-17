@@ -2,8 +2,8 @@
 move_stuff :: (time_step: float) {
     scope_timer();
 
-    for 0..entities.count-1 {
-        e := *entities[it];
+    for 0..context.world.entities.count-1 {
+        e := *context.world.entities[it];
         e.previous_center = e.center;
 
         // friction (in future just handle in the physics solving)

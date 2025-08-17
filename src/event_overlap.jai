@@ -3,7 +3,7 @@ determine_if_gadget_volume_is_overlapped :: (volume: *Entity, gadget: *Entity) {
     any_overlappers_can_interact: bool;
     for *volume.event_volume.overlaps.field {
         overlapper := try_get_entity(*it.entity);
-        if overlapper != null && is_set(*overlapper.flags, .CAN_INTERACT_WITH_GADGETS) {
+        if overlapper != null && is_set(*overlapper.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY) {
             any_overlappers_can_interact = true;
             break;
         }

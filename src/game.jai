@@ -21,13 +21,17 @@ main :: () {
     pre_boot();
 
     startup_success := true;
+    scope_system_init(_context,             *startup_success);
+    scope_system_init(_program,             *startup_success);
     scope_system_init(_input,               *startup_success);
     scope_system_init(_vulkan,              *startup_success);
     scope_system_init(_imgui,               *startup_success);
-    scope_system_init(_entities,            *startup_success);
-    scope_system_init(_collision,           *startup_success);
-    scope_system_init(_collision_grid,      *startup_success);
-    scope_system_init(_scratch,             *startup_success);
+    scope_system_init(_world,               *startup_success);
+
+    push_context world_contexts[context_index].* {
+        // temp, stands in for having a world loaded
+        scope_system_init(_scratch, *startup_success);
+    }
     if !startup_success then return;
 
     per_frame_time = seconds_since_init();
@@ -35,17 +39,25 @@ main :: () {
 
     while !quit {
         respond_to_scope_timer_commands();
-        scope_timer("game frame", true);
-        begin_frame();
-        update_input();
-        process_entity_input();
-        entity_ai_updates();
-        update_thinks();
-        solve_contacts();
-        update_event_volumes();
-        scratch_think();
-        draw_dev_ui();
-        do_debug_draws();
+        scope_timer("program frame", true);
+
+        // --- world update ---
+        push_context world_contexts[context_index].* {
+            scope_timer("world_frame");
+            begin_world_frame();
+            update_input();
+            process_entity_input();
+            entity_ai_updates();
+            update_thinks();
+            solve_contacts();
+            update_event_volumes();
+            scratch_think();
+            draw_dev_ui();
+            do_debug_draws();
+            end_world_frame();
+        }
+        // --------------------
+
         end_frame();
     }
 
@@ -70,12 +82,11 @@ pre_boot :: () {
     
     initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
     // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
-    bump_allocator_initialize(*program_runtime_allocator);
-
-    entity_pointer_array_init();
+    // bump_allocator_initialize(*program_runtime_allocator);
 
     // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
     command_line_procedures = COMMAND_LINE_PROCEDURES;
+
 }
 
 respond_to_scope_timer_commands :: inline () {
@@ -90,26 +101,13 @@ respond_to_scope_timer_commands :: inline () {
     }
 }
 
-begin_frame :: () {
-    scope_timer();
-
-    array_reserve(*entity_deletion_queue, 128);
-}
 
 end_frame :: () {
     scope_timer();
 
-    new_non_render_time := seconds_since_init();
-    simulation_dt = exponential_interp(simulation_dt, xx (new_non_render_time - non_render_time), 2.0, delta_time);
-    render_frame();
-    non_render_time = seconds_since_init();
+    program_frame += 1;
 
-    entity_frame_turnover();
-
-    reset_temporary_storage();
-    game_frame += 1;
-
-    // doing this after game_frame advances so the data are correct for the next generation of entities
+    // doing this after program_frame advances so the data are correct for the next generation of entities
     // set_global_entities();
 
     new_time := seconds_since_init();
@@ -171,7 +169,7 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
     }
 }
 
-scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
+scope_timer :: ($name := "", is_program_frame_timer := false) #expand {
     #if BUILDVAR_PROFILERS_ACTIVE {
         proc_name :: #procedure_name();
         timer_name :: #run ifx name == "" then tprint("%", proc_name) else tprint("% :: %", proc_name, name);
@@ -182,14 +180,14 @@ scope_timer :: ($name := "", is_game_frame_timer := false) #expand {
                 array_resize(*scope_timers, id+1);
             }
             scope_timers[id].name = timer_name;
-            new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=true,is_game_frame=is_game_frame_timer};
+            new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=true,is_program_frame=is_program_frame_timer};
             Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
             array_add(*scope_timer_stack_diffs, new_stack_diff);
         }
 
         `defer {
             if is_profiling_on {
-                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=false,is_game_frame=is_game_frame_timer};
+                new_stack_diff := Scope_Timer_Stack_Diff.{cpu_time=0,timer_id=id,is_scope_begin=false,is_program_frame=is_program_frame_timer};
                 Win32.QueryPerformanceCounter(*new_stack_diff.cpu_time);
                 array_add(*scope_timer_stack_diffs, new_stack_diff);
             }
@@ -209,7 +207,7 @@ report_scope_times :: () {
 
         trackers: [..]Timer_Tracker;
 
-        game_frame_began: bool;
+        program_frame_began: bool;
         frame_began_at_index: s32;
 
         for scope_timer_stack_diffs {
@@ -222,14 +220,14 @@ report_scope_times :: () {
             {
                 using trackers[it.timer_id];
 
-                if it.is_game_frame {
+                if it.is_program_frame {
                     if it.is_scope_begin {
-                        assert(!game_frame_began);
-                        game_frame_began = true;
+                        assert(!program_frame_began);
+                        program_frame_began = true;
                         frame_began_at_index = xx it_index;
                     } else {
-                        assert(game_frame_began);
-                        game_frame_began = false;
+                        assert(program_frame_began);
+                        program_frame_began = false;
                         array_add(*frame_cpu_time_deltas, 0);
                     }
                 } else {
@@ -319,7 +317,7 @@ delta_time_multiplier := 1.0; @command_line
 window: Window_Type;
 console_window: Window_Type;
 delta_time := 0.01;
-game_frame: s32;
+program_frame: s32;
 per_frame_time: float64;
 non_render_time: float64;
 cpu_frequency: s64;
@@ -370,6 +368,7 @@ switch_break :: (val := -1) {
 #import "xxHash";
 #import "Flat_Pool";
 #import "Sort";
+#import "File_Utilities";
 ImGui :: #import "ImGui_VulkanWin32";
 Input :: #import "Input";
 
@@ -397,6 +396,7 @@ Zlib :: #import "zlib";
 #load "ai/ai.jai";
 #load "think.jai";
 #load "event_overlap.jai";
+#load "program.jai";
 
 #load "collision_types.jai";
 
