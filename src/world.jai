@@ -11,11 +11,14 @@ WORLD_Z :: Vector3.{0,0,1};
 
 WORLD_COUNT_MAX :: 64;
 WORLD_FILE_SIZE_MAX :: 20 * 1024 * 1024;
+WORLD_SIZE_MAX :: 50 * 1024 * 1024;
 
 Context_Type :: type_of(context);
 worlds: [..]World;
 world_contexts: [..]*Context_Type;
 world_context_datas: [..]Context_Type;
+world_heaps: [..]Bump_Allocator_Heap;
+world_heap_pool: Pool(s32);
 
 context_index: s32;
 
@@ -39,8 +42,8 @@ World :: struct {
     gadget_interaction_allocator: Nesting_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
     gadget_children_allocator: Nesting_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
 
-    world_runtime_allocator: Allocator;
-    world_runtime_flat_pool: Flat_Pool;
+    world_runtime_allocator: Bump_Allocator;
+    world_heap_index: s32;
     
     // collision
     collision_grid: []Collision_Grid_Allocation;
@@ -105,13 +108,36 @@ _world :: (stage: Boot_Stage) -> bool {
     return true;
 }
 
-initialize :: (using world: *World) {
-    world_runtime_allocator.proc = flat_pool_allocator_proc;
-    world_runtime_allocator.data = *world_runtime_flat_pool;
+get_new_world_heap :: () -> s32 {
+    i := request_item(*world_heap_pool);
+    add_heap_count := i - (world_heaps.count - 1);
+    if add_heap_count > 0 {
+        old_count := world_heaps.count;
+        array_resize(*world_heaps, i + 1);
+        for old_count..world_heaps.count-1 {
+            allocation := alloc_array(u8, WORLD_SIZE_MAX, program_runtime_allocator);
+            assert(allocation.data != null);
+            world_heaps[it] = .{bytes=allocation, end=0};
+        }
+    }
+    return xx i;
+}
 
+release_world_heap :: (i: s32) {
+    return_item(*world_heap_pool, i);
+}
+
+initialize :: (using world: *World) {
     if world_id == 0 {
         world_id = get_new_world_id();
     }
+
+    world_heap_index = get_new_world_heap();
+    world_runtime_allocator.heap = world_heaps[world_heap_index];
+    world_runtime_allocator.parent_allocator = no_allocator;
+    world_runtime_allocator.proc = bump_allocator_proc;
+    world_runtime_allocator.data = *world_runtime_allocator;
+
 
     // entities
     {
@@ -192,7 +218,8 @@ end_world_frame :: () {
 }
 
 reset :: (world: *World) {
-    fini(*world.world_runtime_flat_pool);
+    release_world_heap(world.world_heap_index);
+    world.* = .{};
 }
 
 save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
@@ -226,106 +253,13 @@ save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
         rm_log("loading world %", file_path);
     }
 
-    // maybe better to just to slowly & carefully expand the saving & loading support for data that appears stable and would be immediately useful rather than trying to generally serialize all world data. that seems like an endless black hole of work the more I think about it.
-    // $todo: HOWEVER, being able to generally encode pointers (ONLY THOSE WITHIN THE BLOCK) as offsets from the virtual allocation head would be VERY useful.
-    // $todo: just a single flat pool for the whole program... there's a lot of power in that.
+    // - don't do the crazy pointer serialization thing.
+    // - the only entity data that points outside of entities currently is *Mesh in their Mesh_Instances. so, I just need persistent assets representing these meshes and I can give them asset references.
 
-    for *e : entities {
-        id := e.id;
-        serialize(*record, *id);
-        if rw_mode == .READ {
-            assert(id == e.id);
-        }
-
-        // todo: serialize flags
-
-        serialize(*record, (*e.center).(*u8), size_of(type_of(e.center)));
-
-        orientation := e.orientation;
-        serialize(*record, (*orientation).(*u8), size_of(type_of(e.orientation)));
-        set_orientation(e, orientation);
-
-        // a little extra validation
-        has_any_meshes : u8 = xx (e.meshes.field.count > 0);
-        serialize(*record, *has_any_meshes, 1);
-        if rw_mode == .READ {
-            assert(has_any_meshes == xx (e.meshes.field.count > 0));
-        }
-
-        for e.meshes.field {
-            serialize(*record, (*it.albedo).(*u8), size_of(type_of(it.albedo)));
-            serialize(*record, (*it.scale).(*u8), size_of(type_of(it.scale)));
-            serialize(*record, (*it.offset).(*u8), size_of(type_of(it.offset)));
-            serialize(*record, (*it.orientation).(*u8), size_of(type_of(it.orientation)));
-        }
-
-        // a little extra extra validation
-        uses_gadget : u8 = xx is_set(*e.flags, .USES_GADGET);
-        serialize(*record, *uses_gadget, 1);
-        if rw_mode == .READ {
-            assert(uses_gadget == xx is_set(*e.flags, .USES_GADGET));
-        }
-
-        if uses_gadget {
-            serialize(*record, (*e.gadget).(*u8), size_of(type_of(e.gadget)));
-            if rw_mode == .READ {
-                // just restored some bad pointers. clear them.
-                e.gadget_interactions = .{};
-                e.gadget_children = .{};
-            }
-            serialize(*record, *e.gadget_interactions, *gadget_interaction_allocator);
-            serialize(*record, *e.gadget_children, *gadget_children_allocator);
-        }
-    }
-
-    zero : u32 = 0;
-    serialize(*record, *zero);
-    assert(zero == 0);
-
-    if rw_mode == .WRITE {
-        imprint_checksum(*record);
-        write_entire_file(file_path, *record);
-    }
-
-    // $note: because the runtime allocators were switched to Flat_Pool, I can serialize by recording pointers as offsets from the base address.
-    // note that pointers not within the pool's allocation are probably statically allocated...
-    // uh
-    // this probably has a lot of edge cases I'm not thinking of, too
-    // yes, pointers to global data.
-    // I think it's just render data
-    // but even just dealing with that is like 20 minutes blehhhhhhhhhhhh
-    // I need to seriously think about how to make it feasible to save and load worlds.
-    // is there any way I can make a prototype level without it...?
-
-    // #insert #run -> string {
-    //     builder: String_Builder;
-
-    //     world_type_info := (World).(*Type_Info_Struct);
-    //     for field : world_type_info.members {
-    //         if field.type.type == {
-    //         case .INTEGER;
-    //         case .FLOAT;
-    //         case .BOOL;
-    //         case .STRING;
-    //         case .POINTER;
-    //         case .PROCEDURE;
-    //         case .VOID;
-    //         case .STRUCT;
-    //         case .ARRAY;
-    //         case .OVERLOAD_SET;
-    //         case .ANY;
-    //         case .ENUM;
-    //         case .POLYMORPHIC_VARIABLE;
-    //         case .TYPE;
-    //         case .CODE;
-    //         case .UNTYPED_LITERAL;
-    //         case .UNTYPED_ENUM;
-    //         }
-    //     }
-
-    //     return builder_to_string(*builder);
-    // }   
-
+    // 1. bring in the asset managing code I was using in that other thing
+    // 2. make Mesh a tracked asset type (serialize the instructions to load it as a .mesh file)
+    // 3. write entity serialization proc
+    // 4. within that proc, turn mesh pointers into asset references for saving.
 }
 
 save :: #bake_arguments save_or_load(rw_mode=.WRITE);
@@ -368,4 +302,8 @@ add_world_draw_commands :: (cmd: VkCommandBuffer, using world: *World, vp_mat: M
             draw_collision_mesh(cmd, e, *vp_mat);
         }
     }
+}
+
+serialize_entity :: (record: *Serializer(.STATIC), e: *Entity) {
+
 }

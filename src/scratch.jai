@@ -60,8 +60,10 @@ _scratch :: (stage: Boot_Stage) -> bool {
         player_entity.center.z = 2.0;
         player_entity.attached_camera = camera_1_ref;
         player_entity.ray_channels = 0;
-        set(*player_entity.flags, .PLAYER_ENTITY_THINK);
         player_entity_ref = player_entity.ref;
+        player_entity.physics_properties.air_friction_multiplier = 4;
+        set(*player_entity.flags, .PLAYER_ENTITY_THINK);
+        set(*player_entity.flags, .APPLY_AIR_FRICTION);
     }
     // ball
     {
@@ -91,8 +93,9 @@ _scratch :: (stage: Boot_Stage) -> bool {
         set_shape_and_mass(button, .{type=.CAPSULE, capsule=.{half_height, radius}}, IMMOVABLE_ENTITY_MASS);
         button.collision_mesh_albedo.tint = .{g=0.8};
         capsule_mesh := get_or_create_capsule_mesh(half_height*2, radius);
+        cube := get_or_load_mesh(MESH_CUBE);
         set_meshes(button, .[
-            .{data=cube_mesh, albedo=.{tint=.{r=1,g=1,b=1}}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
+            .{data=cube, albedo=.{tint=.{r=1,g=1,b=1}}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
             .{data=capsule_mesh, albedo=.{tint=.{r=1}}}
         ]);
         add_gadget_child(button, .{door_ref});
@@ -123,7 +126,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
     // temp
     context.world.world_name = "world";
     context.world.world_id = 41;
-    load(context.world, "worlds/world_41.world");
+    // load(context.world, "worlds/world_41.world");
 
     return true;
 }

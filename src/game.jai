@@ -397,14 +397,15 @@ Zlib :: #import "zlib";
 #load "think.jai";
 #load "event_overlap.jai";
 #load "program.jai";
-
 #load "collision_types.jai";
-
 #load "entities/entity.jai";
 #load "entities/entity_control.jai";
 #load "entities/spawn_entity.jai";
 #load "entities/entity_flags.jai";
 #load "entities/prefabs.jai";
+#load "prebuild/asset.jai";
+#load "file.jai";
+#load "assets.jai";
 
 kernel32 :: #system_library "kernel32";
 GetConsoleWindow :: () -> Win32.HWND #foreign kernel32;

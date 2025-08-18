@@ -2,7 +2,7 @@ INVALID_ENTITY_ID : u32 : 0;
 INVALID_ENTITY_INDEX : u32 : U32_MAX;
 INVALID_CAMERA_INDEX : u8  : U8_MAX;
 
-ENTITY_MAX_COUNT :: 20_000;
+ENTITY_MAX_COUNT :: 2_000;
 CAMERA_MAX_COUNT :: 64;
 ENTITY_MESHES_MAX_COUNT :: 8;
 ENTITY_NAME_MAX_CHAR_COUNT :: 64;
@@ -332,6 +332,7 @@ Physics_Properties :: struct {
     friction_bias := 0.0;
     // todo: linear accel discrete (or continuous?) function
     friction_multiplier := 1.0;
+    air_friction_multiplier := 1.0;
     linear_acceleration := 190.0;
     accel_opposite_direction_multiplier := 2.0;
     fast_start_speed_max := 5.0;

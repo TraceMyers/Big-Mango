@@ -41,6 +41,7 @@ process_entity_input :: () {
     } else if control_mode == .FIRST_PERSON_PLAYER_FREE_FLY {
         if player_entity != null && camera_1 != null {
             set(*player_entity.flags, .ACCELERATE_IN_3D);
+            unset(*player_entity.flags, .APPLY_GRAVITY);
             first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
             handle_first_person_input(player_entity, camera_1, first_person_camera_offset, true);
             handle_player_input(player_entity);

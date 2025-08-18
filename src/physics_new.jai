@@ -8,7 +8,10 @@ move_stuff :: (time_step: float) {
 
         // friction (in future just handle in the physics solving)
         if is_set(*e.flags, .ACCELERATE_IN_3D) {
-            // apply_friction(*e.velocity, e.physics_properties.friction_multiplier, e.physics_properties.friction_bias, time_step);
+            if is_set(*e.flags, .APPLY_AIR_FRICTION) {
+                friction_multiplier := e.physics_properties.friction_multiplier + e.physics_properties.air_friction_multiplier;
+                apply_friction(*e.velocity, friction_multiplier, e.physics_properties.friction_bias, time_step);
+            }
         } else {
             apply_friction(*e.velocity.xy, e.physics_properties.friction_multiplier, e.physics_properties.friction_bias, time_step);
         }

@@ -3,9 +3,11 @@
 // options that change the program to something different whenever they are changed.
 PROFILERS_ACTIVE :: false;
 COLLISION_DEBUG :: true;
+GENERATE_PRIMITIVE_MESH_LOADER_FILES :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
+REGENERATE_ASSET_REFERENCES :: true;
 GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 
 #run {
@@ -13,6 +15,7 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: true;
     make_directory_if_it_does_not_exist("bin");
     make_directory_if_it_does_not_exist("modules");
     make_directory_if_it_does_not_exist("src/generated");
+
 
     {
         file, success := file_open("src/generated/procedure_captures.jai", true, true);
@@ -112,9 +115,11 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 #string HERE
 BUILDVAR_PROFILERS_ACTIVE :: %;
 BUILDVAR_COLLISION_DEBUG :: %;
+BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES :: %;
 HERE, 
         PROFILERS_ACTIVE,
-        COLLISION_DEBUG
+        COLLISION_DEBUG,
+        GENERATE_PRIMITIVE_MESH_LOADER_FILES
     ), w);
 
     add_build_string(tprint("Compiler :: #import \"Compiler\";\nBUILDVAR_BUILD_CONFIG :: Compiler.Optimization_Type.%;", optimization), w);
@@ -190,6 +195,9 @@ HERE,
         if m.kind == .PHASE {
             m_phase := cast(*Message_Phase)m;
             if m_phase.phase == .TYPECHECKED_ALL_WE_CAN && !generated_code {
+                #if REGENERATE_ASSET_REFERENCES {
+                    create_assets_file();
+                }
                 generate_captured_procedures(procs_to_capture_as_structs, w);
                 generate_command_line_code(gen_float_command_line_var_procs, gen_bool_command_line_var_procs, command_line_proc_names, w);
                 log("\nend code generation\n");
@@ -520,4 +528,6 @@ HERE;
 #import "xxHash";
 Program_Print :: #import "Program_Print";
 
+#load "src/prebuild/asset.jai";
+#load "src/file.jai";
 // #load "src/prebuild/entity_construction.jai";
