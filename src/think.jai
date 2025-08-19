@@ -260,7 +260,7 @@ gadget_button_think :: (using e: *Entity, interaction: *Gadget_Interaction) -> w
         offset := -WORLD_UP * (norm_dist * button.press_distance);
 
         for *e.meshes.field {
-            if it.data.primitive_type == .CAPSULE {
+            if it.data.(*Mesh_Asset).loader.primitive_type == .CAPSULE {
                 it.offset = offset;
                 break;
             }

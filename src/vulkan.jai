@@ -123,7 +123,7 @@ render_frame :: () {
     }
 
     current_frame := get_current_frame_data();
-    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, ONE_SECOND_IN_NANOSECONDS), "failed to wait for the render fence");
+    vk_validate(vkWaitForFences(logical_device, 1, *current_frame.fence, VK_TRUE, NANOSECONDS_PER_SECOND), "failed to wait for the render fence");
     vk_validate(vkResetFences(logical_device, 1, *current_frame.fence), "failed to reset the render fence");
 
     if should_rebuild_swapchain() {
@@ -420,7 +420,7 @@ begin_command_buffer :: (cmd: VkCommandBuffer) {
 
 acquire_next_swapchain_image :: (current_frame: *Frame_Data) -> u32 {
     image_index: u32;
-    vk_validate(vkAcquireNextImageKHR(logical_device, swapchain.vk_obj, ONE_SECOND_IN_NANOSECONDS, current_frame.swapchain_semaphore, null, *image_index), "failed to wait to get an image from the swapchain");
+    vk_validate(vkAcquireNextImageKHR(logical_device, swapchain.vk_obj, NANOSECONDS_PER_SECOND, current_frame.swapchain_semaphore, null, *image_index), "failed to wait to get an image from the swapchain");
     return image_index;
 }
 
@@ -971,23 +971,7 @@ create_buffers :: () {
 }
 
 create_primitives :: () {
-    {
-        // plane_mesh = create_mesh("_plane", plane_vertices, plane_indices);
-        // plane_mesh.primitive_type = .RECT;
-    }
-    {
-        // cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
-        // cube_mesh.primitive_type = .BOX;
-    }
-    {
-        SPHERE_RADIUS :: 1.0;
-        sphere_mesh_low_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.8);
-        sphere_mesh_low_poly.primitive_type = .SPHERE;
-        sphere_mesh_mid_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.2);
-        sphere_mesh_mid_poly.primitive_type = .SPHERE;
-        sphere_mesh_high_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.05);
-        sphere_mesh_high_poly.primitive_type = .SPHERE;
-    }
+    
 }
 
 create_rect_pipeline :: () {
@@ -1750,23 +1734,23 @@ generate_capsule_mesh_name :: (height: float, radius: float, triangulize_distanc
     return tprint("_capsule_%_%_%", height, radius, triangulize_distance);
 }
 
-create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 1.0) -> *Mesh {
-    auto_release_temp();
-
-    capsule_indices: [..]u16;
-    capsule_indices.allocator = temp;
-    capsule_vertices: [..]Mesh_Vertex;
-    capsule_vertices.allocator = temp;
-
-    generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
-
-    capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
-    capsule_mesh := create_mesh(capsule_name, capsule_vertices, capsule_indices, .CAPSULE);
-
-    return capsule_mesh;
+get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 0.0) -> *Mesh {
+    for meshes {
+        if it.loader.primitive_type == .CAPSULE {
+            loader_capsule := it.loader.capsule;
+            if loader_capsule.height == height && loader_capsule.radius == radius && loader_capsule.triangulization_distance == triangulize_distance {
+                return *it.mesh;
+            }
+        }
+    }
+    name := tprint("capsule_%_%_%", height, radius, triangulize_distance);
+    hash := native_XXH64(name.data, xx name.count, 0xDEADBEEF);
+    return create_capsule_mesh(name, hash, height, radius, triangulize_distance);
 }
 
-get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 0.0) -> *Mesh {
+create_capsule_mesh :: (name: string, hash: u64, height: float, radius: float, triangulize_distance := 0.0) -> *Mesh {
+    auto_release_temp();
+
     if triangulize_distance == 0 {
         cylinder_side_surface_area := 2 * PI * radius * height;
         sphere_surface_area := 4 * PI * square(radius);
@@ -1774,55 +1758,25 @@ get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distanc
         TARGET_TRIANGLE_COUNT :: 1024;
         triangulize_distance = sqrt(total_surface_area / TARGET_TRIANGLE_COUNT);
     }
-    capsule_name := generate_capsule_mesh_name(height, radius, triangulize_distance);
-    mesh := get_existing_mesh(capsule_name);
-    if mesh == null then mesh = create_capsule_mesh(height, radius, triangulize_distance);
+
+    capsule_indices: [..]u16;
+    capsule_indices.allocator = temp;
+    capsule_vertices: [..]Mesh_Vertex;
+    capsule_vertices.allocator = temp;
+
+    generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
+    mesh := create_mesh(name, hash, capsule_vertices, capsule_indices, .CAPSULE);
+    mesh_asset := mesh.(*Mesh_Asset);
+    mesh_asset.loader.capsule.height = height;
+    mesh_asset.loader.capsule.radius = radius;
+    mesh_asset.loader.capsule.triangulization_distance = triangulize_distance;
+
     return mesh;
 }
 
-get_existing_mesh :: (name: string) -> *Mesh {
-    hash := native_XXH64(name.data, xx name.count, 0);
-    for meshes {
-        if hash == it.hash then return *it.mesh;
-    }
-    return null;
-}
-
-get_or_create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16) -> *Mesh {
-    mesh := get_existing_mesh(name);
-    if mesh then return mesh;
-    return create_mesh(name, vertices, indices);
-}
-
-create_mesh :: (name: string, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
-    // just a convention to make sure the preloads are consistent and intentional. all preload names start with an underscore.
-    assert(starts_with(name, "_"));
-
-    hash := native_XXH64(name.data, xx name.count, 0);
-    for meshes {
-        assert(it.hash != hash);
-    }   
-
-    auto_release_temp();
-
-    mesh: Mesh;
-    modified_vertices: [..]Mesh_Vertex;
-    modified_vertices.allocator = temp;
-
-    setup_mesh_data_for_flat_shading(vertices, indices, *modified_vertices);
-    create_mesh_data_buffer(*mesh.ibo, indices, .INDEX);
-    create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
-
-    mesh.primitive_type = primitive_type;
-
-    array_add(*meshes, .{hash, mesh});
-    return *meshes[meshes.count-1].mesh;
-}
-
-// $todo: cleanup duplicate
 create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
     for meshes {
-        assert(it.hash != hash);
+        assert(it.asset_ref.name_hash != hash);
     }   
 
     auto_release_temp();
@@ -1835,40 +1789,19 @@ create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16
     create_mesh_data_buffer(*mesh.ibo, indices, .INDEX);
     create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
 
-    mesh.primitive_type = primitive_type;
-
-    array_add(*meshes, .{hash, mesh});
-    return *meshes[meshes.count-1].mesh;
+    mesh_asset := array_add(*meshes);
+    mesh_asset.mesh = mesh;
+    mesh_asset.asset_ref.name_hash = hash;
+    mesh_asset.loader.primitive_type = primitive_type;
+    mesh_asset.loader.load_type = 0;
+    
+    return *mesh_asset.mesh;
 }
 
 // norm translation offsets: x,y,z in -inf, inf where 0,0,0 is no vertex offset, and 0,0,0.5 is a half-mesh-height vertex offset in z
-get_or_load_mesh :: (filename: string, flip_winding := false, reorient := Quaternion.{}, norm_translation_offsets := Vector3.{}, add_to_deletion_queue := true, assert_already_loaded := false) -> *Mesh {
-    hash := native_XXH64(filename.data, xx filename.count, 0);
-    for meshes {
-        if it.hash == hash {
-            return *it.mesh;
-        }
-    }
-    assert(!assert_already_loaded);
-
-    mesh: Mesh;
-    file_path := tprint("../content/%", filename);
-    success := load_mesh_from_file(*mesh, file_path, flip_winding, reorient, norm_translation_offsets);
-    if !success {
-        return null;
-    }
-
-    array_add(*meshes, .{hash, mesh});
-    if add_to_deletion_queue {
-        // deletion_queue_add(*game_deletion_queue, ) // ?
-    }
-
-    return *meshes[meshes.count-1].mesh;
-}
-
 get_or_load_mesh :: (loader_reference: Asset_Reference) -> *Mesh {
     for meshes {
-        if it.hash == loader_reference.name_hash {
+        if it.asset_ref.name_hash == loader_reference.name_hash {
             return *it.mesh;
         }
     }
@@ -1877,7 +1810,7 @@ get_or_load_mesh :: (loader_reference: Asset_Reference) -> *Mesh {
 
     // $todo: generic read/write asset info serialization is actually doable piecewise.
     read_success: bool;
-    serializer: Serializer(.STATIC, .PRIMITIVE);
+    serializer: Serializer(.STATIC);
     serializer.memory, read_success = read_entire_file(loader_reference.path);
     assert(read_success);
 
@@ -1885,77 +1818,112 @@ get_or_load_mesh :: (loader_reference: Asset_Reference) -> *Mesh {
     
     meta_data_version: s32;
     serialize(*serializer, *meta_data_version);
-
+    serializer.head = 0;
     loader_version: s32;
 
     if meta_data_version == {
     case 1;
-        serializer.head = 0;
-        meta_data: Asset_Meta_Data_V1;
-        serialize(*serializer, (*meta_data).(*u8), size_of(Asset_Meta_Data_V1));
+        meta_data: Asset_Meta_Data;
+        serialize(*serializer, (*meta_data).(*u8), size_of(Asset_Meta_Data));
         assert(meta_data.type == .MESH);
         loader_version = meta_data.version;
     case;
         assert(false, "invalid meta data version %", meta_data_version);
     }
 
+    mesh: *Mesh;
+
     if loader_version == {
     case 1;
-        loader: Mesh_Loader_V1;
-        serialize(*serializer, (*loader).(*u8), size_of(Mesh_Loader_V1));
+        loader: Mesh_Loader;
+        serialize(*serializer, (*loader).(*u8), size_of(Mesh_Loader));
         if loader.load_type == .PRIMITIVE {
+            name := path_strip_extension(path_filename(loader_reference.path));
             if loader.primitive_type == {
             case .SPHERE;
+                mesh = create_capsule_mesh(name, loader_reference.name_hash, loader.sphere.radius*2, loader.sphere.radius, loader.sphere.triangulization_distance);
             case .CAPSULE;
+                mesh = create_capsule_mesh(name, loader_reference.name_hash, loader.capsule.height, loader.capsule.radius, loader.capsule.triangulization_distance);
             case .RECT;
-                name := path_strip_extension(path_filename(loader_reference.path));
-                return create_mesh(name, loader_reference.name_hash, plane_vertices, plane_indices, .RECT);
+                mesh = create_mesh(name, loader_reference.name_hash, plane_vertices, plane_indices, .RECT);
             case .BOX;
-                name := path_strip_extension(path_filename(loader_reference.path));
-                return create_mesh(name, loader_reference.name_hash, cube_vertices, cube_indices, .BOX);
+                mesh = create_mesh(name, loader_reference.name_hash, cube_vertices, cube_indices, .BOX);
             case .AABB;
-                name := path_strip_extension(path_filename(loader_reference.path));
-                return create_mesh(name, loader_reference.name_hash, cube_vertices, cube_indices, .BOX);
+                mesh = create_mesh(name, loader_reference.name_hash, cube_vertices, cube_indices, .BOX);
             case .HALF_SPACE;
             case;
                 assert(false, "invalid mesh loader primitive type %", loader.load_type);
             } 
+
         } else { // OBJ
-            // $todo: obj load asset
+            assert(loader.primitive_type == 0);
+            using loader.from_file;
+            asset_ref := find_mesh_file_asset_reference(asset_hash);
+            if asset_ref {
+                mesh = load_mesh_from_file(asset_ref.path, flip_winding, reorient, norm_translation_offsets);
+            }
+        }
+        if mesh != null {
+            mesh.(*Mesh_Asset).loader = loader;
         }
     case;
         assert(false, "invalid mesh loader version %", loader_version);
     }
 
-    return null;
+    if mesh != null {
+        mesh.(*Mesh_Asset).asset_ref = loader_reference;
+    }
+
+    return mesh;
 }
 
-load_mesh_from_file :: (out_mesh: *Mesh, file_path: string, flip_winding: bool, reorient := Quaternion.{}, norm_translation_offsets := Vector3.{}) -> bool {
+load_mesh_from_file :: (asset_path: string, flip_winding: bool, reorient := Quaternion.{}, norm_translation_offsets := Vector3.{}) -> *Mesh {
     auto_release_temp();
-    out_mesh.* = .{};
 
     vertices: []Mesh_Vertex;
     indices: Index_Buffer;
 
-    if ends_with(file_path, ".obj") {
-        vertices, indices = load_obj_file(file_path, flip_winding, reorient, norm_translation_offsets, temp);
+    if ends_with(asset_path, ".obj") {
+        vertices, indices = load_obj_file(asset_path, flip_winding, reorient, norm_translation_offsets, temp);
     } else {
-        return false;
+        return null;
     }
 
     modified_vertices: [..]Mesh_Vertex;
     modified_vertices.allocator = temp;
+    
+    mesh: Mesh;
 
     if indices.type == .U16 {
         setup_mesh_data_for_flat_shading(vertices, indices._u16, *modified_vertices);
-        create_mesh_data_buffer(*out_mesh.ibo, indices._u16, .INDEX);
+        create_mesh_data_buffer(*mesh.ibo, indices._u16, .INDEX);
     } else {
         setup_mesh_data_for_flat_shading(vertices, indices._u32, *modified_vertices);
-        create_mesh_data_buffer(*out_mesh.ibo, indices._u32, .INDEX);
+        create_mesh_data_buffer(*mesh.ibo, indices._u32, .INDEX);
     }
-    create_mesh_data_buffer(*out_mesh.vbo, modified_vertices, .VERTEX);
+    create_mesh_data_buffer(*mesh.vbo, modified_vertices, .VERTEX);
 
-    return true;
+    mesh_asset := array_add(*meshes);
+    mesh_asset.mesh = mesh;
+    // mesh_asset.asset_ref.name_hash = hash;
+    mesh_asset.loader.primitive_type = 0;
+    mesh_asset.loader.load_type = .FROM_FILE;
+    using mesh_asset.loader;
+    from_file.asset_hash = get_asset_hash(asset_path);
+    from_file.flip_winding = flip_winding;
+    from_file.reorient = reorient;
+    from_file.norm_translation_offsets = norm_translation_offsets;
+
+    return *mesh_asset.mesh;
+}
+
+find_mesh_loader_asset :: (mesh: *Mesh) -> Asset_Reference {
+    mesh_asset := mesh.(*Mesh_Asset);
+    // if mesh_asset.asset_ref.path.data == null || mesh_asset.asset_ref.count == 0 || mesh_asset.loader.load_type == 0 {
+    //     assert(mesh_asset.asset_ref.path.data == null && mesh_asset.asset_ref.count == 0 && mesh_asset.loader.load_type == 0);
+
+    // }
+    return .{};
 }
 
 // TODO: could maybe use some more params? I guess that'll be obvious later
@@ -2718,7 +2686,8 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4)
     if shape.type == {
     case .NONE;
     case .SPHERE;
-        emesh := Mesh_Instance.{data=sphere_mesh_mid_poly, albedo=albedo};
+        sphere := get_or_load_mesh(MESH_SPHERE_MID_POLY);
+        emesh := Mesh_Instance.{data=sphere, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .CAPSULE;
         using shape.capsule;
@@ -2747,13 +2716,18 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4)
 
 draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4, is_collision_mesh := false) {
     mesh := emesh.data;
+    if mesh == null {
+        return;
+    }
     model := make_translation_matrix4(entity.center);
     rot := rotation_matrix(Matrix4, entity.orientation);
     model *= rot;
 
+    mesh_primitive_type := mesh.(*Mesh_Asset).loader.primitive_type;
+
     if is_collision_mesh {
         scale: Matrix4 = ---;
-        if #complete mesh.primitive_type == {
+        if #complete mesh_primitive_type == {
         case .NONE; #through;
         case .CAPSULE;
             scale = Matrix4_Identity;
@@ -2839,24 +2813,18 @@ draw_spheres :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
             group_poly_count = it.poly_count;
             if group_poly_count == {
             case .LOW;
-                mesh_ptr = sphere_mesh_low_poly;
-                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_low_poly.vbo.buffer, *offset);
-                vkCmdBindIndexBuffer(cmd, sphere_mesh_low_poly.ibo.buffer, 0, xx sphere_mesh_low_poly.ibo.index_type);
-                group_index_count = sphere_mesh_low_poly.ibo.count;
+                mesh_ptr = get_or_load_mesh(MESH_SPHERE_LOW_POLY);
             case .MEDIUM;
-                mesh_ptr = sphere_mesh_mid_poly;
-                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_mid_poly.vbo.buffer, *offset);
-                vkCmdBindIndexBuffer(cmd, sphere_mesh_mid_poly.ibo.buffer, 0, xx sphere_mesh_mid_poly.ibo.index_type);
-                group_index_count = sphere_mesh_mid_poly.ibo.count;
+                mesh_ptr = get_or_load_mesh(MESH_SPHERE_MID_POLY);
             case .HIGH;
-                mesh_ptr = sphere_mesh_high_poly;
-                vkCmdBindVertexBuffers(cmd, 0, 1, *sphere_mesh_high_poly.vbo.buffer, *offset);
-                vkCmdBindIndexBuffer(cmd, sphere_mesh_high_poly.ibo.buffer, 0, xx sphere_mesh_high_poly.ibo.index_type);
-                group_index_count = sphere_mesh_high_poly.ibo.count;
+                mesh_ptr = get_or_load_mesh(MESH_SPHERE_HIGH_POLY);
             case;
                 rm_error("invalid group poly count");
                 return;
             }
+            vkCmdBindVertexBuffers(cmd, 0, 1, *mesh_ptr.vbo.buffer, *offset);
+            vkCmdBindIndexBuffer(cmd, mesh_ptr.ibo.buffer, 0, xx mesh_ptr.ibo.index_type);
+            group_index_count = mesh_ptr.ibo.count;
         }
 
         model := make_translation_matrix4(it.position);
@@ -3248,10 +3216,10 @@ Mesh_Vertex :: struct {
     normal: Vector3;
 }
 
-
-Hashed_Mesh :: struct {
-    hash: u64;
-    mesh: Mesh;
+Mesh_Asset :: struct {
+    using #as mesh: Mesh;
+    asset_ref: Asset_Reference;
+    loader: Mesh_Loader;
 }
 
 Lights :: struct {
@@ -3320,7 +3288,6 @@ Mesh_Data_Buffer :: struct {
 Mesh :: struct {
     vbo: Mesh_Data_Buffer;
     ibo: Mesh_Data_Buffer;
-    primitive_type: Collision_Shape_Type = 0;
 }
 
 Render_Buffer :: struct {
@@ -3673,7 +3640,7 @@ sphere_mesh_high_poly: *Mesh;
 test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
 
-meshes: [..]Hashed_Mesh;
+meshes: [..]Mesh_Asset;
 
 sphere_draws: [..]Sphere_Draw_Data;
 
@@ -3741,84 +3708,167 @@ required_device_extensions := (*u8).[
     "VK_KHR_dynamic_rendering",
 ];
 
-ONE_MILLISECOND_IN_NANSOSECONDS :: 1_000_000;
-ONE_SECOND_IN_NANOSECONDS :: 1_000_000_000;
+NANOSECONDS_PER_MILLISECOND :: 1_000_000;
+NANOSECONDS_PER_SECOND :: 1_000_000_000;
 VK_API_VERSION :: VK_API_VERSION_1_3;
 VK_MSAA_SAMPLES :: VkSampleCountFlagBits._1_BIT;
+RENDER_ASSET_TEMP_HASH_SEED :: 0xDEADBEEF;
 
 Load_Mesh_Type :: enum u16 {
-    PRIMITIVE;
-    OBJ;
+    PRIMITIVE :: 0x1;
+    FROM_FILE;
 }
 
-Mesh_Load_From_File_V1 :: struct {
+Mesh_Load_From_File :: struct {
     version : s32 = 1;
-    file: Asset_Reference;
+    asset_hash: u64;
     reorient: Quaternion;
     norm_translation_offsets: Vector3;
     flip_winding: bool;
 }
 
-Mesh_Loader_V1 :: struct {
-    load_type: Load_Mesh_Type;
-    primitive_type: Collision_Shape_Type;
+// Mesh_Asset :: struct {
+//     using #as mesh: Mesh;
+//     asset_ref: Asset_Reference;
+//     loader: Mesh_Loader;
+// }
+
+Mesh_Loader :: struct {
+    load_type: Load_Mesh_Type = 0;
+    primitive_type: Collision_Shape_Type = 0;
     using data : union {
         sphere : struct {radius: float; triangulization_distance: float; } = ---;
         capsule : struct {height: float; radius: float; triangulization_distance: float; } = ---;
-        from_file: Mesh_Load_From_File_V1;
+        from_file: Mesh_Load_From_File;
     }
 }
 
-// $note: easiest way to handle using this is to just delete the contents of the mesh_loaders folder and get this to run
-generate_primitive_mesh_loader_files :: () { 
-    // {
-    //     plane_mesh = create_mesh("_plane", plane_vertices, plane_indices);
-    //     plane_mesh.primitive_type = .RECT;
-    // }
-    // {
-    //     cube_mesh = create_mesh("_cube", cube_vertices, cube_indices);
-    //     cube_mesh.primitive_type = .BOX;
-    // }
-    // {
-    //     SPHERE_RADIUS :: 1.0;
-    //     sphere_mesh_low_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.8);
-    //     sphere_mesh_low_poly.primitive_type = .SPHERE;
-    //     sphere_mesh_mid_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.2);
-    //     sphere_mesh_mid_poly.primitive_type = .SPHERE;
-    //     sphere_mesh_high_poly = get_or_create_capsule_mesh(SPHERE_RADIUS*2.0, SPHERE_RADIUS, 0.05);
-    //     sphere_mesh_high_poly.primitive_type = .SPHERE;
-    // }
-    plane_loader: Mesh_Loader_V1;
+find_mesh_file_asset_reference :: (hash: u64) -> *Asset_Reference {
+    for OBJ_ASSET_REFERENCES {
+        if it.name_hash == hash {
+            return it;
+        }
+    }
+    return null;
+}
+
+generate_mesh_loader_files :: () { 
+    plane_loader: Mesh_Loader;
     {
         using plane_loader;
-        load_type = .PRIMITIVE;
         primitive_type = .RECT;
         success := generate_primitive_mesh_loader_file("plane", *plane_loader);
-        log("generated plane asset: %", success);
     }
-    cube_loader: Mesh_Loader_V1;
+    cube_loader: Mesh_Loader;
     {
         using cube_loader;
-        load_type = .PRIMITIVE;
         primitive_type = .BOX;
         success := generate_primitive_mesh_loader_file("cube", *cube_loader);
-        log("generated cube asset: %", success);
+    }
+    SPHERE_RADIUS :: 1.0;
+    sphere_loader: Mesh_Loader;
+    {
+        using sphere_loader;
+        primitive_type = .SPHERE;
+        sphere.radius = SPHERE_RADIUS;
+        sphere.triangulization_distance = 0.8;
+        success := generate_primitive_mesh_loader_file("sphere_low_poly", *sphere_loader);
+    }
+    {
+        using sphere_loader;
+        sphere.triangulization_distance = 0.2;
+        success := generate_primitive_mesh_loader_file("sphere_mid_poly", *sphere_loader);
+    }
+    {
+        using sphere_loader;
+        sphere.triangulization_distance = 0.05;
+        success := generate_primitive_mesh_loader_file("sphere_high_poly", *sphere_loader);
+    }
+    {
+        loader: Mesh_Loader;
+        using loader.from_file;
+        asset_hash = OBJ_FINALBASEMESH.name_hash;
+        set_orientation(*reorient, .{0,0,1}, .{0,1,0});
+        norm_translation_offsets = .{0,0,-5};
+        flip_winding = true;
+        generate_mesh_loader_file("finalbasemesh", *loader);
     }
 }
-#if BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES then #run generate_primitive_mesh_loader_files();
+#if BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES then #run generate_mesh_loader_files();
 
-generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader_V1) -> bool {
+generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader) -> bool {
+    data.load_type = .PRIMITIVE;
+    assert(data.primitive_type != 0);
+
     scope_set_working_directory("assets/mesh_loaders/primitives");
+    auto_release_temp();
 
     s: Serializer(.STATIC);
     s.memory = as_string(alloc_array(u8, 1024, temp));
     set_rw_mode(*s, .WRITE, false);
 
-    meta_data := Asset_Meta_Data_V1.{type=.MESH, version=1};
-    serialize(*s, (*meta_data).(*u8), size_of(Asset_Meta_Data_V1));
-    serialize(*s, data.(*u8), size_of(Mesh_Loader_V1));
+    meta_data := Asset_Meta_Data.{type=.MESH, version=1};
+    serialize(*s, (*meta_data).(*u8), size_of(Asset_Meta_Data));
+    serialize(*s, data.(*u8), size_of(Mesh_Loader));
 
     filename_with_ext := tprint("%.mesh", filename);
     success := write_entire_file(filename_with_ext, *s);
     return success;
+}
+
+generate_mesh_loader_file :: (filename: string, data: *Mesh_Loader) -> bool {
+    data.load_type = .FROM_FILE;
+    data.primitive_type = 0;
+
+    {
+        scope_set_working_directory("assets");
+        // assert(find_mesh_file_asset_reference(data.from_file.asset_hash) != null);
+    }
+
+    scope_set_working_directory("assets/mesh_loaders");
+    auto_release_temp();
+
+    s: Serializer(.STATIC);
+    s.memory = as_string(alloc_array(u8, 1024, temp));
+    set_rw_mode(*s, .WRITE, false);
+
+    meta_data := Asset_Meta_Data.{type=.MESH, version=1};
+    serialize(*s, (*meta_data).(*u8), size_of(Asset_Meta_Data));
+    serialize(*s, data.(*u8), size_of(Mesh_Loader));
+
+    filename_with_ext := tprint("%.mesh", filename);
+    success := write_entire_file(filename_with_ext, *s);
+    return success;
+}
+
+create_mesh_loader_asset :: (filename: string, mesh: *Mesh) -> bool {
+    scope_set_working_directory("assets/mesh_loaders");
+    auto_release_temp();
+
+    // s: Serializer(.STATIC);
+    // s.memory = as_string(alloc_array(u8, 1024, temp));
+    // set_rw_mode(*s, .WRITE, false);
+
+    // loader: Mesh_Loader;
+    // {
+    //     using loader;
+    //     if mesh.primitive_type == {
+    //     case .NONE;
+    //         return false;
+    //     case .SPHERE;
+    //         return false;
+    //     case .CAPSULE;
+
+    //     case .RECT;
+    //         return false;
+    //     case .BOX;
+    //         return false;
+    //     case .AABB;
+    //         return false;
+    //     case .HALF_SPACE;
+    //         return false;
+    //     }
+    // }
+
+    return false;
 }

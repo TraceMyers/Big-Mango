@@ -1,22 +1,27 @@
 
+COLLISION_GRID_DIMENSIONS :: Int_Vector2.{1000, 1000};
+COLLISION_GRID_CELL_DIMENSIONS :: Vector2.{5, 5};
+COLLISION_GRID_ORIGIN :: #run to_vector2(Int_Vector2.{0,0} - COLLISION_GRID_DIMENSIONS / 2);
+
 // todo: figure out & test rectifying the cell allocations
 
 world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
-    diff := world_pos - context.world.collision_grid_origin;
-    diff *= context.world.inv_collision_cell_dimensions;
+    INV_COLLISION_GRID_CELL_DIMENSIONS :: #run (1 / COLLISION_GRID_CELL_DIMENSIONS);
+    diff := world_pos - COLLISION_GRID_ORIGIN;
+    diff *= INV_COLLISION_GRID_CELL_DIMENSIONS;
     ivec := to_int_vector2(diff);
-    return clamp(ivec, .{}, context.world.collision_grid_dimensions-1);
+    return clamp(ivec, .{}, COLLISION_GRID_DIMENSIONS-1);
 }
 
 collision_grid_index :: inline (pos: Int_Vector2) -> s32 {
-    y_part := pos.y * context.world.collision_grid_dimensions.x;
+    y_part := pos.y * COLLISION_GRID_DIMENSIONS.x;
     x_part := pos.x;
     return x_part + y_part;
 }
 
 collision_grid_index_to_grid_position :: inline (i: s32) -> Int_Vector2 {
-    y_part := i / context.world.collision_grid_dimensions.x;
-    x_part := i - y_part * context.world.collision_grid_dimensions.x;
+    y_part := i / COLLISION_GRID_DIMENSIONS.x;
+    x_part := i - y_part * COLLISION_GRID_DIMENSIONS.x;
     return .{x_part, y_part};
 }
 
@@ -224,16 +229,16 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: In
 draw_collision_grid :: (at_height: float, color: Color4f) {
     using context.world;
     scope_timer();
-    for x : 0..collision_grid_dimensions.x {
-        top := collision_grid_origin + Vector2.{x.(float), 0} * collision_cell_dimensions;
+    for x : 0..COLLISION_GRID_DIMENSIONS.x {
+        top := COLLISION_GRID_ORIGIN + Vector2.{x.(float), 0} * COLLISION_GRID_CELL_DIMENSIONS;
         bottom := top;
-        bottom.y += collision_cell_dimensions.y * collision_grid_dimensions.y.(float);
+        bottom.y += COLLISION_GRID_CELL_DIMENSIONS.y * COLLISION_GRID_DIMENSIONS.y.(float);
         draw_line(Vector3.{xy=top,z=at_height}, Vector3.{xy=bottom,z=at_height}, color);
     }
-    for y : 0..collision_grid_dimensions.y {
-        left := collision_grid_origin + Vector2.{0, y.(float)} * collision_cell_dimensions;
+    for y : 0..COLLISION_GRID_DIMENSIONS.y {
+        left := COLLISION_GRID_ORIGIN + Vector2.{0, y.(float)} * COLLISION_GRID_CELL_DIMENSIONS;
         right := left;
-        right.x += collision_cell_dimensions.x * collision_grid_dimensions.x.(float);
+        right.x += COLLISION_GRID_CELL_DIMENSIONS.x * COLLISION_GRID_DIMENSIONS.x.(float);
         draw_line(Vector3.{xy=left,z=at_height}, Vector3.{xy=right,z=at_height}, color);
     }
 }

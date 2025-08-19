@@ -186,7 +186,7 @@ serialize_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *
 
 serialize :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S)) 
 #modify {
-    return is_serial_primitive(T);
+    return is_serial_primitive(T) || T == string;
 } {
     if rw_mode == .WRITE {
         serialize_nested_array(buffer, array, nesting_allocator, .WRITE);
@@ -197,7 +197,7 @@ serialize :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Arra
 
 serialize_nested_array :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S), $mode: Rw_Mode) 
 #modify {
-    return is_serial_primitive(T);
+    return is_serial_primitive(T) || T == string;
 } {
     array_count: s32 = xx array.field.count;
     serialize_primitive(buffer, *array_count, mode);
@@ -206,24 +206,38 @@ serialize_nested_array :: (using buffer: *Serializer($alloc_m, $align_m), array:
 
 serialize_nested_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *Nested_Array($T, $S), nesting_allocator: *Nesting_Allocator(S), array_count: s32, $mode: Rw_Mode) 
 #modify {
-    return is_serial_primitive(T);
+    return is_serial_primitive(T) || T == string;
 } {
     validate_read_write();
     if array_count == 0 {
         return;
     }
-    align_head_up_for_type(buffer, T);
-    array_size := size_of(T) * array_count;
-    new_head := head + array_size;
+    
+    new_head := head;
+    array_size: s32;
+
+    #if T == string {
+        align_head_up_for_type(buffer, u8);
+        array_size = array_count;
+    } else {
+        align_head_up_for_type(buffer, T);
+        array_size = xx (size_of(T) * array_count);
+    }
+
+    new_head += array_size;
     check_new_head(buffer, new_head);
     #if mode == .WRITE {
-        memcpy(memory.data + head, array.field.data, array_size);
-    } else {
-        if array.field.count != array_count {
-            array_resize(array, nesting_allocator, array_count);
+        if array_count > 0 {
+            memcpy(memory.data + head, array.field.data, array_size);
         }
-        memcpy(array.field.data, memory.data + head, array_size);
+    } else {
+        assert(array.field.data == null);
+        array_resize(array, nesting_allocator, array_count);
+        if array_count > 0 {
+            memcpy(array.field.data, memory.data + head, array_size);
+        }
     }
+
     head = new_head;
 }
 
@@ -255,11 +269,11 @@ serialize_string :: (using buffer: *Serializer($alloc_m, $align_m), str: *string
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // bytes
 
-serialize :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s32) {
+serialize :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s64) {
     if rw_mode == .WRITE {
-        serialize_bytes(buffer, data, count, .WRITE);
+        serialize_bytes(buffer, data, xx count, .WRITE);
     } else {
-        serialize_bytes(buffer, data, count, .READ);
+        serialize_bytes(buffer, data, xx count, .READ);
     }
 }
 

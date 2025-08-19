@@ -1,7 +1,8 @@
 
 // OBJ doesn't guarantee a winding order. just have to know.
-load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
-    data := read_entire_file(file_path);
+load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
+    scope_set_working_directory("../assets");
+    data := read_entire_file(asset_path);
     defer free(data);
 
     Mesh_Data_Counts :: struct {
@@ -62,7 +63,7 @@ load_obj_file :: (file_path: string, flip_winding: bool, reorientation := QUATER
 
     assert(counts.vertex_count > counts.max_index);
     if counts.vertex_count != counts.max_index + 1 {
-        rm_warning("mesh [%]: vertex count [%] does not equal max index + 1 [%]", file_path, counts.vertex_count, counts.max_index+1);
+        rm_warning("mesh [%]: vertex count [%] does not equal max index + 1 [%]", asset_path, counts.vertex_count, counts.max_index+1);
     }
 
     Temp_Mesh_Data :: struct {

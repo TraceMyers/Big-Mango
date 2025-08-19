@@ -81,12 +81,12 @@ pre_boot :: () {
     rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
     
     initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
-    // all allocations whose lifetime is the runtime of the program can just use this allocator. easy and fast.
-    // bump_allocator_initialize(*program_runtime_allocator);
 
     // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
     command_line_procedures = COMMAND_LINE_PROCEDURES;
 
+    load_obj_asset_reference_pointers();
+    load_mesh_asset_reference_pointers();
 }
 
 respond_to_scope_timer_commands :: inline () {

@@ -11,7 +11,7 @@ WORLD_Z :: Vector3.{0,0,1};
 
 WORLD_COUNT_MAX :: 64;
 WORLD_FILE_SIZE_MAX :: 20 * 1024 * 1024;
-WORLD_SIZE_MAX :: 50 * 1024 * 1024;
+WORLD_SIZE_MAX :: 100 * 1024 * 1024;
 
 Context_Type :: type_of(context);
 worlds: [..]World;
@@ -23,6 +23,9 @@ world_heap_pool: Pool(s32);
 context_index: s32;
 
 World :: struct {
+    world_heap_index: s32;
+    world_runtime_allocator: Bump_Allocator;
+
     world_id: u64;
     world_frame: s32;
     world_name := "world";
@@ -41,18 +44,11 @@ World :: struct {
     event_overlap_allocator: Nesting_Allocator(EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
     gadget_interaction_allocator: Nesting_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
     gadget_children_allocator: Nesting_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
-
-    world_runtime_allocator: Bump_Allocator;
-    world_heap_index: s32;
     
     // collision
     collision_grid: []Collision_Grid_Allocation;
     collision_grid_cell_flags: []Collision_Grid_Cell_Flags;
     collision_grid_allocator: Nesting_Allocator(COLLISION_GRID_ALLOCATOR_MIN_SIZE);
-    collision_grid_origin: Vector2;
-    collision_grid_dimensions: Int_Vector2;
-    collision_cell_dimensions: Vector2;
-    inv_collision_cell_dimensions: Vector2;
     time_step_accumulator := 0.0;
     contact_pairs: [..]Contact_Pair;
     seen_entity_in_group: Bit_Array(1);
@@ -168,18 +164,8 @@ initialize :: (using world: *World) {
 
     // collisions
     {
-        center := Vector2.{};
-        dimensions := Int_Vector2.{100, 100};
-        cell_dimensions := Vector2.{25, 25};
-
         array_reserve(*altered_cells, 4096);
-        flt_dimensions := to_vector2(dimensions);
-        half_world_dimensions := (flt_dimensions * cell_dimensions) * 0.5;
-        collision_grid_origin = center - half_world_dimensions;
-        collision_grid_dimensions = dimensions;
-        collision_cell_dimensions = cell_dimensions;
-        inv_collision_cell_dimensions = 1.0 / cell_dimensions;
-        cell_count := dimensions.x * dimensions.y;
+        cell_count := COLLISION_GRID_DIMENSIONS.x * COLLISION_GRID_DIMENSIONS.y;
         world_runtime_allocate(world, *collision_grid, cell_count);
         world_runtime_allocate(world, *collision_grid_cell_flags, cell_count);
         memset(collision_grid_cell_flags.data, 0, cell_count * size_of(Collision_Grid_Cell_Flags));
@@ -222,13 +208,12 @@ reset :: (world: *World) {
     world.* = .{};
 }
 
-save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
+save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     auto_release_temp();
 
     record: Serializer(.STATIC);
+    record.read_array_allocator = no_allocator;
     set_rw_mode(*record, rw_mode);
-
-    using context.world;
 
     file_path: string;
 
@@ -252,14 +237,78 @@ save_or_load :: (world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     } else {
         rm_log("loading world %", file_path);
     }
+    
+    serialize(*record, *world_id);
+    serialize(*record, *world_frame);
+    serialize(*record, *world_name);
+    serialize(*record, *entity_id_counter); 
+    serialize(*record, *time_step_accumulator);
+    serialize(*record, (*color_group_random_state).(*u8), size_of(Random_State));
+    serialize(*record, *collision_frame);
+    serialize(*record, *physics_frame);
+    serialize(*record, *ground_ref);
+    serialize(*record, *camera_1_ref);
+    serialize(*record, *camera_2_ref);
+    serialize(*record, *player_entity_ref);
 
-    // - don't do the crazy pointer serialization thing.
-    // - the only entity data that points outside of entities currently is *Mesh in their Mesh_Instances. so, I just need persistent assets representing these meshes and I can give them asset references.
+    serialize_preallocated_dynamic_array(*record, *entities);
+    serialize_preallocated_dynamic_array(*record, *entity_deletion_queue);
+    serialize_preallocated_pool(*record, *entity_ref_layer);
 
-    // 1. bring in the asset managing code I was using in that other thing
-    // 2. make Mesh a tracked asset type (serialize the instructions to load it as a .mesh file)
-    // 3. write entity serialization proc
-    // 4. within that proc, turn mesh pointers into asset references for saving.
+    for *e : entities {
+        serialize(*record, *e.name, *name_allocator);
+        serialize(*record, *e.meshes, *meshes_allocator);
+        if rw_mode == .WRITE {
+            for *mesh : e.meshes.field {
+                mesh_asset := mesh.(*Mesh_Asset);
+                if mesh_asset.asset_ref.path.count == 0 {
+                    assert(mesh_asset.asset_ref.path.data == null);
+                    
+                } 
+            }
+        }
+        serialize(*record, *e.linear_impulses, *linear_impulses_allocator);
+        if is_set(*e.flags, .USES_GADGET) {
+            serialize(*record, *e.gadget_interactions, *gadget_interaction_allocator);
+            serialize(*record, *e.gadget_children, *gadget_children_allocator);
+        } else {
+            assert(e.gadget_interactions.field.data == null && e.gadget_children.field.data == null);
+        }
+
+        if rw_mode == .READ {
+            e.collision_cell_hash = INVALID_COLLISION_CELL_HASH;
+        }
+    }
+
+    serialize(*record, *color_group_random_state);
+    serialize(*record, *collision_frame);
+    serialize(*record, *physics_frame);
+
+    serialize(*record, *camera_1_ref);
+    serialize(*record, *camera_2_ref);
+    serialize(*record, *player_entity_ref);
+
+    // temp
+    serialize(*record, *ground_ref);
+    serialize(*record, *ball_ref);
+    serialize(*record, *door_ref);
+    serialize(*record, *ai_guy_ref);
+    serialize(*record, *button_ref);
+}
+
+serialize_preallocated_dynamic_array :: (record: *Serializer, array: *[..]$T) {
+    serialize(record, *array.count);
+    serialize(record, array.data.(*u8), array.count * size_of(T));
+}
+
+serialize_preallocated_pool :: (record: *Serializer, pool: *Pool($T)) {
+    serialize_preallocated_dynamic_array(record, *pool.items);
+    serialize_preallocated_dynamic_array(record, *pool.in_use.items);
+    serialize(record, *pool.in_use.groups_bit_size);
+    serialize(record, *pool.top);
+    serialize(record, *pool.shrink_to_min);
+    serialize(record, *pool.allow_grow_default);
+    serialize(record, *pool.allow_shrink_default);
 }
 
 save :: #bake_arguments save_or_load(rw_mode=.WRITE);
@@ -304,6 +353,6 @@ add_world_draw_commands :: (cmd: VkCommandBuffer, using world: *World, vp_mat: M
     }
 }
 
-serialize_entity :: (record: *Serializer(.STATIC), e: *Entity) {
+// serialize_entity :: (record: *Serializer(.STATIC), e: *Entity) {
 
-}
+// }

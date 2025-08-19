@@ -91,9 +91,10 @@ spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orien
 
     set_shape_and_mass(e, .{type=.SPHERE, sphere=.{radius=sphere_radius}}, 1);
 
-    reorient_mesh_quat: Quaternion;
-    set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
-    mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
+    // reorient_mesh_quat: Quaternion;
+    // set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
+    // mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
+    mesh := get_or_load_mesh(MESH_FINALBASEMESH);
     set_meshes(e, .[.{data=mesh, albedo=.{tint=.{0.7,0.7,0.9,1.0}}}]);
 
     set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY);

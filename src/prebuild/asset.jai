@@ -8,32 +8,53 @@ Asset_Type :: enum u32 {
     MESH :: 0x1;
 }
 
-Asset_Meta_Data_V1 :: struct {
+Asset_Meta_Data :: struct {
     meta_data_version : s32 = 1;
     type: Asset_Type;
     version: s32;
 }
 
 create_assets_file :: () -> bool {
-    // TODO: relative paths, file watching, etc.
     asset_directory := tprint("%\\%", get_working_directory(), "assets");
     make_directory_if_it_does_not_exist(asset_directory);
 
-    file_builder : String_Builder;
-    if !create_asset_type_references("obj", asset_directory, *file_builder) then return false;
-    if !create_asset_type_references("mesh", asset_directory, *file_builder) then return false;
+    naked_reference_builder: String_Builder;
+    asset_type_array_strings: [..]string;
+
+    obj_success, obj_array := create_asset_type_references("obj", asset_directory, *naked_reference_builder);
+    if !obj_success {
+        return false;
+    }
+    array_add(*asset_type_array_strings, obj_array);
+
+    mesh_success, mesh_array := create_asset_type_references("mesh", asset_directory, *naked_reference_builder);
+    if !mesh_success {
+        return false;
+    }
+    array_add(*asset_type_array_strings, mesh_array);
 
     file_path := "src/assets.jai";
-    file_string := builder_to_string(*file_builder);
-    write_entire_file(file_path, file_string);
+    whole_file_builder: String_Builder;
+    print_to_builder(*whole_file_builder, "%\n", builder_to_string(*naked_reference_builder));
+    for asset_type_array_strings {
+        if it_index == asset_type_array_strings.count - 1 {
+            print_to_builder(*whole_file_builder, "%", it);
+        } else {
+            print_to_builder(*whole_file_builder, "%\n", it);
+        }
+    }
+
+    write_entire_file(file_path, *whole_file_builder);
     return true;
 }
 
-create_asset_type_references :: (extension_name: string, asset_directory: string, file_builder: *String_Builder) -> bool {
+create_asset_type_references :: (extension_name: string, asset_directory: string, ref_builder: *String_Builder) -> bool, string {
     HASH_SEED :: 1;
 
     files := find_all_files_with_extension(asset_directory, extension_name);
     end_assets_path_index := asset_directory.count+1;
+
+    log("generating % asset references. % files found.", extension_name, files.count);
 
     names : [..]string;
     hashes : [..]u64;
@@ -43,27 +64,17 @@ create_asset_type_references :: (extension_name: string, asset_directory: string
     defer array_free(path_indices);
 
     for *files {
-        split_success, _, filename_with_ext := split_from_right(it.*, #char "/");
-        if split_success {
-            name_success, filename, _ := split_from_right(filename_with_ext, #char ".");
-            if name_success {
-                for c : 0..it.count-1 {
-                    if it.data[c] == #char "\\" {
-                        it.data[c] = #char "/";
-                    }
-                }
-                log("file: %", filename);
-                array_add(*names, copy_string(filename));
-                array_add(*hashes, native_XXH64(filename.data, xx filename.count, seed=HASH_SEED));
-                array_add(*path_indices, it_index);
-            }
-        }
+        filename_with_ext := path_filename(it.*);
+        filename := path_strip_extension(filename_with_ext);
+        array_add(*names, copy_string(filename));
+        array_add(*hashes, get_asset_hash(it.*));
+        array_add(*path_indices, it_index);
     }
     for i : 0..hashes.count-2 {
         for j : i+1..hashes.count-1 {
             if hashes[i] == hashes[j] {
                 log_hash_collision(files, names, hashes, path_indices, i, j);
-                return false;
+                return false, "";
             }
         }
     }
@@ -79,19 +90,31 @@ create_asset_type_references :: (extension_name: string, asset_directory: string
         it.* = to_upper(it.*);
     }
 
+    runtime_proc_name := tprint("load_%_asset_reference_pointers", extension_name);
+    type_array_name := tprint("%_ASSET_REFERENCES", upper_extension_name);
+
+    asset_type_array_builder: String_Builder;
+    print_to_builder(*asset_type_array_builder, "%: [%]*Asset_Reference;\n", type_array_name, names.count);
+    print_to_builder(*asset_type_array_builder, "% :: () {\n", runtime_proc_name);
+
     for i : 0..names.count-1 {
         full_path := files[path_indices[i]];
         path := slice(full_path, end_assets_path_index, full_path.count-end_assets_path_index);
-        name := names[i];
+        upper_name := names[i];
         hash := hashes[i];
-        print_to_builder(
-            file_builder, 
-            "%_% :: Asset_Reference.{\"%\", %};\n", 
-            upper_extension_name, name, path, hash
-        );
+        asset_name := tprint("%_%", upper_extension_name, upper_name);
+        print_to_builder(ref_builder, "% :: Asset_Reference.{\"%\", %};\n", asset_name, path, hash);
+        print_to_builder(*asset_type_array_builder, "\t%[%] = *%;\n", type_array_name, i, asset_name);
     }
 
-    return true;
+    print_to_builder(*asset_type_array_builder, "}\n");
+
+    return true, builder_to_string(*asset_type_array_builder);
+}
+
+get_asset_hash :: (asset_path: string) -> u64 {
+    filename_with_ext := path_filename(asset_path);
+    return native_XXH64(filename_with_ext.data, xx filename_with_ext.count, 0xdeadbeef);
 }
 
 log_hash_collision :: (
