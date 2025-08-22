@@ -506,8 +506,8 @@ Event_Overlap :: struct {
 // uses the bounding box of the entity's collision shape for detecting aabb-aabb overlaps. so, pretty imprecise but that's typically fine for a trigger volume, or as I feel like calling it, an event volume. because it's an event.
 // if attached_to is not set, the event volume will delete itself.
 Event_Volume :: struct {
-    on_begin_overlap: Event_Volume_Overlap_Proc;
-    on_end_overlap: Event_Volume_Overlap_Proc;
+    on_begin_overlap: Proc_Handle;
+    on_end_overlap: Proc_Handle;
     attached_to: Entity_Ref;
     offset_from_attachment: Vector3;
     overlaps: Nested_Array(Event_Overlap, EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
@@ -543,21 +543,25 @@ update_event_volumes :: () {
 
         any_overlaps_can_interact: bool;
 
-        for #v2 < 0..overlaps.field.count-1 {
-            overlap := *overlaps.field[it];
+        i := overlaps.field.count-1;
+        prev_count := overlaps.field.count;
+        while i >= 0 {
+            overlap := *overlaps.field[i];
             if overlap.begin_overlap_frame == collision_frame {
-                if on_begin_overlap != null {
+                if on_begin_overlap != 0 {
                     other_entity := try_get_entity(*overlap.entity);
-                    on_begin_overlap(e, attached_to_entity, other_entity);
+                    call(on_begin_overlap, e, attached_to_entity, other_entity);
                 }
             } else if overlap.last_seen_on_frame != collision_frame {
                 other_entity := try_get_entity(*overlap.entity);
-                remove_event_volume_overlap_at(e, it);
-                if on_end_overlap != null {
+                prev_count = overlaps.field.count;
+                remove_event_volume_overlap_at(e, i);
+                if on_end_overlap != 0 {
                     // may pass null in. that indicates that the entity left the volume on the same frame they were destroyed.
-                    on_end_overlap(e, attached_to_entity, other_entity);
+                    call(on_end_overlap, e, attached_to_entity, other_entity);
                 }
             }
+            i -= 1;
         }
     }
 }

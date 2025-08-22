@@ -10,22 +10,17 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
     // ground entity
     {
-        ground := spawn_entity("ground", .[]);
-        ground_ref = ground.ref;
+        ground := spawn_floor(.{}, .{g=0.8,b=0.7}, 400);
+        // ground := spawn_entity("ground", .[]);
+        // ground_ref = ground.ref;
 
-        set_shape_and_mass(ground, .{type=.RECT, rect=.{200, 200, false}}, IMMOVABLE_ENTITY_MASS);
-        set_orientation(ground, .{0,0,1}, .{1,0,0});
-
+        // set_shape_and_mass(ground, .{type=.RECT, rect=.{200, 200, false}}, IMMOVABLE_ENTITY_MASS);
+        // set_orientation(ground, .{0,0,1}, .{1,0,0});
         ground.physics_properties.elasticity = 0.4;
-        ground.center.z = 0.0;
     }
     // wall entity
     {
-        wall := spawn_entity("wall", .[]);
-        
-        set_shape_and_mass(wall, .{type=.RECT, rect=.{60, 200, true}}, IMMOVABLE_ENTITY_MASS);
-        set_orientation(wall, .{y=-1}, .{z=1});
-        wall.center = .{y=200};
+        wall := spawn_wall(.{y=200}, .{g=0.8,b=0.7}, 300);
     }
     another_door: *Entity;
     // door 2, the sequel
@@ -67,13 +62,9 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
     // ball
     {
-        ball := spawn_entity("ball", .[.DRAW_COLLIDER_HEIGHT_LINE, .PHYSICS_DRIVEN_ROTATION, .APPLY_GRAVITY, .ACCELERATE_IN_3D]);
-        set_shape_and_mass(ball, .{type=.SPHERE, sphere=.{3}}, 0.5);
-
-        ball.center.xy = .{0, 10};
-        ball.center.z = player_entity.center.z + player_entity.shape.half_height + ball.shape.sphere.radius;
-        ball.physics_properties.elasticity = 1.0;
-        ball.physics_properties.linear_speed_max = 1000;
+        radius := 3.0;
+        ball_init_z := player_entity.center.z + player_entity.shape.half_height + radius;
+        ball := spawn_ball(.{y=10,z=ball_init_z} , .{r=0.7,g=0.5}, radius);
         ball_ref = ball.ref;
     }
     // button
@@ -93,7 +84,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
         set_shape_and_mass(button, .{type=.CAPSULE, capsule=.{half_height, radius}}, IMMOVABLE_ENTITY_MASS);
         button.collision_mesh_albedo.tint = .{g=0.8};
         capsule_mesh := get_or_create_capsule_mesh(half_height*2, radius);
-        cube := get_or_load_mesh(MESH_CUBE);
+        cube := get_or_load_mesh(*MESH_CUBE);
         set_meshes(button, .[
             .{data=cube, albedo=.{tint=.{r=1,g=1,b=1}}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
             .{data=capsule_mesh, albedo=.{tint=.{r=1}}}
@@ -124,8 +115,8 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
 
     // temp
-    context.world.world_name = "world";
-    context.world.world_id = 41;
+    // context.world.world_name = "world";
+    // context.world.world_id = 41;
     // load(context.world, "worlds/world_41.world");
 
     return true;

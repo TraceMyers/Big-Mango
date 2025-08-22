@@ -19,6 +19,9 @@ Entity_Flags :: enum {
     GADGET_ALWAYS_ACTIVE;
     GADGET_FORCE_INTERACTIONS_AS_PARENT;
     GADGET_ALLOW_PARENT_TO_FORCE_INTERACTIONS;
+    DOES_NOT_DIE_TO_Z_FLOOR;
+    CAN_BE_HELD;
+    BUILD_MODE_IGNORE_CLICK_RAYCAST;
 
     // ========================================================================== reset per frame
     COLLIDING_WITH_SOMETHING;

@@ -28,7 +28,8 @@ player_entity_think :: (e: *Entity) {
 
             request.channels = .DEFAULT;
             if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
-                if result.hit_entity == context.world.ball_ref {
+                hit_entity := get_entity(result.hit_entity);
+                if is_set(*hit_entity.flags, .CAN_BE_HELD) {
                     e.holding_entity = result.hit_entity;
                 }
             }

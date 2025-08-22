@@ -44,6 +44,7 @@ Raycast_Request :: struct {
     hit_back_face: bool;
     // if false, use the outward-facing normal of the hit. if true, treat the inner intersection as the true hit, so the normal is the inner normal.
     flip_back_face_hit_normal: bool;
+    build_mode: bool; // $todo: probably there should be an automatically-managed 'visible' raycast channel that build mode uses
 }
 
 raycast_ray_length :: inline (using request: Raycast_Request) -> float {
@@ -62,8 +63,9 @@ raycast :: (request: Raycast_Request, out_result: *Raycast_Result) -> bool {
     cur_result: Raycast_Result = ---;
     out_result.* = .{hit_distance=FLOAT32_MAX};
     // todo: grid + sphere intersection test
+    hit_everything := request.build_mode;
     for e : context.world.entities {
-        if (e.ray_channels & request.channels) == 0 {
+        if !hit_everything && (e.ray_channels & request.channels) == 0 {
             continue;
         }
         cur_result.is_hit = false;
@@ -268,7 +270,7 @@ raycast_capsule :: (using request: Raycast_Request, body: Physics_Body, out_resu
 
                 if ray_end_dist_sq >= square(body.shape.capsule.radius) {
                     out_result.is_hit = true;
-
+                    
                 }
             }
         }
@@ -283,4 +285,12 @@ raycast_capsule :: (using request: Raycast_Request, body: Physics_Body, out_resu
 
     out_result.normal_is_degenerate |= !is_normalized(out_result.hit_normal, SMALL_NUMBER);
     return out_result.is_hit;
+}
+
+draw_raycast :: (request: Raycast_Request, result: Raycast_Result, duration := 0.0) {
+    if result.is_hit {
+        draw_line(request.ray.origin, result.hit_location, .{r=1}, .{r=1}, duration, end_point_radius=3);
+    } else {
+        draw_line(request.ray.origin, request.ray.origin + request.ray.direction * 100.0, .{b=1}, .{b=1}, duration);
+    }
 }

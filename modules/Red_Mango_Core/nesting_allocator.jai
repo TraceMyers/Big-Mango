@@ -51,11 +51,25 @@ Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {
     allocation: Nested_Allocation;
 }
 
-maybe_shrink :: inline (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B)) {
-    if array.allocation.count >= 8 && array.allocation.count >= (array.field.count >> 2) {
-        assert(basic_validity_check(array.allocation.ref));
-        new_allocated_count := (array.field.count >> 1);
-        array_resize(array, allocator, xx new_allocated_count);
+maybe_shrink :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B)) {
+    if array.field.count == 0 {
+        if array.allocation.count > 0 {
+            na_free(allocator, *array.allocation.ref);
+            array.allocation = .{};
+            array.field.data = null;
+        }
+        return;
+    }
+
+    assert(basic_validity_check(array.allocation.ref));
+    if array.allocation.count >= 8 && array.allocation.count >= (array.field.count << 2) {
+        new_allocated_count := (array.field.count << 1);
+        new_ref := na_alloc(allocator, new_allocated_count * size_of(T));
+        memcpy(new_ref.data, array.allocation.ref.data, array.field.count * size_of(T));
+        na_free(allocator, *array.allocation.ref);
+        array.allocation.ref = new_ref;
+        array.allocation.count = xx new_allocated_count;
+        array.field.data = new_ref.data;
     }
 }
 
@@ -123,6 +137,7 @@ array_set :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), it
     }
 }
 
+// $todo: optimize
 array_resize :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), new_count: s32) {
     assert(new_count >= 0);
     new_ref := ifx new_count > 0 then na_alloc(allocator, new_count * size_of(T)) else .{};

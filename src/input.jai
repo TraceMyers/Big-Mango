@@ -1,5 +1,5 @@
 
-DEFAULT_CONTROL_MODE :: Control_Mode.FIRST_PERSON_PLAYER;
+DEFAULT_CONTROL_MODE :: Control_Mode.BUILD;
 control_mode := DEFAULT_CONTROL_MODE;
 prev_control_mode := Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
 input_focus := Input_Focus.GAME;
@@ -15,6 +15,7 @@ Input_Focus :: enum {
 }
 
 Control_Mode :: enum_flags {
+    BUILD;
     FIRST_PERSON_CAMERA_ONLY;
     FIRST_PERSON_PLAYER;
     FIRST_PERSON_PLAYER_FREE_FLY;
@@ -23,7 +24,7 @@ Control_Mode :: enum_flags {
     ORTHO_XZ;
     ORTHO_XY;
 }
-FIRST_PERSON_CONTROL_MODE : Control_Mode : .FIRST_PERSON_CAMERA_ONLY | .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
+FIRST_PERSON_CONTROL_MODE : Control_Mode : .BUILD | .FIRST_PERSON_CAMERA_ONLY | .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
 FIRST_PERSON_PLAYER_CONTROL_MODE : Control_Mode : .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
 ORTHO_CONTROL_MODE : Control_Mode : .ORTHO_YZ_45_DOWN | .ORTHO_YZ | .ORTHO_XZ | .ORTHO_XY;
 
@@ -37,7 +38,9 @@ _input :: (stage: Boot_Stage) -> bool {
             _, _, window_width=, window_height=, success := get_dimensions(window, true);
             SetForegroundWindow(window);
             Win32.SetCapture(window);
-            toggle_cursor_first_person_mode();
+            if control_mode != .BUILD {
+                toggle_cursor_first_person_mode();
+            }
             return true;
         }
         return false;
@@ -113,9 +116,9 @@ update_input :: () {
                     case .F6;
                         control_mode = .FIRST_PERSON_PLAYER_FREE_FLY;
                     case .F7;
-                        control_mode = .FIRST_PERSON_CAMERA_ONLY;
+                        control_mode = .BUILD;
                     case #char "M";
-                        if (control_mode & FIRST_PERSON_CONTROL_MODE) != 0 {
+                        if control_mode != .BUILD {
                             toggle_cursor_first_person_mode();
                         }
                     case #char "0";
@@ -129,9 +132,13 @@ update_input :: () {
                     case #char "L";
                         context_index = (!context_index).(s32);
                     case .MOUSE_BUTTON_LEFT;
-                        player_entity := try_get_entity(*context.world.player_entity_ref);
-                        if player_entity != null {
-                            set(*player_entity.flags, .USE_INTERACTION_QUEUED);
+                        if (control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE) != 0 {
+                            player_entity := try_get_entity(*context.world.player_entity_ref);
+                            if player_entity != null {
+                                set(*player_entity.flags, .USE_INTERACTION_QUEUED);
+                            }
+                        } else if control_mode == .BUILD {
+                            build_mode_data.lmb_pressed = true;
                         }
                     case #char "S";
                         if it.modifier_flags.ctrl_pressed {
@@ -183,6 +190,14 @@ toggle_cursor_first_person_mode :: () {
         cursor_visible = false;
     }
     Win32.ShowCursor(cursor_visible.(s32));
+}
+
+set_cursor_first_person_mode :: (value: bool) {
+    if cursor_locked_to_center && !value {
+        toggle_cursor_first_person_mode();
+    } else if !cursor_locked_to_center && value {
+        toggle_cursor_first_person_mode();
+    }
 }
 
 toggle_cursor_visible :: () {

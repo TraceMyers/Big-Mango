@@ -1,4 +1,6 @@
 
+cursor_position: Int_Vector2;
+cursor_norm_position: Vector2;
 imgui_pool: VkDescriptorPool;
 imgui_context: *ImGuiContext;
 command_line_text_buffer: [1024]u8;
@@ -576,22 +578,39 @@ add_physics_debugger :: () {
 
 // eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.
 add_entity_pocket :: () {
+    if context.world == null {
+        Text("need a world to spawn stuff in it");
+    }
+
+    main_camera := get_world_main_camera(context.world);
+    if main_camera == null {
+        Text("need a main camera to spawn stuff in the world.");
+        return;
+    }
+
+    spawn_location := look_origin(main_camera) + look_direction(main_camera) * 20.0;
+    direction_2d := normalize(look_direction(main_camera).xy);
+    direction_3d := Vector3.{xy=direction_2d};
+
     if CollapsingHeader("entity pocket") {
-        if Button("capsule") {
-            // entity := spawn_entity(.PERSON, name="test", physics_properties_template=.CAPSULE_MAN, make_physics_properties_dynamic=true);
-            // test_ref := entity.ref;
-            // entity_phys_props := get_entity_physics_properties(test_ref);
-            // {
-            //     using entity_phys_props;
-            //     body_elasticity = 1.0;
-            //     // body_collider.type = .CAPSULE;
-            //     // body_collider.capsule.half_height = 10.0;
-            //     // body_collider.capsule.radius = 7.0;
-            // }
-            // // entity_phys_props.mass = IMMOVABLE_ENTITY_MASS;
-            // capsule := get_or_create_capsule_mesh(20.0, 7.0, 4.0);
-            // set_entity_meshes(entity.ref, .{data=capsule, albedo=.{tint=.{g=0.8}}});
-            // entity.center.z = 100.0;
+        if Button("door") {
+            spawn_swinging_door(spawn_location, direction_3d, .{r=0.5,g=0.5,b=0.5});
+        }
+        SameLine();
+        if Button("button") {
+            spawn_button(spawn_location, direction_3d, .{r=0.8,g=0.8,b=0.8}, .{r=1});
+        }
+        SameLine();
+        if Button("wall") {
+            spawn_wall(spawn_location, .{r=0.5,g=0.5,b=0.5});
+        }
+        SameLine();
+        if Button("floor") {
+            spawn_floor(spawn_location, .{r=0.5,g=0.5,b=0.5});
+        }
+        SameLine();
+        if Button("ball") {
+            spawn_ball(spawn_location, .{r=0.9,g=0.3,b=0.2});
         }
     }
 }
@@ -617,6 +636,12 @@ add_dev_ui_scratch_space :: () {
                     Text("null entity");
                 }
             }
+        }
+        Text("cursor window pos     : %", cursor_position);
+        Text("cursor window norm pos: %", cursor_norm_position);
+        selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
+        if selected_entity != null {
+            TextWrapped("selected entity: %", FormatStruct.{value=selected_entity.*, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=false, long_form_separator_between_fields ="\n"});
         }
     }
 }

@@ -94,7 +94,7 @@ spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orien
     // reorient_mesh_quat: Quaternion;
     // set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
     // mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
-    mesh := get_or_load_mesh(MESH_FINALBASEMESH);
+    mesh := get_or_load_mesh(*MESH_FINALBASEMESH);
     set_meshes(e, .[.{data=mesh, albedo=.{tint=.{0.7,0.7,0.9,1.0}}}]);
 
     set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY);
@@ -103,8 +103,11 @@ spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orien
 }
 
 spawn_camera :: (name: string, center := Vector3.{}, orientation := QUATERNION_IDENTITY) -> *Entity {
-    e := spawn_entity(name, .[.USES_CAMERA], center, orientation);
+    e := spawn_entity(name, .[.USES_CAMERA, .ACCELERATE_IN_3D, .APPLY_AIR_FRICTION, .MOVED_BY_PHYSICS, .DOES_NOT_DIE_TO_Z_FLOOR], center, orientation);
     e.collision_channels = 0;
+    e.physics_properties.linear_acceleration = 400;
+    e.physics_properties.air_friction_multiplier = 3.0;
+    e.physics_properties.linear_speed_max = 50;
     return e;
 }
 
@@ -127,8 +130,8 @@ spawn_gadget :: (name: string, in_gadget: Gadget, center := Vector3.{}, orientat
         }
 
         using volume.event_volume;
-        on_begin_overlap = on_gadget_event_volume_begin_overlap;
-        on_end_overlap = on_gadget_event_volume_end_overlap;
+        on_begin_overlap = .ON_GADGET_EVENT_VOLUME_BEGIN_OVERLAP;
+        on_end_overlap = .ON_GADGET_EVENT_VOLUME_END_OVERLAP;
         attached_to = gadget.ref;
         offset_from_attachment = event_volume_offset;
 

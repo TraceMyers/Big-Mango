@@ -1,7 +1,7 @@
 
-COLLISION_GRID_DIMENSIONS :: Int_Vector2.{1000, 1000};
-COLLISION_GRID_CELL_DIMENSIONS :: Vector2.{5, 5};
-COLLISION_GRID_ORIGIN :: #run to_vector2(Int_Vector2.{0,0} - COLLISION_GRID_DIMENSIONS / 2);
+COLLISION_GRID_DIMENSIONS :: Int_Vector2.{600, 600};
+COLLISION_GRID_CELL_DIMENSIONS :: Vector2.{60, 60};
+COLLISION_GRID_ORIGIN :: #run Vector2.{0,0} - ((to_vector2(COLLISION_GRID_DIMENSIONS) * COLLISION_GRID_CELL_DIMENSIONS) / 2);
 
 // todo: figure out & test rectifying the cell allocations
 
@@ -233,12 +233,12 @@ draw_collision_grid :: (at_height: float, color: Color4f) {
         top := COLLISION_GRID_ORIGIN + Vector2.{x.(float), 0} * COLLISION_GRID_CELL_DIMENSIONS;
         bottom := top;
         bottom.y += COLLISION_GRID_CELL_DIMENSIONS.y * COLLISION_GRID_DIMENSIONS.y.(float);
-        draw_line(Vector3.{xy=top,z=at_height}, Vector3.{xy=bottom,z=at_height}, color);
+        draw_line(Vector3.{xy=top,z=at_height}, Vector3.{xy=bottom,z=at_height}, color, layer=1);
     }
     for y : 0..COLLISION_GRID_DIMENSIONS.y {
         left := COLLISION_GRID_ORIGIN + Vector2.{0, y.(float)} * COLLISION_GRID_CELL_DIMENSIONS;
         right := left;
         right.x += COLLISION_GRID_CELL_DIMENSIONS.x * COLLISION_GRID_DIMENSIONS.x.(float);
-        draw_line(Vector3.{xy=left,z=at_height}, Vector3.{xy=right,z=at_height}, color);
+        draw_line(Vector3.{xy=left,z=at_height}, Vector3.{xy=right,z=at_height}, color, layer=1);
     }
 }

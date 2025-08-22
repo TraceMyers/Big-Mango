@@ -63,46 +63,46 @@ _vulkan :: (stage: Boot_Stage) -> bool {
         if !init_success then return false;
         vkDeviceWaitIdle(logical_device);
 
-        for command_frames {
-            vkDestroyCommandPool(logical_device, it.command_pool, null);
-            vkDestroyFence(logical_device, it.fence, null);
-            vkDestroySemaphore(logical_device, it.render_semaphore, null);
-            vkDestroySemaphore(logical_device, it.swapchain_semaphore, null);
-            flush_deletion_queue(it.deletion_queue, true);
-        }
-        array_reset(*command_frames);
-        array_reset_keeping_memory(*shader_hash_table);
+        // for command_frames {
+        //     vkDestroyCommandPool(logical_device, it.command_pool, null);
+        //     vkDestroyFence(logical_device, it.fence, null);
+        //     vkDestroySemaphore(logical_device, it.render_semaphore, null);
+        //     vkDestroySemaphore(logical_device, it.swapchain_semaphore, null);
+        //     flush_deletion_queue(it.deletion_queue, true);
+        // }
+        // array_reset(*command_frames);
+        // array_reset_keeping_memory(*shader_hash_table);
 
-        if draw_image_descriptor_layout {
-            vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null);
-            draw_image_descriptor_layout = null;
-        }
-        if draw_image.vk_obj {
-            vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
-            draw_image.vk_obj = null;
-        }
-        if draw_image.image_view {
-            vkDestroyImageView(logical_device, draw_image.image_view, null);
-            draw_image.image_view = null;
-        }
-        if depth_image.vk_obj {
-            vmaDestroyImage(vk_allocator, depth_image.vk_obj, depth_image.allocation);
-            depth_image.vk_obj = null;
-        }
-        if depth_image.image_view {
-            vkDestroyImageView(logical_device, depth_image.image_view, null);
-            depth_image.image_view = null;
-        }
-        reset(*swapchain);
+        // if draw_image_descriptor_layout {
+        //     vkDestroyDescriptorSetLayout(logical_device, draw_image_descriptor_layout, null);
+        //     draw_image_descriptor_layout = null;
+        // }
+        // if draw_image.vk_obj {
+        //     vmaDestroyImage(vk_allocator, draw_image.vk_obj, draw_image.allocation);
+        //     draw_image.vk_obj = null;
+        // }
+        // if draw_image.image_view {
+        //     vkDestroyImageView(logical_device, draw_image.image_view, null);
+        //     draw_image.image_view = null;
+        // }
+        // if depth_image.vk_obj {
+        //     vmaDestroyImage(vk_allocator, depth_image.vk_obj, depth_image.allocation);
+        //     depth_image.vk_obj = null;
+        // }
+        // if depth_image.image_view {
+        //     vkDestroyImageView(logical_device, depth_image.image_view, null);
+        //     depth_image.image_view = null;
+        // }
+        // reset(*swapchain);
 
-        flush_deletion_queue(game_deletion_queue, true);
+        // flush_deletion_queue(game_deletion_queue, true);
 
-        vkDestroyDevice(logical_device, null);
-        logical_device = null;
-        vkDestroySurfaceKHR(vk_instance, surface, null);
-        surface = null;
-        vkDestroyInstance(vk_instance, null);
-        vk_instance = null;
+        // vkDestroyDevice(logical_device, null);
+        // logical_device = null;
+        // vkDestroySurfaceKHR(vk_instance, surface, null);
+        // surface = null;
+        // vkDestroyInstance(vk_instance, null);
+        // vk_instance = null;
         return true;
     }
 }
@@ -133,6 +133,7 @@ render_frame :: () {
         create_swapchain();
         create_draw_image();
         create_depth_image();
+        // $todo: recreate pipelines?
         update_draw_image_descriptor_set();
         if !vk_validate(init_success, "failed to recreate the swapchain.") {
             quit = true;
@@ -147,7 +148,6 @@ render_frame :: () {
 
     draw_extent.width = draw_image.extent.width;
     draw_extent.height = draw_image.extent.height;
-
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
 
     prepare_lights();
@@ -178,15 +178,13 @@ render_frame :: () {
     }
 
     // ship line draws to line draw buffer
-    if lines.count > 0 {
-        copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
-    }
-    defer array_reset_keeping_memory(*lines);
-
-    draw_lines(cmd, *vp_mat);
-    draw_spheres(cmd, *vp_mat);
 
     add_world_draw_commands(cmd, context.world, vp_mat);
+
+    defer array_reset_keeping_memory(*lines);
+    defer array_reset_keeping_memory(*layers);
+    draw_spheres(cmd, *vp_mat);
+    draw_lines(cmd, *vp_mat);
 
     vkCmdEndRendering(cmd);
 
@@ -958,7 +956,9 @@ create_pipelines :: () {
     // create_capsule_pipeline();
     // create_tex_pipeline();
     create_graphics_pipeline();
+    create_transparency_pipeline();
     create_line_pipeline();
+    create_draw_line_in_front_pipeline();
     create_copy_depth_image_pipeline();
     if !init_success then return;
 }
@@ -1135,6 +1135,178 @@ create_tex_pipeline :: () {
     deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, tex_pipeline, null));
 
     vkDestroyShaderModule(logical_device, compute_draw_shader, null);
+}
+
+create_transparency_pipeline :: () {
+    auto_release_temp();
+
+    test_frag := ifx UNLIT then load_shader("unlit_color_mesh_frag") else load_shader("color_mesh_frag");
+    test_vert := load_shader("color_mesh_vert");
+
+    shader_stages := VkPipelineShaderStageCreateInfo.[
+     .{
+        stage = .VERTEX_BIT,
+        module = test_vert,
+        pName = "main"
+    }, 
+    .{
+        stage = .FRAGMENT_BIT,
+        module = test_frag,
+        pName = "main"
+    }];
+
+    vertex_bindings, vertex_attributes := vertex_descriptors(Mesh_Vertex);
+
+    vertex_input_info := VkPipelineVertexInputStateCreateInfo.{
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = *vertex_bindings,
+        vertexAttributeDescriptionCount = xx vertex_attributes.count,
+        pVertexAttributeDescriptions = vertex_attributes.data
+    };
+
+    input_assembly_info := VkPipelineInputAssemblyStateCreateInfo.{
+        topology = .TRIANGLE_LIST,
+    };
+
+    viewport := VkViewport.{
+        width = xx swapchain.extent.width,
+        height = xx swapchain.extent.height,
+        minDepth = 0.0,
+        maxDepth = 1.0
+    };
+
+    scissor := VkRect2D.{
+        extent = swapchain.extent
+    };
+
+    viewport_create_info := VkPipelineViewportStateCreateInfo.{
+        viewportCount = 1,
+        scissorCount = 1
+    };
+
+    rasterizer_create_info := VkPipelineRasterizationStateCreateInfo.{
+        depthClampEnable = VK_FALSE,
+        rasterizerDiscardEnable = VK_FALSE,
+        polygonMode = .FILL,
+        lineWidth = 1.0,
+        // cullMode = .FRONT_BIT,
+        // cullMode = .BACK_BIT,
+        cullMode = .NONE,
+        frontFace = .CLOCKWISE,
+        depthBiasEnable = VK_FALSE,
+        depthBiasConstantFactor = 0.0,
+        depthBiasClamp = 0.0,
+        depthBiasSlopeFactor = 0.0
+    };
+
+    multisample_create_info := VkPipelineMultisampleStateCreateInfo.{
+        sampleShadingEnable = VK_FALSE,
+        rasterizationSamples = ._1_BIT,
+        minSampleShading = 1.0,
+        pSampleMask = null,
+        alphaToCoverageEnable = VK_FALSE,
+        alphaToOneEnable = VK_FALSE
+    };
+
+    color_blend_attachment := VkPipelineColorBlendAttachmentState.{
+        colorWriteMask = .R_BIT | .G_BIT | .B_BIT | .A_BIT,
+        blendEnable = VK_TRUE,
+        srcColorBlendFactor = .SRC_ALPHA,
+        dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+        colorBlendOp = .ADD,
+        srcAlphaBlendFactor = .ONE,
+        dstAlphaBlendFactor = .ZERO,
+        alphaBlendOp = .ADD
+    };
+
+    color_blend_create := VkPipelineColorBlendStateCreateInfo.{
+        logicOpEnable = VK_FALSE,
+        logicOp = .COPY,
+        attachmentCount = 1,
+        pAttachments = *color_blend_attachment
+    };
+
+    dynamic_states := VkDynamicState.[
+        .VIEWPORT,
+        .SCISSOR,
+        // .LINE_WIDTH,
+        // .DEPTH_BIAS,
+        // .BLEND_CONSTANTS,
+        // .DEPTH_BOUNDS,
+        // .STENCIL_COMPARE_MASK             :: 6;
+        // .STENCIL_WRITE_MASK               :: 7;
+        // .STENCIL_REFERENCE                :: 8;
+        // .VIEWPORT_W_SCALING_NV            :: 1000087000;
+        // .DISCARD_RECTANGLE_EXT            :: 1000099000;
+        // SAMPLE_LOCATIONS_EXT             :: 1000143000;
+    ];
+
+    dynamic_state := VkPipelineDynamicStateCreateInfo.{
+        dynamicStateCount = xx dynamic_states.count,
+        pDynamicStates = dynamic_states.data
+    };
+
+    layouts := VkDescriptorSetLayout.[
+        mesh_descriptor_set_layout,
+    ];
+
+    color_pc := VkPushConstantRange.{
+        stageFlags = .VERTEX_BIT,
+        offset = 0,
+        size = size_of(float32) * 16 + size_of(float32) * 4 + size_of(float) * 4
+    };
+
+    pipeline_layout_info := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = xx layouts.count,
+        pSetLayouts = layouts.data,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *color_pc
+    };
+
+    // vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *graphics_pipeline_layout), "failed to create the graphics pipeline layout");
+    // deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, graphics_pipeline_layout, null));
+
+    color_attachment_format := VkFormat.R16G16B16A16_SFLOAT;
+    rendering_create_info := VkPipelineRenderingCreateInfo.{
+        colorAttachmentCount=1,
+        pColorAttachmentFormats = *color_attachment_format,
+        depthAttachmentFormat = .D24_UNORM_S8_UINT
+    };
+
+    depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
+        depthTestEnable = VK_TRUE,
+        depthWriteEnable = VK_FALSE,
+        depthCompareOp = .LESS,
+        depthBoundsTestEnable = VK_FALSE,
+        stencilTestEnable = VK_FALSE,
+        // front:                 VkStencilOpState;
+        // back:                  VkStencilOpState;
+        // minDepthBounds:        float;
+        // maxDepthBounds:        float;
+    };
+
+    pipeline_create := VkGraphicsPipelineCreateInfo.{
+        pNext = *rendering_create_info,
+        stageCount = xx shader_stages.count,
+        pStages = shader_stages.data,
+        pVertexInputState = *vertex_input_info,
+        pInputAssemblyState = *input_assembly_info,
+        // pTessellationState:  *VkPipelineTessellationStateCreateInfo;
+        pViewportState = *viewport_create_info,
+        pRasterizationState = *rasterizer_create_info,
+        pMultisampleState = *multisample_create_info,
+        pDepthStencilState = *depth_stencil_info,
+        pColorBlendState = *color_blend_create,
+        pDynamicState = *dynamic_state,
+        layout = graphics_pipeline_layout,
+        // renderPass:          VkRenderPass;
+        // subpass:             u32;
+        // basePipelineHandle:  VkPipeline;
+        // basePipelineIndex:   s32;
+    };
+
+    vk_init_validate(vkCreateGraphicsPipelines(logical_device, VK_NULL_HANDLE, 1, *pipeline_create, null, *transparency_pipeline), "failed to create the the graphics pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, transparency_pipeline, null));
 }
 
 create_graphics_pipeline :: () {
@@ -1481,6 +1653,178 @@ create_line_pipeline :: () {
     deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, line_pipeline, null));
 }
 
+create_draw_line_in_front_pipeline :: () {
+    auto_release_temp();
+
+    frag := load_shader("line_frag");
+    vert := load_shader("line_in_front_vert");
+
+    shader_stages := VkPipelineShaderStageCreateInfo.[
+     .{
+        stage = .VERTEX_BIT,
+        module = vert,
+        pName = "main"
+    }, 
+    .{
+        stage = .FRAGMENT_BIT,
+        module = frag,
+        pName = "main"
+    }];
+
+    vertex_bindings, vertex_attributes := vertex_descriptors(Line_Vertex);
+
+    vertex_input_info := VkPipelineVertexInputStateCreateInfo.{
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = *vertex_bindings,
+        vertexAttributeDescriptionCount = xx vertex_attributes.count,
+        pVertexAttributeDescriptions = vertex_attributes.data
+    };
+
+    input_assembly_info := VkPipelineInputAssemblyStateCreateInfo.{
+        topology = .LINE_LIST,
+    };
+
+    viewport := VkViewport.{
+        width = xx swapchain.extent.width,
+        height = xx swapchain.extent.height,
+        minDepth = 0.0,
+        maxDepth = 1.0
+    };
+
+    scissor := VkRect2D.{
+        extent = swapchain.extent
+    };
+
+    viewport_create_info := VkPipelineViewportStateCreateInfo.{
+        viewportCount = 1,
+        scissorCount = 1
+    };
+
+    rasterizer_create_info := VkPipelineRasterizationStateCreateInfo.{
+        depthClampEnable = VK_FALSE,
+        rasterizerDiscardEnable = VK_FALSE,
+        polygonMode = .LINE,
+        lineWidth = 1.0,
+        // cullMode = .FRONT_BIT,
+        // cullMode = .BACK_BIT,
+        cullMode = .NONE,
+        frontFace = .CLOCKWISE,
+        depthBiasEnable = VK_FALSE,
+        depthBiasConstantFactor = 0.0,
+        depthBiasClamp = 0.0,
+        depthBiasSlopeFactor = 0.0
+    };
+
+    multisample_create_info := VkPipelineMultisampleStateCreateInfo.{
+        sampleShadingEnable = VK_FALSE,
+        rasterizationSamples = ._1_BIT,
+        minSampleShading = 1.0,
+        pSampleMask = null,
+        alphaToCoverageEnable = VK_FALSE,
+        alphaToOneEnable = VK_FALSE
+    };
+
+    color_blend_attachment := VkPipelineColorBlendAttachmentState.{
+        colorWriteMask = .R_BIT | .G_BIT | .B_BIT | .A_BIT,
+        blendEnable = VK_TRUE,
+        srcColorBlendFactor = .SRC_ALPHA,
+        dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+        colorBlendOp = .ADD,
+        srcAlphaBlendFactor = .ONE,
+        dstAlphaBlendFactor = .ZERO,
+        alphaBlendOp = .ADD
+    };
+
+    color_blend_create := VkPipelineColorBlendStateCreateInfo.{
+        logicOpEnable = VK_FALSE,
+        logicOp = .COPY,
+        attachmentCount = 1,
+        pAttachments = *color_blend_attachment
+    };
+
+    dynamic_states := VkDynamicState.[
+        .VIEWPORT,
+        .SCISSOR,
+        .LINE_WIDTH,
+        // .DEPTH_BIAS,
+        // .BLEND_CONSTANTS,
+        // .DEPTH_BOUNDS,
+        // .STENCIL_COMPARE_MASK             :: 6;
+        // .STENCIL_WRITE_MASK               :: 7;
+        // .STENCIL_REFERENCE                :: 8;
+        // .VIEWPORT_W_SCALING_NV            :: 1000087000;
+        // .DISCARD_RECTANGLE_EXT            :: 1000099000;
+        // SAMPLE_LOCATIONS_EXT             :: 1000143000;
+    ];
+
+    dynamic_state := VkPipelineDynamicStateCreateInfo.{
+        dynamicStateCount = xx dynamic_states.count,
+        pDynamicStates = dynamic_states.data
+    };
+
+    layouts := VkDescriptorSetLayout.[
+        // mesh_descriptor_set_layout,
+    ];
+
+    color_pc := VkPushConstantRange.{
+        stageFlags = .VERTEX_BIT,
+        offset = 0,
+        size = size_of(float32) * 16,
+    };
+
+    pipeline_layout_info := VkPipelineLayoutCreateInfo.{
+        setLayoutCount = xx layouts.count,
+        pSetLayouts = layouts.data,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = *color_pc
+    };
+
+    // vk_init_validate(vkCreatePipelineLayout(logical_device, *pipeline_layout_info, null, *line_pipeline_layout), "failed to create the line pipeline layout");
+    // deletion_queue_add(*game_deletion_queue, vkDestroyPipelineLayout(logical_device, line_pipeline_layout, null));
+
+    color_attachment_format := VkFormat.R16G16B16A16_SFLOAT;
+    rendering_create_info := VkPipelineRenderingCreateInfo.{
+        colorAttachmentCount=1,
+        pColorAttachmentFormats = *color_attachment_format,
+        depthAttachmentFormat = .D24_UNORM_S8_UINT
+    };
+
+    depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
+        depthTestEnable = VK_FALSE,
+        depthWriteEnable = VK_FALSE,
+        // depthCompareOp = .ALWAYS,
+        depthBoundsTestEnable = VK_FALSE,
+        stencilTestEnable = VK_FALSE,
+        // front:                 VkStencilOpState;
+        // back:                  VkStencilOpState;
+        // minDepthBounds:        float;
+        // maxDepthBounds:        float;
+    };
+
+    pipeline_create := VkGraphicsPipelineCreateInfo.{
+        pNext = *rendering_create_info,
+        stageCount = xx shader_stages.count,
+        pStages = shader_stages.data,
+        pVertexInputState = *vertex_input_info,
+        pInputAssemblyState = *input_assembly_info,
+        // pTessellationState:  *VkPipelineTessellationStateCreateInfo;
+        pViewportState = *viewport_create_info,
+        pRasterizationState = *rasterizer_create_info,
+        pMultisampleState = *multisample_create_info,
+        pDepthStencilState = *depth_stencil_info,
+        pColorBlendState = *color_blend_create,
+        pDynamicState = *dynamic_state,
+        layout = line_pipeline_layout,
+        // renderPass:          VkRenderPass;
+        // subpass:             u32;
+        // basePipelineHandle:  VkPipeline;
+        // basePipelineIndex:   s32;
+    };
+
+    vk_init_validate(vkCreateGraphicsPipelines(logical_device, VK_NULL_HANDLE, 1, *pipeline_create, null, *draw_line_in_front_pipeline), "failed to create the the line pipeline");
+    deletion_queue_add(*game_deletion_queue, vkDestroyPipeline(logical_device, draw_line_in_front_pipeline, null));
+}
+
 create_frame_data :: () {
     auto_release_temp();
 
@@ -1731,7 +2075,15 @@ create_shader_module :: (spirv: string) -> VkShaderModule {
 }
 
 generate_capsule_mesh_name :: (height: float, radius: float, triangulize_distance: float) -> string {
-    return tprint("_capsule_%_%_%", height, radius, triangulize_distance);
+    name := tprint("capsule_%_%_%", height, radius, triangulize_distance);
+    replace_chars(name, ".", #char "_");
+    return name;
+}
+
+generate_sphere_mesh_name :: (radius: float, triangulize_distance: float) -> string {
+    name := tprint("sphere_%_%", radius, triangulize_distance);
+    replace_chars(name, ".", #char "_");
+    return name;
 }
 
 get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distance := 0.0) -> *Mesh {
@@ -1743,7 +2095,7 @@ get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distanc
             }
         }
     }
-    name := tprint("capsule_%_%_%", height, radius, triangulize_distance);
+    name := generate_capsule_mesh_name(height, radius, triangulize_distance);
     hash := native_XXH64(name.data, xx name.count, 0xDEADBEEF);
     return create_capsule_mesh(name, hash, height, radius, triangulize_distance);
 }
@@ -1767,6 +2119,8 @@ create_capsule_mesh :: (name: string, hash: u64, height: float, radius: float, t
     generate_capsule_geo(*capsule_vertices, *capsule_indices, height, radius, triangulize_distance);
     mesh := create_mesh(name, hash, capsule_vertices, capsule_indices, .CAPSULE);
     mesh_asset := mesh.(*Mesh_Asset);
+    mesh_asset.loader.load_type = .PRIMITIVE;
+    mesh_asset.loader.primitive_type = .CAPSULE;
     mesh_asset.loader.capsule.height = height;
     mesh_asset.loader.capsule.radius = radius;
     mesh_asset.loader.capsule.triangulization_distance = triangulize_distance;
@@ -1776,8 +2130,10 @@ create_capsule_mesh :: (name: string, hash: u64, height: float, radius: float, t
 
 create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
     for meshes {
-        assert(it.asset_ref.name_hash != hash);
-    }   
+        if it.asset_ref != null {
+            assert(it.asset_ref.name_hash != hash);
+        }
+    }
 
     auto_release_temp();
 
@@ -1791,7 +2147,6 @@ create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16
 
     mesh_asset := array_add(*meshes);
     mesh_asset.mesh = mesh;
-    mesh_asset.asset_ref.name_hash = hash;
     mesh_asset.loader.primitive_type = primitive_type;
     mesh_asset.loader.load_type = 0;
     
@@ -1799,9 +2154,9 @@ create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16
 }
 
 // norm translation offsets: x,y,z in -inf, inf where 0,0,0 is no vertex offset, and 0,0,0.5 is a half-mesh-height vertex offset in z
-get_or_load_mesh :: (loader_reference: Asset_Reference) -> *Mesh {
+get_or_load_mesh :: (loader_reference: *Asset_Reference) -> *Mesh {
     for meshes {
-        if it.asset_ref.name_hash == loader_reference.name_hash {
+        if it.asset_ref != null && it.asset_ref.name_hash == loader_reference.name_hash {
             return *it.mesh;
         }
     }
@@ -1858,7 +2213,7 @@ get_or_load_mesh :: (loader_reference: Asset_Reference) -> *Mesh {
         } else { // OBJ
             assert(loader.primitive_type == 0);
             using loader.from_file;
-            asset_ref := find_mesh_file_asset_reference(asset_hash);
+            asset_ref := find_mesh_data_asset_reference(asset_hash);
             if asset_ref {
                 mesh = load_mesh_from_file(asset_ref.path, flip_winding, reorient, norm_translation_offsets);
             }
@@ -1905,7 +2260,6 @@ load_mesh_from_file :: (asset_path: string, flip_winding: bool, reorient := Quat
 
     mesh_asset := array_add(*meshes);
     mesh_asset.mesh = mesh;
-    // mesh_asset.asset_ref.name_hash = hash;
     mesh_asset.loader.primitive_type = 0;
     mesh_asset.loader.load_type = .FROM_FILE;
     using mesh_asset.loader;
@@ -1917,13 +2271,54 @@ load_mesh_from_file :: (asset_path: string, flip_winding: bool, reorient := Quat
     return *mesh_asset.mesh;
 }
 
-find_mesh_loader_asset :: (mesh: *Mesh) -> Asset_Reference {
+find_mesh_loader_asset_reference :: (mesh: *Mesh) -> *Asset_Reference {
     mesh_asset := mesh.(*Mesh_Asset);
-    // if mesh_asset.asset_ref.path.data == null || mesh_asset.asset_ref.count == 0 || mesh_asset.loader.load_type == 0 {
-    //     assert(mesh_asset.asset_ref.path.data == null && mesh_asset.asset_ref.count == 0 && mesh_asset.loader.load_type == 0);
+    if mesh_asset.asset_ref != null {
+        return mesh_asset.asset_ref;
+    }
 
-    // }
-    return .{};
+    scope_set_working_directory("../assets");
+    scope_set_allocator(temp);
+
+    // $todo: generic read/write asset info serialization is actually doable piecewise.
+    for MESH_ASSET_REFERENCES {
+        auto_release_temp();
+
+        read_success: bool;
+        serializer: Serializer(.STATIC);
+
+        set_rw_mode(*serializer, .READ, false);
+        serializer.memory, read_success = read_entire_file(it.path);
+        assert(read_success);   
+
+        meta_data_version: s32;
+        serialize(*serializer, *meta_data_version);
+        serializer.head = 0;
+        loader_version: s32;
+
+        if meta_data_version == {
+        case 1;
+            meta_data: Asset_Meta_Data;
+            serialize(*serializer, (*meta_data).(*u8), size_of(Asset_Meta_Data));
+            assert(meta_data.type == .MESH);
+            loader_version = meta_data.version;
+        case;
+            assert(false, "invalid meta data version %", meta_data_version);
+        }
+
+        if loader_version == {
+        case 1;
+            loader: Mesh_Loader;
+            serialize(*serializer, (*loader).(*u8), size_of(Mesh_Loader));
+            if loader == mesh_asset.loader {
+                return it;
+            }
+        case;
+            assert(false, "invalid mesh loader version %", loader_version);
+        }
+    }
+
+    return null;
 }
 
 // TODO: could maybe use some more params? I guess that'll be obvious later
@@ -2686,7 +3081,7 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4)
     if shape.type == {
     case .NONE;
     case .SPHERE;
-        sphere := get_or_load_mesh(MESH_SPHERE_MID_POLY);
+        sphere := get_or_load_mesh(*MESH_SPHERE_MID_POLY);
         emesh := Mesh_Instance.{data=sphere, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .CAPSULE;
@@ -2696,19 +3091,19 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4)
         emesh := Mesh_Instance.{data=capsule_mesh, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .RECT;
-        plane := get_or_load_mesh(MESH_PLANE);
+        plane := get_or_load_mesh(*MESH_PLANE);
         emesh := Mesh_Instance.{data=plane, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .BOX;
-        cube := get_or_load_mesh(MESH_CUBE);
+        cube := get_or_load_mesh(*MESH_CUBE);
         emesh := Mesh_Instance.{data=cube, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .AABB;
-        cube := get_or_load_mesh(MESH_CUBE);
+        cube := get_or_load_mesh(*MESH_CUBE);
         emesh := Mesh_Instance.{data=cube, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     case .HALF_SPACE;
-        plane := get_or_load_mesh(MESH_PLANE);
+        plane := get_or_load_mesh(*MESH_PLANE);
         emesh := Mesh_Instance.{data=plane, albedo=albedo};
         draw_mesh(cmd, entity, *emesh, vp_mat, true);
     }
@@ -2761,7 +3156,11 @@ draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view
 draw_mesh :: (cmd: VkCommandBuffer, mesh: *Mesh, model: *Matrix4, orientation: *Quaternion, view_projection: *Matrix4, albedo: Mesh_Albedo, instance_count: u32 = 1) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
 
-    vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
+    if albedo.tint.a < 1 {
+        vkCmdBindPipeline(cmd, .GRAPHICS, transparency_pipeline);
+    } else {
+        vkCmdBindPipeline(cmd, .GRAPHICS, graphics_pipeline);
+    }
     offset : u64 = 0;
     vkCmdBindDescriptorSets(cmd, .GRAPHICS, graphics_pipeline_layout, 0, 1, *mesh_descriptors, 0, null);
 
@@ -2782,17 +3181,63 @@ draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
     if lines.count == 0 then return;
 
-    vkCmdBindPipeline(cmd, .GRAPHICS, line_pipeline);
     vkCmdSetLineWidth(cmd, 4.0);
+
+    constants: [16]float32;
+    memcpy(constants.data, view_projection, 16 * size_of(float));
+    vkCmdPushConstants(cmd, line_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, constants.data);
+
+    line_draw_indices := alloc_array(s64, lines.count, temp);
+    for *line_draw_indices {
+        it.* = it_index;
+    }
+    sort_draws_by_layer :: (i: s64) -> s8 {
+        return layers[i];
+    }
+    quick_sort(line_draw_indices, sort_draws_by_layer);
+
+    if lines.count > 0 {
+        copy_cpu_memory_to_buffer(line_vbo.buffer, as_string(lines));
+    }
 
     offset : u64 = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, *line_vbo.buffer, *offset);
 
-    constants: [16]float32;
-    memcpy(constants.data, view_projection, 16 * size_of(float));
+    do_bind :: () #expand {
+        if `layers[`use_index] == 0 {
+            if `binded_pipeline != .DEPTH {
+                vkCmdBindPipeline(`cmd, .GRAPHICS, `line_pipeline);
+                `binded_pipeline = .DEPTH;
+            }
+        } else if `binded_pipeline != .IN_FRONT {
+            vkCmdBindPipeline(`cmd, .GRAPHICS, `draw_line_in_front_pipeline);
+            `binded_pipeline = .IN_FRONT;
+        }
+    }
 
-    vkCmdPushConstants(cmd, line_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, constants.data);
-    vkCmdDraw(cmd, xx (lines.count * 2), 1, 0, 0);
+    binded_pipeline: enum { DEPTH::0x1; IN_FRONT; } = 0;
+    last_seen_layer : s8 = -1;
+    draw_count := 0;
+    i := 0;
+    while i <= lines.count {
+        if i < lines.count {
+            use_index := line_draw_indices[i];
+            line := *lines[use_index];
+            do_bind();
+            if last_seen_layer != layers[use_index] {
+                if draw_count > 0 {
+                    vkCmdDraw(cmd, xx (draw_count * 2), 1, xx ((i - draw_count) * 2), 0);
+                }
+                last_seen_layer = layers[use_index];
+                draw_count = 1;
+            } else draw_count += 1;
+        } else {
+            use_index := line_draw_indices[i-1];
+            do_bind();
+            vkCmdDraw(cmd, xx (draw_count * 2), 1, xx ((i - draw_count) * 2), 0);
+        }
+        i += 1;
+    }
 }
 
 draw_spheres :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
@@ -2813,11 +3258,11 @@ draw_spheres :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
             group_poly_count = it.poly_count;
             if group_poly_count == {
             case .LOW;
-                mesh_ptr = get_or_load_mesh(MESH_SPHERE_LOW_POLY);
+                mesh_ptr = get_or_load_mesh(*MESH_SPHERE_LOW_POLY);
             case .MEDIUM;
-                mesh_ptr = get_or_load_mesh(MESH_SPHERE_MID_POLY);
+                mesh_ptr = get_or_load_mesh(*MESH_SPHERE_MID_POLY);
             case .HIGH;
-                mesh_ptr = get_or_load_mesh(MESH_SPHERE_HIGH_POLY);
+                mesh_ptr = get_or_load_mesh(*MESH_SPHERE_HIGH_POLY);
             case;
                 rm_error("invalid group poly count");
                 return;
@@ -3218,7 +3663,7 @@ Mesh_Vertex :: struct {
 
 Mesh_Asset :: struct {
     using #as mesh: Mesh;
-    asset_ref: Asset_Reference;
+    asset_ref: *Asset_Reference;
     loader: Mesh_Loader;
 }
 
@@ -3594,6 +4039,11 @@ graphics_pipeline_layout: VkPipelineLayout;
 line_pipeline: VkPipeline;
 line_pipeline_layout: VkPipelineLayout;
 
+draw_line_in_front_pipeline: VkPipeline;
+
+transparency_pipeline: VkPipeline;
+// transparency_pipeline_layout: VkPipelineLayout;
+
 rect_pipeline: VkPipeline;
 rect_pipeline_layout: VkPipelineLayout;
 
@@ -3619,6 +4069,8 @@ transfer_command_buffer: VkCommandBuffer;
 transfer_command_pool: VkCommandPool;
 
 lines: [..]Line_Data; // $todo: rename to line_draws
+layers: [..]s8; // $todo rename all of this stuff
+
 line_vbo: Mesh_Data_Buffer;
 
 shader_hash_table: [..]Shader_Hash_Item;
@@ -3727,12 +4179,6 @@ Mesh_Load_From_File :: struct {
     flip_winding: bool;
 }
 
-// Mesh_Asset :: struct {
-//     using #as mesh: Mesh;
-//     asset_ref: Asset_Reference;
-//     loader: Mesh_Loader;
-// }
-
 Mesh_Loader :: struct {
     load_type: Load_Mesh_Type = 0;
     primitive_type: Collision_Shape_Type = 0;
@@ -3743,8 +4189,21 @@ Mesh_Loader :: struct {
     }
 }
 
-find_mesh_file_asset_reference :: (hash: u64) -> *Asset_Reference {
+operator == :: inline (loader_a: Mesh_Loader, loader_b: Mesh_Loader) -> bool {
+    return memcmp(*loader_a, *loader_b, size_of(Mesh_Loader)) == 0;
+}
+
+find_mesh_data_asset_reference :: (hash: u64) -> *Asset_Reference {
     for OBJ_ASSET_REFERENCES {
+        if it.name_hash == hash {
+            return it;
+        }
+    }
+    return null;
+}
+
+find_mesh_loader_asset_reference :: (hash: u64) -> *Asset_Reference {
+    for MESH_ASSET_REFERENCES {
         if it.name_hash == hash {
             return it;
         }
@@ -3796,11 +4255,12 @@ generate_mesh_loader_files :: () {
 }
 #if BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES then #run generate_mesh_loader_files();
 
-generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader) -> bool {
+// $todo: really need to make the working dir the same for both compile and run
+generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader, working_dir := "assets/mesh_loaders/primitives") -> bool {
     data.load_type = .PRIMITIVE;
     assert(data.primitive_type != 0);
 
-    scope_set_working_directory("assets/mesh_loaders/primitives");
+    scope_set_working_directory(working_dir);
     auto_release_temp();
 
     s: Serializer(.STATIC);
@@ -3816,16 +4276,12 @@ generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader) ->
     return success;
 }
 
-generate_mesh_loader_file :: (filename: string, data: *Mesh_Loader) -> bool {
+// $todo: really need to make the working dir the same for both compile and run
+generate_mesh_loader_file :: (filename: string, data: *Mesh_Loader, working_dir := "assets/mesh_loaders") -> bool {
     data.load_type = .FROM_FILE;
     data.primitive_type = 0;
 
-    {
-        scope_set_working_directory("assets");
-        // assert(find_mesh_file_asset_reference(data.from_file.asset_hash) != null);
-    }
-
-    scope_set_working_directory("assets/mesh_loaders");
+    scope_set_working_directory(working_dir);
     auto_release_temp();
 
     s: Serializer(.STATIC);
@@ -3841,34 +4297,54 @@ generate_mesh_loader_file :: (filename: string, data: *Mesh_Loader) -> bool {
     return success;
 }
 
-create_mesh_loader_asset :: (filename: string, mesh: *Mesh) -> bool {
-    scope_set_working_directory("assets/mesh_loaders");
+create_mesh_loader_asset :: (mesh: *Mesh, filename := "") -> ref_hash: u64 {
     auto_release_temp();
 
-    // s: Serializer(.STATIC);
-    // s.memory = as_string(alloc_array(u8, 1024, temp));
-    // set_rw_mode(*s, .WRITE, false);
+    use_filename := filename;
+    
+    mesh_asset := mesh.(*Mesh_Asset);
+    if mesh_asset.loader.primitive_type == .NONE {
+        assert(mesh_asset.loader.load_type == .FROM_FILE);
+        using mesh_asset.loader.from_file;
+        file_asset_ref := find_mesh_data_asset_reference(asset_hash);
+        assert(file_asset_ref != null);
+        if use_filename == "" {
+            asset_filename := path_strip_extension(path_filename(file_asset_ref.path));
+            reorient_hash := native_XXH64(*reorient, xx size_of(Quaternion), 0xdeadbeef);
+            translation_hash := native_XXH64(*norm_translation_offsets, xx size_of(Vector3), 0xdeadbeef);
+            use_filename = tprint("%_%_%_%", asset_filename, reorient_hash, translation_hash, flip_winding.(u8));
+        }
+        generate_mesh_loader_file(use_filename, *mesh_asset.loader, "../assets/mesh_loaders");
+    } else {
+        assert(mesh_asset.loader.load_type == .PRIMITIVE);
+        if use_filename == "" {
+            using mesh_asset.loader;
+            if primitive_type == {
+            case .SPHERE;
+                use_filename = generate_sphere_mesh_name(sphere.radius, sphere.triangulization_distance);
+            case .CAPSULE;
+                use_filename = generate_capsule_mesh_name(capsule.height, capsule.radius, sphere.triangulization_distance);
+            case .RECT;
+                use_filename = tprint("rect");
+            case .BOX;
+                use_filename = tprint("box");
+            case .AABB;
+                use_filename = tprint("aabb");
+            case .HALF_SPACE;
+                use_filename = tprint("half_space");
+            case;
+                assert(false);
+            }
+        }
+        generate_primitive_mesh_loader_file(use_filename, *mesh_asset.loader, "../assets/mesh_loaders/primitives");
+    }
 
-    // loader: Mesh_Loader;
-    // {
-    //     using loader;
-    //     if mesh.primitive_type == {
-    //     case .NONE;
-    //         return false;
-    //     case .SPHERE;
-    //         return false;
-    //     case .CAPSULE;
+    return get_asset_hash(tprint("%.mesh", use_filename));
+}
 
-    //     case .RECT;
-    //         return false;
-    //     case .BOX;
-    //         return false;
-    //     case .AABB;
-    //         return false;
-    //     case .HALF_SPACE;
-    //         return false;
-    //     }
-    // }
-
-    return false;
+get_viewport :: () -> Vector2 {
+    draw_extent.width = draw_image.extent.width;
+    draw_extent.height = draw_image.extent.height;
+    viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
+    return viewport;
 }

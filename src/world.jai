@@ -12,6 +12,7 @@ WORLD_Z :: Vector3.{0,0,1};
 WORLD_COUNT_MAX :: 64;
 WORLD_FILE_SIZE_MAX :: 20 * 1024 * 1024;
 WORLD_SIZE_MAX :: 100 * 1024 * 1024;
+INVALID_WORLD_ID : u64 : 0;
 
 Context_Type :: type_of(context);
 worlds: [..]World;
@@ -19,6 +20,7 @@ world_contexts: [..]*Context_Type;
 world_context_datas: [..]Context_Type;
 world_heaps: [..]Bump_Allocator_Heap;
 world_heap_pool: Pool(s32);
+queued_world_load: string;
 
 context_index: s32;
 
@@ -123,9 +125,11 @@ release_world_heap :: (i: s32) {
     return_item(*world_heap_pool, i);
 }
 
-initialize :: (using world: *World) {
-    if world_id == 0 {
+initialize :: (using world: *World, id := INVALID_WORLD_ID) {
+    if id == INVALID_WORLD_ID {
         world_id = get_new_world_id();
+    } else {
+        world_id = id;
     }
 
     world_heap_index = get_new_world_heap();
@@ -133,7 +137,6 @@ initialize :: (using world: *World) {
     world_runtime_allocator.parent_allocator = no_allocator;
     world_runtime_allocator.proc = bump_allocator_proc;
     world_runtime_allocator.data = *world_runtime_allocator;
-
 
     // entities
     {
@@ -164,7 +167,7 @@ initialize :: (using world: *World) {
 
     // collisions
     {
-        array_reserve(*altered_cells, 4096);
+        world_runtime_reserve(world, *altered_cells, 8192);
         cell_count := COLLISION_GRID_DIMENSIONS.x * COLLISION_GRID_DIMENSIONS.y;
         world_runtime_allocate(world, *collision_grid, cell_count);
         world_runtime_allocate(world, *collision_grid_cell_flags, cell_count);
@@ -175,9 +178,8 @@ initialize :: (using world: *World) {
 }
 
 begin_world_frame :: () {
-    using context.world;
-
     scope_timer();
+    using context.world;
 
     array_reserve(*entity_deletion_queue, 128);
     if entity_deletion_queue.count == 0 {
@@ -210,9 +212,7 @@ reset :: (world: *World) {
 
 save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     auto_release_temp();
-
     record: Serializer(.STATIC);
-    record.read_array_allocator = no_allocator;
     set_rw_mode(*record, rw_mode);
 
     file_path: string;
@@ -221,22 +221,30 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
         scope_set_allocator(temp);
         read_success: bool;
         file_path = load_file_path;
-        assert(file_path != "");
+        if file_path == "" {
+            file_path = tprint("worlds/%_%.world", world.world_name, world.world_id);
+        }
         record.memory, read_success = read_entire_file(file_path);
-        assert(read_success);
+        if !read_success {
+            rm_error("tried to read file % for world loading, but failed.", file_path);
+            return;
+        }
         validate_checksum(*record);
+        rm_log("loading world %", file_path);
     } else {
         scope_set_allocator(temp);
         make_directory_if_it_does_not_exist("worlds");
         file_path = tprint("worlds/%_%.world", world.world_name, world.world_id);
         record.memory = alloc_string(WORLD_FILE_SIZE_MAX);
+        rm_log("saving world %", file_path);
     }
 
-    if rw_mode == .WRITE {
-        rm_log("saving world %", file_path);
-    } else {
-        rm_log("loading world %", file_path);
+    if rw_mode == .READ {
+        reset(world);
+        initialize(world);
     }
+
+    record.read_array_allocator = world.world_runtime_allocator;
     
     serialize(*record, *world_id);
     serialize(*record, *world_frame);
@@ -251,29 +259,48 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     serialize(*record, *camera_2_ref);
     serialize(*record, *player_entity_ref);
 
+    record.read_array_allocator = no_allocator;
+
     serialize_preallocated_dynamic_array(*record, *entities);
     serialize_preallocated_dynamic_array(*record, *entity_deletion_queue);
     serialize_preallocated_pool(*record, *entity_ref_layer);
 
     for *e : entities {
+        if rw_mode == .READ {
+            e.name = .{};
+            e.meshes = .{};
+            e.linear_impulses = .{};
+            e.gadget_interactions = .{};
+            e.gadget_children = .{};
+            e.event_volume.overlaps = .{};
+        }
         serialize(*record, *e.name, *name_allocator);
         serialize(*record, *e.meshes, *meshes_allocator);
         if rw_mode == .WRITE {
+            for mesh : e.meshes.field {
+                asset_ref := find_mesh_loader_asset_reference(mesh.data);
+                if asset_ref == null {
+                    hash := create_mesh_loader_asset(mesh.data);
+                    serialize(*record, *hash);
+                } else {
+                    serialize(*record, *asset_ref.name_hash);
+                }
+            }
+        } else {
             for *mesh : e.meshes.field {
-                mesh_asset := mesh.(*Mesh_Asset);
-                if mesh_asset.asset_ref.path.count == 0 {
-                    assert(mesh_asset.asset_ref.path.data == null);
-                    
-                } 
+                hash: u64;
+                serialize(*record, *hash);
+                asset_ref := find_mesh_loader_asset_reference(hash);
+                assert(asset_ref != null);
+                mesh.data = get_or_load_mesh(asset_ref);
             }
         }
         serialize(*record, *e.linear_impulses, *linear_impulses_allocator);
         if is_set(*e.flags, .USES_GADGET) {
             serialize(*record, *e.gadget_interactions, *gadget_interaction_allocator);
             serialize(*record, *e.gadget_children, *gadget_children_allocator);
-        } else {
-            assert(e.gadget_interactions.field.data == null && e.gadget_children.field.data == null);
         }
+        serialize(*record, *e.event_volume.overlaps, *event_overlap_allocator);
 
         if rw_mode == .READ {
             e.collision_cell_hash = INVALID_COLLISION_CELL_HASH;
@@ -284,6 +311,7 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     serialize(*record, *collision_frame);
     serialize(*record, *physics_frame);
 
+    // woops doubled
     serialize(*record, *camera_1_ref);
     serialize(*record, *camera_2_ref);
     serialize(*record, *player_entity_ref);
@@ -294,6 +322,10 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     serialize(*record, *door_ref);
     serialize(*record, *ai_guy_ref);
     serialize(*record, *button_ref);
+
+    if rw_mode == .WRITE {
+        write_entire_file(file_path, *record);
+    }
 }
 
 serialize_preallocated_dynamic_array :: (record: *Serializer, array: *[..]$T) {
@@ -315,6 +347,11 @@ save :: #bake_arguments save_or_load(rw_mode=.WRITE);
 load :: #bake_arguments save_or_load(rw_mode=.READ);
 
 get_world_main_camera :: (using world: *World) -> *Entity {
+    if control_mode == .BUILD {
+        return try_get_entity(*camera_2_ref);
+    } else if control_mode & ORTHO_CONTROL_MODE {
+        return try_get_entity(*camera_2_ref);
+    }
     player_entity := try_get_entity(*player_entity_ref);
     if player_entity != null {
         attached_camera := try_get_entity(*player_entity.attached_camera);
@@ -353,6 +390,12 @@ add_world_draw_commands :: (cmd: VkCommandBuffer, using world: *World, vp_mat: M
     }
 }
 
-// serialize_entity :: (record: *Serializer(.STATIC), e: *Entity) {
-
-// }
+load_world :: (args: []Command_Line_Argument) {
+    init_command_line_proc_or_return(args, 1);
+    world_name, success := try_parse_command_line_arg(*args[0], string);
+    if success {
+        scope_set_allocator(context.default_allocator);
+        reset(*queued_world_load);
+        queued_world_load = sprint("worlds/%.world", world_name);
+    }
+} @command_line

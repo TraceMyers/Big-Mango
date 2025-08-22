@@ -1,17 +1,19 @@
 
 do_debug_draws :: () {
     for #v2 < 0..line_draws.count-1 {
+        // $todo: copying the line draws into another line draws array is silly.
         line := *line_draws[it];
         array_add(*lines, .{
             .{
                 position = .{xyz=line.start,w=1},
-                color = line.start_color
+                color = line.start_color,
             }, 
             .{
                 position = .{xyz=line.end,w=1},
-                color = line.end_color
+                color = line.end_color,
             }
         });
+        array_add(*layers, line.layer);
         if line.start_point_radius > 0 {
             draw_sphere(line.start, line.start_point_radius, line.start_color);
         }
@@ -25,31 +27,35 @@ do_debug_draws :: () {
     }
 }
 
-draw_line :: inline (start: Vector3, end: Vector3, color: Color4f, duration := 0.0) {
-    draw_line(start, end, color, color, duration);
+draw_line :: inline (start: Vector3, end: Vector3, color: Color4f, duration := 0.0, layer : s8 = 0)  {
+    draw_line(start, end, color, color, duration, layer=layer);
 }
 
-draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, duration := 0.0, start_point_radius := 0.0, end_point_radius := 0.0) {
+draw_line :: (start: Vector3, end: Vector3, start_color: Color4f, end_color: Color4f, duration := 0.0, start_point_radius := 0.0, end_point_radius := 0.0, layer : s8 = 0) {
     if lines.count + 2 > LINES_MAX then return;
-    array_add(*line_draws, .{start, end, start_color, end_color, start_point_radius, end_point_radius, duration});
+    array_add(*line_draws, .{start, end, start_color, end_color, start_point_radius, end_point_radius, duration, layer});
 }
 
 draw_sphere :: (center: Vector3, radius: float, color: Color4f, poly_count := Sphere_Poly_Count.MEDIUM) {
     array_add(*sphere_draws, .{center, radius, color, poly_count});
 }
 
-draw_aabb :: (shape: Collision_Shape, position: Vector3, orientation: Quaternion, color: Color4f) {
+draw_aabb :: (shape: Collision_Shape, position: Vector3, orientation: Quaternion, color: Color4f, layer : s8 = 0) {
     aabb: AABB = ---;
     get_aabb(shape, position, orientation, *aabb);
-    draw_aabb(aabb, color);
+    draw_aabb(aabb, color, layer);
 }
 
-draw_aabb :: (aabb: AABB, color: Color4f) {
+draw_aabb :: (aabb: AABB, color: Color4f, layer : s8 = 0) {
     points: [8]Vector3;
     get_aabb_points(aabb, *points);
     for Box_Edges {
-        draw_line(points[it.a], points[it.b], color);
+        draw_line(points[it.a], points[it.b], color, layer=layer);
     }
+}
+
+draw_aabb :: (e: *Entity, color: Color4f, layer : s8 = 0) {
+    draw_aabb(e.shape, e.center, e.orientation, COLOR4F_RED);
 }
 
 draw_all_body_collider_aabbs :: () {
@@ -99,6 +105,8 @@ Line_Draw :: struct {
     start_point_radius: float;
     end_point_radius: float;
     time_remaining: float;
+    layer: s8;
 }
 
+DRAW_IN_FRONT_LAYER_MAX :: S8_MAX;
 line_draws: [..]Line_Draw;

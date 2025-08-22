@@ -44,7 +44,7 @@ move_stuff :: (time_step: float) {
             }
         }
 
-        if e.center.z <= Z_KILL_FLOOR {
+        if e.center.z <= Z_KILL_FLOOR && !is_set(*e.flags, .DOES_NOT_DIE_TO_Z_FLOOR) {
             queue_entity_deletion(e.ref);
         }
 

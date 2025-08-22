@@ -22,7 +22,6 @@ process_entity_input :: () {
     camera_1 := try_get_entity(*camera_1_ref);
     camera_2 := try_get_entity(*camera_2_ref);
 
-    if player_entity == null then return;
     if input_focus != .GAME then return;
 
     if control_mode == .FIRST_PERSON_CAMERA_ONLY {
@@ -31,12 +30,15 @@ process_entity_input :: () {
             handle_first_person_input(camera_2, null, .{}, true);
         }
     } else if control_mode == .FIRST_PERSON_PLAYER {
-        attached_camera := get_entity(player_entity.attached_camera);
-        if player_entity != null && attached_camera != null {
-            unset(*player_entity.flags, .ACCELERATE_IN_3D);
-            first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
-            handle_first_person_input(player_entity, attached_camera, first_person_camera_offset, false);
-            handle_player_input(player_entity);
+        if player_entity != null {
+            attached_camera := try_get_entity(*player_entity.attached_camera);
+            if attached_camera != null {
+                unset(*player_entity.flags, .ACCELERATE_IN_3D);
+                first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
+                handle_first_person_input(player_entity, attached_camera, first_person_camera_offset, false);
+                handle_player_input(player_entity);
+                apply_acceleration(player_entity);
+            }
         }
     } else if control_mode == .FIRST_PERSON_PLAYER_FREE_FLY {
         if player_entity != null && camera_1 != null {
@@ -45,17 +47,26 @@ process_entity_input :: () {
             first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
             handle_first_person_input(player_entity, camera_1, first_person_camera_offset, true);
             handle_player_input(player_entity);
+            apply_acceleration(player_entity);
         }
-    } else { // ortho
+    } else if control_mode == .BUILD {
+        if camera_2 != null {
+            if Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_RIGHT] & .DOWN {
+                set_cursor_first_person_mode(true);
+                handle_first_person_input(camera_2, camera_2, .{}, true);
+                apply_acceleration(camera_2);
+            } else {
+                set_cursor_first_person_mode(false);
+            }
+            handle_world_build_input(camera_2);
+        }
+    } else if control_mode & ORTHO_CONTROL_MODE { // ortho
         if player_entity != null && camera_2 != null {
             unset(*player_entity.flags, .ACCELERATE_IN_3D);
             handle_ortho_input(player_entity, camera_2);
             handle_player_input(player_entity);
+            apply_acceleration(player_entity);
         }
-    }
-
-    if player_entity != null {
-        apply_acceleration(player_entity);
     }
 }
 
@@ -206,15 +217,67 @@ handle_player_input :: (entity: *Entity) {
     }
 }
 
-    // if jump_queued {
-    //     time_since_queued := seconds_since_init().(float) - jump_queued_at_time;
-    //     if time_since_queued < 0.3 {
-    //         entity.movement_flags |= .JUMP_QUEUED;
-    //         entity.jump_queued_at_time = jump_queued_at_time;
-    //     }
-    //     jump_queued_at_time = -999.0;
-    //     jump_queued = false;
-    // }
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Build_Mode_Data :: struct {
+    lmb_pressed: bool;
+    selected_entity_ref: Entity_Ref;
+}
+
+build_mode_data: Build_Mode_Data;
+
+handle_world_build_input :: (camera: *Entity) {
+    using build_mode_data;
+
+    selected_entity := try_get_entity(*selected_entity_ref);
+    if selected_entity != null {
+        draw_aabb(selected_entity, .{r=1}, layer=2);
+    }
+
+    if Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_RIGHT] & .DOWN {
+        build_mode_data.lmb_pressed = false;
+        return;
+    }
+
+    if lmb_pressed {
+        result: Raycast_Result;
+        request: Raycast_Request;
+
+        request.build_mode = true;
+
+        theta := (camera.perspective.vertical_fov * 0.5) * (PI / 180.0);
+        half_y_dist := NEAR_PLANE * tan(theta); // tan(theta) = opp / adj
+        viewport := get_viewport();
+        clip_rect_height := half_y_dist * 2.0;
+        clip_rect_width := get_aspect_ratio(camera, viewport) * clip_rect_height;
+
+        p: Win32.POINT;
+        Win32.GetCursorPos(*p);
+        success := Win32.ScreenToClient(window, *p) != 0;
+        if success {
+            cursor_position.x = p.x;
+            cursor_position.y = p.y;
+            cursor_norm_position.x = p.x.(float) / viewport.x.(float);
+            cursor_norm_position.y = p.y.(float) / viewport.y.(float);
+        }
+
+        norm_clip_rect_center := Vector2.{0.5,0.5};
+        norm_center_diff := cursor_norm_position - norm_clip_rect_center;
+        world_clip_rect_diff := norm_center_diff * Vector2.{clip_rect_width, -clip_rect_height};
+
+        world_clip_rect_center := camera.center + camera.axes.fore * NEAR_PLANE;
+        world_clip_rect_cursor_pos := world_clip_rect_center + world_clip_rect_diff.x * camera.axes.right + world_clip_rect_diff.y * camera.axes.up;
+        cursor_raycast_dir := normalize(world_clip_rect_cursor_pos - camera.center);
+
+        request.ray = .{look_origin(camera), cursor_raycast_dir};
+        request.hit_back_face = true;
+        if raycast(*request, *result) {
+            selected_entity_ref = result.hit_entity;
+        }
+        // draw_raycast(request, result, 1);
+        lmb_pressed = false;
+    }
+}
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // command line procs
@@ -242,3 +305,7 @@ teleport_player_to_free_fly_camera :: (args: []Command_Line_Argument) {
     init_command_line_proc_or_return(args, 0);
     get_entity(context.world.player_entity_ref).center = get_entity(context.world.camera_2_ref).center;
 } @command_line
+
+// --------------------------------------------------------------------------------------------------------------------------
+#scope_file
+// --------------------------------------------------------------------------------------------------------------------------

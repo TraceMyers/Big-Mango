@@ -73,3 +73,5 @@ view_projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
     proj := projection_matrix(camera, viewport);
     return proj * view;
 }
+
+// get_screen_clip

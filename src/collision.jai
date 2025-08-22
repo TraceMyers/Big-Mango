@@ -30,12 +30,12 @@ AABB_OVERLAP_BUFFER :: 1.0;
 PHYSICS_FIXED_TIME_STEP :: 1.0 / 240.0;
 DRAW_COLLISION_MESHES :: BUILDVAR_COLLISION_DEBUG;
 
-COLLISION_VELOCITY_ITERATION_COUNT :: 5;
+COLLISION_VELOCITY_ITERATION_COUNT :: 6;
 COLLISION_POSITION_ITERATION_COUNT :: 8;
-COLLISION_MAX_CORRECTION :: 1.0;
+COLLISION_MAX_CORRECTION :: 10.0;
 COLLISION_OVERLAP_TOLERANCE :: 0.001;
-COLLISION_IMPULSE_DAMPING :: 0.95;
-COLLISION_POSITION_CORRECTION_DAMPING :: 0.25;
+COLLISION_IMPULSE_DAMPING :: 0.8;
+COLLISION_POSITION_CORRECTION_DAMPING :: 0.35;
 Z_KILL_FLOOR :: -100.0;
 
 #if BUILDVAR_COLLISION_DEBUG {
@@ -48,14 +48,14 @@ solve_contacts :: () {
     using context.world;
     scope_timer();
 
+    // draw_collision_grid(10, .{b=1});
+
     time_step_accumulator += delta_time;
     time_step_count := (time_step_accumulator / PHYSICS_FIXED_TIME_STEP).(s32);
     if time_step_count <= 0 {
         return;
     }
     collision_frame += 1;
-
-    // draw_collision_grid(context.player_entity.center.z - context.player_entity.shape.half_height, .{b=1});
 
     update_collision_grid_cell_occupations();
 
@@ -70,9 +70,12 @@ solve_contacts :: () {
     solve_contacts_broad_phase(time_step_count);
     solve_contacts_narrow_phase(time_step_count);
 
-    TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS];
-    for e : context.world.entities {
-        unset_multiple(*e.flags, TRANSIENT_COLLISION_FLAGS);
+    {
+        scope_timer("unset transient collision flags");
+        TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS];
+        for e : context.world.entities {
+            unset_multiple(*e.flags, TRANSIENT_COLLISION_FLAGS);
+        }
     }
 }
 
@@ -263,7 +266,7 @@ solve_contact_velocities :: () {
                     friction_impulse := -pair.contact_tangent * (friction_impulse_magnitude * friction_coef);
                     normal_impulse := -contact_result.normal * normal_impulse_magnitude;
                     // total_impulse := normal_impulse + friction_impulse;
-                    total_impulse := normal_impulse;
+                    total_impulse := normal_impulse * COLLISION_IMPULSE_DAMPING;
 
                     entity_a.velocity += total_impulse; 
                     // if is_set(*entity_a.flags, .PHYSICS_DRIVEN_ROTATION) {

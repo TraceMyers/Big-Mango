@@ -1,9 +1,9 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-PROFILERS_ACTIVE :: false;
+PROFILERS_ACTIVE :: true;
 COLLISION_DEBUG :: true;
-GENERATE_PRIMITIVE_MESH_LOADER_FILES :: true;
+GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
@@ -15,7 +15,6 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: true;
     make_directory_if_it_does_not_exist("bin");
     make_directory_if_it_does_not_exist("modules");
     make_directory_if_it_does_not_exist("src/generated");
-
 
     {
         file, success := file_open("src/generated/procedure_captures.jai", true, true);

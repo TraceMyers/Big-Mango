@@ -87,6 +87,7 @@ pre_boot :: () {
 
     load_obj_asset_reference_pointers();
     load_mesh_asset_reference_pointers();
+    load_handle_procedure_array();
 }
 
 respond_to_scope_timer_commands :: inline () {
@@ -100,7 +101,6 @@ respond_to_scope_timer_commands :: inline () {
         profiling_off = false;
     }
 }
-
 
 end_frame :: () {
     scope_timer();
@@ -122,6 +122,14 @@ end_frame :: () {
     render_times[dt_index] = render_dt;
     simulation_times[dt_index] = simulation_dt;
     dt_index = increment_wrap(dt_index, 0, delta_times.count-1);
+
+    if queued_world_load != "" {
+        if world_contexts[context_index].world != null {
+            load(world_contexts[context_index].world, queued_world_load);
+        }
+        scope_set_allocator(context.default_allocator);
+        reset(*queued_world_load);
+    }
 
     #if BUILDVAR_PROFILERS_ACTIVE {{
         scope_timer("make scope timer allocations");
@@ -212,6 +220,7 @@ report_scope_times :: () {
 
         for scope_timer_stack_diffs {
             required_tracker_ct := it.timer_id + 1;
+            assert(required_tracker_ct < 10_000);
             if required_tracker_ct > trackers.count {
                 array_resize(*trackers, required_tracker_ct);
                 assert(it.is_scope_begin);
@@ -281,7 +290,7 @@ report_scope_times :: () {
                 continue;
             }
             log("[%]", scope_timers[it_index].name);
-            scope_mkin, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
+            scope_min, scope_median, scope_high_percentile := get_array_stats(it.cpu_time_deltas);
             frame_min, frame_median, frame_high_percentile := get_array_stats(it.frame_cpu_time_deltas);
             log(
 #string HERE
@@ -379,6 +388,7 @@ Zlib :: #import "zlib";
 
 #load "constants.jai";
 // #load "physics_properties.jai";
+#load "proc_handles.jai";
 #load "input.jai";
 #load "vulkan.jai";
 #load "imgui/imgui_impl.jai";
