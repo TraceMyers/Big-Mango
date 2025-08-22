@@ -55,7 +55,7 @@ draw_aabb :: (aabb: AABB, color: Color4f, layer : s8 = 0) {
 }
 
 draw_aabb :: (e: *Entity, color: Color4f, layer : s8 = 0) {
-    draw_aabb(e.shape, e.center, e.orientation, COLOR4F_RED);
+    draw_aabb(e.shape, e.center, e.orientation, color, layer);
 }
 
 draw_all_body_collider_aabbs :: () {

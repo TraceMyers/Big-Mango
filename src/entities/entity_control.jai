@@ -231,7 +231,14 @@ handle_world_build_input :: (camera: *Entity) {
 
     selected_entity := try_get_entity(*selected_entity_ref);
     if selected_entity != null {
-        draw_aabb(selected_entity, .{r=1}, layer=2);
+        draw_aabb(selected_entity, .{r=1.0,g=1.0,b=1.0,a=0.4}, 2);
+        // $todo: handles should be sized to screenspace
+        // or just use a screenspace shader 
+        // $todo: test the handles with closest point on each line segment -> distance check. don't use (explicit) capsule
+        // raycast, since that would cause weird blocking in front
+        draw_line(selected_entity.center, selected_entity.center + WORLD_UP * 10.0, .{b=1}, .{b=1}, end_point_radius=1.8, layer=3);
+        draw_line(selected_entity.center, selected_entity.center + WORLD_RIGHT * 10.0, .{r=1}, .{r=1}, end_point_radius=1.8, layer=3);
+        draw_line(selected_entity.center, selected_entity.center + WORLD_FORE * 10.0, .{g=1}, .{g=1}, end_point_radius=1.8, layer=3);
     }
 
     if Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_RIGHT] & .DOWN {
@@ -240,11 +247,6 @@ handle_world_build_input :: (camera: *Entity) {
     }
 
     if lmb_pressed {
-        result: Raycast_Result;
-        request: Raycast_Request;
-
-        request.build_mode = true;
-
         theta := (camera.perspective.vertical_fov * 0.5) * (PI / 180.0);
         half_y_dist := NEAR_PLANE * tan(theta); // tan(theta) = opp / adj
         viewport := get_viewport();
@@ -269,6 +271,9 @@ handle_world_build_input :: (camera: *Entity) {
         world_clip_rect_cursor_pos := world_clip_rect_center + world_clip_rect_diff.x * camera.axes.right + world_clip_rect_diff.y * camera.axes.up;
         cursor_raycast_dir := normalize(world_clip_rect_cursor_pos - camera.center);
 
+        result: Raycast_Result;
+        request: Raycast_Request;
+        request.build_mode = true;
         request.ray = .{look_origin(camera), cursor_raycast_dir};
         request.hit_back_face = true;
         if raycast(*request, *result) {
