@@ -181,6 +181,11 @@ render_frame :: () {
 
     add_world_draw_commands(cmd, context.world, vp_mat);
 
+    defer array_reset_keeping_memory(*primitive_draws);
+    for primitive_draws {
+        draw_primitive(cmd, it, *vp_mat);
+    }
+
     defer array_reset_keeping_memory(*lines);
     defer array_reset_keeping_memory(*layers);
     draw_spheres(cmd, *vp_mat);
@@ -3109,6 +3114,22 @@ draw_collision_mesh :: (cmd: VkCommandBuffer, entity: *Entity, vp_mat: *Matrix4)
     }
 }
 
+primitive_draws: [..]Primitive_Draw;
+
+Primitive_Draw :: struct {
+    shape: Collision_Shape;
+    center: Vector3;
+    orientation: Quaternion;
+    color: Mesh_Albedo;
+}
+
+// hacky thing to draw primitives by dressing the primitive draw data up in an entity suit
+draw_primitive :: (cmd: VkCommandBuffer, primitive: Primitive_Draw, view_projection: *Matrix4) {
+    entity := Entity.{center=primitive.center, orientation=primitive.orientation};
+    mesh_instance := Mesh_Instance.{data=get_or_load_mesh(*MESH_CUBE), albedo=primitive.color};
+    draw_mesh(cmd, *entity, *mesh_instance, view_projection, true);
+}
+
 draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4, is_collision_mesh := false) {
     mesh := emesh.data;
     if mesh == null {
@@ -3679,6 +3700,10 @@ Lights :: struct {
 Line_Data :: struct {
     a: Line_Vertex;
     b: Line_Vertex;
+}
+
+Box_Draw_Data :: struct {
+
 }
 
 Sphere_Poly_Count :: enum u8 {

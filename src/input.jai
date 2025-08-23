@@ -132,13 +132,15 @@ update_input :: () {
                     case #char "L";
                         context_index = (!context_index).(s32);
                     case .MOUSE_BUTTON_LEFT;
-                        if (control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE) != 0 {
-                            player_entity := try_get_entity(*context.world.player_entity_ref);
-                            if player_entity != null {
-                                set(*player_entity.flags, .USE_INTERACTION_QUEUED);
+                        if !ImGui.GetIO().WantCaptureMouse {
+                            if (control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE) != 0 {
+                                player_entity := try_get_entity(*context.world.player_entity_ref);
+                                if player_entity != null {
+                                    set(*player_entity.flags, .USE_INTERACTION_QUEUED);
+                                }
+                            } else if control_mode == .BUILD {
+                                build_mode_data.lmb_pressed = true;
                             }
-                        } else if control_mode == .BUILD {
-                            build_mode_data.lmb_pressed = true;
                         }
                     case #char "S";
                         if it.modifier_flags.ctrl_pressed {

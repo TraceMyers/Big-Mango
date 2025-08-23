@@ -439,6 +439,7 @@ exponential_interp :: (a: $T/VectorAndFloatTypes, b: T, speed: float32, delta_ti
     return a + (b - a) * move_factor;
 }
 
+// copied from https://stackoverflow.com/questions/66979936/closest-two-3d-point-between-two-line-segment-of-varied-magnitude-in-different-p so I'm not wasting time figuring out the 3d version
 closest_point_on_each_line_segment_old :: (a1: *Vector3, a2: *Vector3, b1: *Vector3, b2: *Vector3, closest_point_a: *Vector3, closest_point_b: *Vector3) {
     a_diff := a2.* - a1.*;
     b_diff := b2.* - b1.*;
@@ -592,7 +593,6 @@ closest_point_on_each_line_segment :: (a1: Vector3, a2: Vector3, b1: Vector3, b2
     return s, t;
 }
 
-// copied from https://stackoverflow.com/questions/66979936/closest-two-3d-point-between-two-line-segment-of-varied-magnitude-in-different-p so I'm not wasting time figuring out the 3d version
 distance_between_line_segments :: (a1: *Vector3, a2: *Vector3, b1: *Vector3, b2: *Vector3, closest_point_a: *Vector3, closest_point_b: *Vector3) -> float {
     closest_point_on_each_line_segment(a1, a2, b1, b2, closest_point_a, closest_point_b);
 	return distance(closest_point_a.*, closest_point_b.*);
@@ -1149,7 +1149,54 @@ degrade_over_time :: (x: *$T/VectorAndFloatTypes, proportion_lost_per_second: fl
     }
 }
 
+to_euler_angles :: (q: Quaternion, degrees := true) -> Vector3 {
+    yaw, roll, pitch: float = ---;
+    // yaw (Z axis rotation)
+    siny_cosp := 2.0 * (q.w * q.z + q.x * q.y);
+    cosy_cosp := 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    yaw = atan2(siny_cosp, cosy_cosp);
+
+    // roll (Y axis rotaton)
+    sinr_cosp := 2.0 * (q.w * q.x + q.y * q.z);
+    cosr_cosp := 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
+    roll = atan2(sinr_cosp, cosr_cosp);
+
+    // pitch (X axis rotation)
+    sinp := 2.0 * (q.w * q.y - q.z * q.x);
+    if abs(sinp) >= 1
+        pitch = PI / 2 * sign(sinp); // clamp
+    else
+        pitch = asin(sinp);
+
+    if degrees {
+        return .{pitch, roll, yaw} * (180.0 / PI);
+    } else {
+        return .{pitch, roll, yaw};
+    }
+}
+
+to_quaternion :: (euler_angles: Vector3, degrees := true) -> Quaternion {
+    use_angles := euler_angles;
+    if degrees {
+        use_angles *= (PI / 180.0);
+    }
+    cy := cos(use_angles.z * 0.5);
+    sy := sin(use_angles.z * 0.5);
+    cp := cos(use_angles.x * 0.5);
+    sp := sin(use_angles.x * 0.5);
+    cr := cos(use_angles.y * 0.5);
+    sr := sin(use_angles.y * 0.5);
+
+    q: Quaternion;
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+    return q;
+}
+
 #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+
 _21_BITS_MAX :: (((1).(u64) << 21)-1);
 INV_21_BITS_MAX : float : ((1.0).(float64) / _21_BITS_MAX.(float64)).(float);
 

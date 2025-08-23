@@ -222,6 +222,13 @@ handle_player_input :: (entity: *Entity) {
 Build_Mode_Data :: struct {
     lmb_pressed: bool;
     selected_entity_ref: Entity_Ref;
+    entity_interaction_grab_offset: Vector3;
+    interacting_with_selected_entity: bool;
+    selected_translation_handle: Direction;
+    physical_manipulation_widget: enum { TRANSLATE; ROTATE; SCALE; }
+    entity_transform_interface_selected_mesh: s32;
+    scale_initial_dimension_value: float;
+    orientation_takes_keyboard_input: bool;
 }
 
 build_mode_data: Build_Mode_Data;
@@ -229,16 +236,146 @@ build_mode_data: Build_Mode_Data;
 handle_world_build_input :: (camera: *Entity) {
     using build_mode_data;
 
+    defer lmb_pressed = false;
+
     selected_entity := try_get_entity(*selected_entity_ref);
     if selected_entity != null {
         draw_aabb(selected_entity, .{r=1.0,g=1.0,b=1.0,a=0.4}, 2);
         // $todo: handles should be sized to screenspace
         // or just use a screenspace shader 
-        // $todo: test the handles with closest point on each line segment -> distance check. don't use (explicit) capsule
-        // raycast, since that would cause weird blocking in front
-        draw_line(selected_entity.center, selected_entity.center + WORLD_UP * 10.0, .{b=1}, .{b=1}, end_point_radius=1.8, layer=3);
-        draw_line(selected_entity.center, selected_entity.center + WORLD_RIGHT * 10.0, .{r=1}, .{r=1}, end_point_radius=1.8, layer=3);
-        draw_line(selected_entity.center, selected_entity.center + WORLD_FORE * 10.0, .{g=1}, .{g=1}, end_point_radius=1.8, layer=3);
+
+        up_axis, right_axis, fore_axis: Vector3;
+        if physical_manipulation_widget == {
+        case .TRANSLATE;
+            up_axis = WORLD_UP;
+            right_axis = WORLD_RIGHT;
+            fore_axis = WORLD_FORE;
+        case .ROTATE;
+        case .SCALE;
+            up_axis = selected_entity.axes.up;
+            right_axis = selected_entity.axes.right;
+            fore_axis = selected_entity.axes.fore;
+        }
+    
+        HANDLE_LENGTH :: 10.0;
+        up_handle_begin     := selected_entity.center;
+        up_handle_end       := selected_entity.center + up_axis * HANDLE_LENGTH;
+        right_handle_begin  := selected_entity.center;
+        right_handle_end    := selected_entity.center + right_axis * HANDLE_LENGTH;
+        fore_handle_begin   := selected_entity.center;
+        fore_handle_end     := selected_entity.center + fore_axis * HANDLE_LENGTH;
+        up_handle_alpha, right_handle_alpha, fore_handle_alpha := 0.3;
+
+        // not using explicit raycast because it doesn't have the features for handling this correctly yet
+        MOUSE_CURSOR_RAY_LENGTH :: 10_000.0;
+        viewport := get_viewport();
+        ray := get_mouse_cursor_ray(camera, viewport);
+        ray_begin := ray.origin;
+        ray_end   := ray.origin + ray.direction * MOUSE_CURSOR_RAY_LENGTH;
+        
+        handle_line_segments := Vector3.[
+            up_handle_begin, up_handle_end,
+            right_handle_begin, right_handle_end,
+            fore_handle_begin, fore_handle_end
+        ];
+
+        HANDLE_SELECT_MAX_DIST_SQ :: 3.0 * 3.0;
+
+        i := 0;
+        closest_handle := -1;
+        closest_handle_dist_sq := FLOAT32_MAX;
+        closest_point_on_handle: Vector3;
+        while i < handle_line_segments.count {
+            closest_pt_on_ray, closest_pt_on_handle: Vector3;
+            closest_point_on_each_line_segment(ray_begin, ray_end, handle_line_segments[i], handle_line_segments[i+1], *closest_pt_on_ray, *closest_pt_on_handle);
+            dist_sq := distance_squared(closest_pt_on_ray, closest_pt_on_handle);
+            if dist_sq < closest_handle_dist_sq && dist_sq < HANDLE_SELECT_MAX_DIST_SQ {
+                closest_point_on_handle = closest_pt_on_handle;
+                closest_handle_dist_sq = dist_sq;
+                closest_handle = i;
+            }
+            i += 2;
+        }
+
+        // invalid handle direction
+        hovered_translation_handle := Direction.BACK;
+
+        if closest_handle == {
+        case 0;
+            hovered_translation_handle = .UP;
+        case 2;
+            hovered_translation_handle = .RIGHT;
+        case 4;
+            hovered_translation_handle = .FORE;
+        case;
+        }
+
+        if (Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_LEFT] & .DOWN) == 0 {
+            interacting_with_selected_entity = false;
+        } else if hovered_translation_handle != .BACK {
+            if lmb_pressed { // just pressed 
+                selected_translation_handle = hovered_translation_handle;
+                entity_interaction_grab_point := closest_point_on_handle;
+                entity_interaction_grab_offset = entity_interaction_grab_point - selected_entity.center;
+                interacting_with_selected_entity = true;
+            }
+        }
+
+        if interacting_with_selected_entity && selected_translation_handle != .BACK {
+            axis_of_movement: Vector3;
+            if selected_translation_handle == {
+            case .UP;
+                up_handle_alpha = 1;
+                axis_of_movement = up_axis;
+            case .RIGHT;
+                right_handle_alpha = 1;
+                axis_of_movement = right_axis;
+            case .FORE;
+                fore_handle_alpha = 1;
+                axis_of_movement = fore_axis;
+            case;
+                assert(false);
+            }
+            
+            reference_point_on_axis := selected_entity.center + entity_interaction_grab_offset;
+            axis_begin := reference_point_on_axis - axis_of_movement * 1000;
+            axis_end   := reference_point_on_axis + axis_of_movement * 1000;
+
+            closest_pt_on_ray, closest_pt_on_axis: Vector3;
+            norm_ray_dist, norm_axis_dist := closest_point_on_each_line_segment(ray_begin, ray_end, axis_begin, axis_end, *closest_pt_on_ray, *closest_pt_on_axis);
+
+            if physical_manipulation_widget == {
+            case .TRANSLATE;
+                selected_entity.center = closest_pt_on_axis - entity_interaction_grab_offset;
+            case .ROTATE;
+
+            case .SCALE;
+            }
+        } else if hovered_translation_handle == {
+        case .UP;
+            up_handle_alpha = 1;
+        case .RIGHT;
+            right_handle_alpha = 1;
+        case .FORE;
+            fore_handle_alpha = 1;
+        }
+
+        if physical_manipulation_widget == {
+        case .TRANSLATE;
+            draw_line(up_handle_begin, up_handle_end, .{r=0.7,g=0.7,b=1} * up_handle_alpha, .{b=1} * up_handle_alpha, end_point_radius=1.8, layer=3);
+            draw_line(right_handle_begin, right_handle_end, .{r=1,g=0.7,b=0.7} * right_handle_alpha, .{r=1} * right_handle_alpha, end_point_radius=1.8, layer=3);
+            draw_line(fore_handle_begin, fore_handle_end, .{r=0.7,g=1,b=0.7} * fore_handle_alpha, .{g=1} * fore_handle_alpha, end_point_radius=1.8, layer=3);
+            draw_sphere(selected_entity.center, 1.8, .{r=0.9,g=0.9,b=0.9,a=0.6});
+        case .ROTATE;
+        case .SCALE;
+            draw_aabb(.{up_handle_end, vector(0.9)}, .{b=1} * up_handle_alpha, 2);
+            draw_aabb(.{right_handle_end, vector(0.9)}, .{r=1} * right_handle_alpha, 2);
+            draw_aabb(.{fore_handle_end, vector(0.9)}, .{g=1} * fore_handle_alpha, 2);
+            draw_line(up_handle_begin, up_handle_end, .{r=0.7,g=0.7,b=1} * up_handle_alpha, .{b=1} * up_handle_alpha, layer=3);
+            draw_line(right_handle_begin, right_handle_end, .{r=1,g=0.7,b=0.7} * right_handle_alpha, .{r=1} * right_handle_alpha, layer=3);
+            draw_line(fore_handle_begin, fore_handle_end, .{r=0.7,g=1,b=0.7} * fore_handle_alpha, .{g=1} * fore_handle_alpha, layer=3);
+            draw_sphere(selected_entity.center, 1.8, .{r=0.9,g=0.9,b=0.9,a=0.6});
+        }
     }
 
     if Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_RIGHT] & .DOWN {
@@ -246,36 +383,13 @@ handle_world_build_input :: (camera: *Entity) {
         return;
     }
 
-    if lmb_pressed {
-        theta := (camera.perspective.vertical_fov * 0.5) * (PI / 180.0);
-        half_y_dist := NEAR_PLANE * tan(theta); // tan(theta) = opp / adj
+    if !interacting_with_selected_entity && lmb_pressed {
         viewport := get_viewport();
-        clip_rect_height := half_y_dist * 2.0;
-        clip_rect_width := get_aspect_ratio(camera, viewport) * clip_rect_height;
-
-        p: Win32.POINT;
-        Win32.GetCursorPos(*p);
-        success := Win32.ScreenToClient(window, *p) != 0;
-        if success {
-            cursor_position.x = p.x;
-            cursor_position.y = p.y;
-            cursor_norm_position.x = p.x.(float) / viewport.x.(float);
-            cursor_norm_position.y = p.y.(float) / viewport.y.(float);
-        }
-
-        norm_clip_rect_center := Vector2.{0.5,0.5};
-        norm_center_diff := cursor_norm_position - norm_clip_rect_center;
-        world_clip_rect_diff := norm_center_diff * Vector2.{clip_rect_width, -clip_rect_height};
-
-        world_clip_rect_center := camera.center + camera.axes.fore * NEAR_PLANE;
-        world_clip_rect_cursor_pos := world_clip_rect_center + world_clip_rect_diff.x * camera.axes.right + world_clip_rect_diff.y * camera.axes.up;
-        cursor_raycast_dir := normalize(world_clip_rect_cursor_pos - camera.center);
-
-        result: Raycast_Result;
         request: Raycast_Request;
-        request.build_mode = true;
-        request.ray = .{look_origin(camera), cursor_raycast_dir};
+        result : Raycast_Result;
+        request.ray = get_mouse_cursor_ray(camera, viewport);
         request.hit_back_face = true;
+        request.build_mode = true;
         if raycast(*request, *result) {
             selected_entity_ref = result.hit_entity;
         }

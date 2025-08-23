@@ -75,6 +75,10 @@ Color4b :: struct {
     _u32: u32 = ---;
 }
 
+operator * :: inline (color: Color4f, scalar: float) -> Color4f #symmetric {
+    return .{color.r * scalar, color.g * scalar, color.b * scalar, color.a};
+}
+
 to_color4b :: inline (color4f: Color4f) -> Color4b {
     byte_color: Color4b = ---;
     byte_color.r = alter_cast(color4f.r, u8, true);

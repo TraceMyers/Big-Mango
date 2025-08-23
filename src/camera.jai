@@ -74,4 +74,32 @@ view_projection_matrix :: (camera: *Entity, viewport: Vector2) -> Matrix4 {
     return proj * view;
 }
 
+get_mouse_cursor_ray :: (camera: *Entity, viewport: Vector2) -> Ray3 {
+    assert(is_set(*camera.flags, .USES_CAMERA));
+    theta := (camera.perspective.vertical_fov * 0.5) * (PI / 180.0);
+    half_y_dist := NEAR_PLANE * tan(theta); // tan(theta) = opp / adj
+    clip_rect_height := half_y_dist * 2.0;
+    clip_rect_width := get_aspect_ratio(camera, viewport) * clip_rect_height;
+
+    p: Win32.POINT;
+    Win32.GetCursorPos(*p);
+    success := Win32.ScreenToClient(window, *p) != 0;
+    if success {
+        cursor_position.x = p.x;
+        cursor_position.y = p.y;
+        cursor_norm_position.x = p.x.(float) / viewport.x.(float);
+        cursor_norm_position.y = p.y.(float) / viewport.y.(float);
+    }
+
+    norm_clip_rect_center := Vector2.{0.5,0.5};
+    norm_center_diff := cursor_norm_position - norm_clip_rect_center;
+    world_clip_rect_diff := norm_center_diff * Vector2.{clip_rect_width, -clip_rect_height};
+
+    world_clip_rect_center := camera.center + camera.axes.fore * NEAR_PLANE;
+    world_clip_rect_cursor_pos := world_clip_rect_center + world_clip_rect_diff.x * camera.axes.right + world_clip_rect_diff.y * camera.axes.up;
+    cursor_raycast_dir := normalize(world_clip_rect_cursor_pos - camera.center);
+
+    return .{look_origin(camera), cursor_raycast_dir};
+}
+
 // get_screen_clip

@@ -21,7 +21,7 @@ dev_ui_opacities := float.[
     0.2,
     0.2,
     0.2,
-    0.2
+    0.4
 ];
 
 Dev_UI_Module :: enum {
@@ -613,6 +613,59 @@ add_entity_pocket :: () {
             spawn_ball(spawn_location, .{r=0.9,g=0.3,b=0.2});
         }
     }
+    if CollapsingHeader("transform") {
+        selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
+        if selected_entity != null {
+            InputFloat3("center", *selected_entity.center.component);
+
+            euler_angles := to_euler_angles(selected_entity.orientation);
+            if build_mode_data.orientation_takes_keyboard_input {
+                if InputFloat3("orientation", *euler_angles.component) {
+                    selected_entity.orientation = to_quaternion(euler_angles);
+                }
+            } else {
+                if SliderFloat3("orientation", *euler_angles.component, -180., 180.) {
+                    selected_entity.orientation = to_quaternion(euler_angles);
+                }
+            }
+            SameLine();
+            Checkbox("keyboard", *build_mode_data.orientation_takes_keyboard_input);
+
+            // sin_ht := length(axis_angle);
+            // axis := 
+            // InputFloat4("orientation", *selected_entity.orientation.component);
+
+            if selected_entity.meshes.field.count > 0 {
+                using build_mode_data;
+                entity_transform_interface_selected_mesh = clamp(entity_transform_interface_selected_mesh, (0).(s32), selected_entity.meshes.field.count.(s32));
+                checkbox_bools := alloc_array(bool, selected_entity.meshes.field.count, temp);
+                memset(checkbox_bools.data, 0, checkbox_bools.count * size_of(type_of(checkbox_bools[0])));
+                for *selected_entity.meshes.field {
+                    asset := it.(*Mesh_Asset);
+                    asset_name: string;
+                    // if asset.asset_ref != null && asset.asset_ref.path.data != null {
+                    //     asset_name = path_filename(asset.asset_ref.path);
+                    // } else {
+                        asset_name = "mesh scale";
+                    // }
+                    use_name := temp_c_string(tprint("%##%", asset_name, it_index));
+                    InputFloat3(use_name, *it.scale.component);
+                    // if it_index == entity_transform_interface_selected_mesh {
+                    //     checkbox_bools[it_index] = true;
+                    //     Checkbox(temp_c_string(tprint("%##%", asset_name, it_index)), *checkbox_bools[it_index]);
+                    //     checkbox_bools[it_index] = false;
+                    // } else {
+                    //     Checkbox(temp_c_string(tprint("%##%", asset_name, it_index)), *checkbox_bools[it_index]);
+                    // }
+                }
+                // for *checkbox_bools {
+                //     if it.* {
+                //         entity_transform_interface_selected_mesh = xx it_index;
+                //     }
+                // }
+            }
+        }
+    }
 }
 
 add_dev_ui_scratch_space :: () {
@@ -641,6 +694,7 @@ add_dev_ui_scratch_space :: () {
         Text("cursor window norm pos: %", cursor_norm_position);
         selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
         if selected_entity != null {
+            Text("interacting with selected entity: %", build_mode_data.interacting_with_selected_entity);
             TextWrapped("selected entity: %", FormatStruct.{value=selected_entity.*, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=false, long_form_separator_between_fields ="\n"});
         }
     }

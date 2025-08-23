@@ -58,6 +58,15 @@ draw_aabb :: (e: *Entity, color: Color4f, layer : s8 = 0) {
     draw_aabb(e.shape, e.center, e.orientation, color, layer);
 }
 
+draw_box :: (location: Vector3, orientation: Quaternion, dimensions: Vector3, color: Color4f) {
+    array_add(*primitive_draws, .{
+        shape = .{type=.BOX, box=.{dimensions.z * 0.5, dimensions.x * 0.5, dimensions.y * 0.5}},
+        center = location,
+        orientation = orientation,
+        color = .{tint=color}
+    });
+}
+
 draw_all_body_collider_aabbs :: () {
     for context.world.entities {
         draw_aabb(it.shape, it.center, it.orientation, COLOR4F_RED);

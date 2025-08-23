@@ -148,3 +148,7 @@ abs :: inline (a: Int_Vector3) -> Int_Vector3 {
 sum :: inline (a: Int_Vector3) -> s32 {
     return a.x + a.y + a.z;
 }
+
+vector :: inline (scalar: float) -> Vector3 {
+    return Vector3.{scalar, scalar, scalar};
+}
