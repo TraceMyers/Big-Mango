@@ -173,6 +173,14 @@ Text_align_right :: (left_x: float, box_width: float, text: string) -> Vector2 {
     return size;
 }
 
+SeparatorText_align_right :: (left_x: float, box_width: float, text: string) -> Vector2 {
+    size := text_size(text);
+    pos_x := left_x + box_width - size.x;
+    SetCursorPosX(pos_x - 20);
+    SeparatorText(temp_c_string(text));
+    return size;
+}
+
 Text_align_right_for_auto_resize :: (cumulative_text_size: *Vector2, text: string, text_left_offset: float) {
     print_size := Text_align_right(GetWindowPos().x + text_left_offset, GetWindowWidth(), text);
     cumulative_text_size.x = max(cumulative_text_size.x, print_size.x);
@@ -339,6 +347,7 @@ add_left_sidebar :: (main_menu_height: float) -> float {
 
     if window_open {
         add_perf_graph(main_menu_height, fixed_window_size.x);
+        add_transform_controls();
         add_debug_window_spawner();
         add_player_character_readout();
         add_camera_controls();
@@ -576,6 +585,112 @@ add_physics_debugger :: () {
     */
 }
 
+imgui_quaternion_input_as_euler_angles :: (text: *u8, q: *Quaternion, keyboard_switch: *bool) {
+    euler_angles := to_euler_angles(q.*);
+    if keyboard_switch.* {
+        if InputFloat3(text, *euler_angles.component) {
+            q.* = to_quaternion(euler_angles);
+        }
+    } else {
+        if SliderFloat3(text, *euler_angles.component, -180., 180.) {
+            q.* = to_quaternion(euler_angles);
+        }
+    }
+    SameLine();
+    keyboard_text := temp_c_string(tprint("keyboard##%", text));
+    Checkbox(keyboard_text, keyboard_switch);
+}
+
+add_transform_controls :: () {
+    center_dummy: Vector3;
+    orientation_dummy: Quaternion;
+
+    center := *center_dummy;
+    orientation := *orientation_dummy;
+    meshes: []Mesh_Instance;
+    name := "---";
+
+    selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
+    if selected_entity != null {
+        center = *selected_entity.center;
+        orientation = *selected_entity.orientation;
+        if selected_entity.meshes.field.count > 0 {
+            meshes = selected_entity.meshes.field;
+        }
+        name = selected_entity.name.field;
+    }
+    
+    Text_align_right(GetWindowPos().x, GetWindowWidth(), name);
+    SeparatorText("transform");
+
+    InputFloat3("center", *center.component);
+
+    imgui_quaternion_input_as_euler_angles("orientation", orientation, *build_mode_data.orientation_takes_keyboard_input);
+
+    dummy_mesh_offset: Vector3;
+    dummy_mesh_scale: Vector3;
+    dummy_mesh_orientation: Quaternion;
+    dummy_mesh_color: Color4f;
+    mesh_offset := *dummy_mesh_offset;
+    mesh_scale := *dummy_mesh_scale;
+    mesh_orientation := *dummy_mesh_orientation;
+    mesh_color := *dummy_mesh_color;
+    mesh_name: string;
+
+    if meshes.count > 0 {
+        build_mode_data.entity_transform_interface_selected_mesh = clamp(build_mode_data.entity_transform_interface_selected_mesh, (0).(s32), meshes.count.(s32) - 1);
+        selected_mesh := *meshes[build_mode_data.entity_transform_interface_selected_mesh];
+        mesh_asset := selected_mesh.data.(*Mesh_Asset);
+        mesh_name = get_mesh_name(mesh_asset);
+        scope_push_indent();
+        mesh_offset = *selected_mesh.offset;
+        mesh_scale = *selected_mesh.scale;
+        mesh_orientation = *selected_mesh.orientation;
+        mesh_color = *selected_mesh.albedo.tint;
+    }
+
+    mesh_separator_text := temp_c_string("selected_mesh: ---");
+    if mesh_name.data != null {
+        mesh_separator_text = temp_c_string(tprint("selected mesh: %", mesh_name));
+    }
+    SeparatorText(mesh_separator_text);
+
+    if Button("select mesh") {
+        OpenPopup("entity_meshes_list");
+    }
+    
+    SameLine();
+    if Button("color##mesh") {
+        build_mode_data.mesh_color_picker_on = true;
+    }
+    if build_mode_data.mesh_color_picker_on {
+        if Begin("mesh color##mesh", *build_mode_data.mesh_color_picker_on, .NoScrollbar | .NoCollapse) {
+            ColorPicker4("color##mesh", *mesh_color.component);
+        } 
+        End();
+    }
+
+    if BeginPopup("entity_meshes_list") {
+        for meshes {
+            // asset := it.(*Mesh_Asset);
+            // asset_name := "mesh scale"; // $todo: mesh names or some way of identifying which...
+            // use_name := temp_c_string(tprint("%##%", asset_name, it_index));
+            // InputFloat3(use_name, *it.scale.component);
+            mesh_asset := it.data.(*Mesh_Asset);
+            mesh_name := get_mesh_name(mesh_asset);
+            if Selectable(temp_c_string(mesh_name)) {
+                build_mode_data.entity_transform_interface_selected_mesh = xx it_index;
+            }
+        }
+        EndPopup();
+    }
+
+    InputFloat3("offset##mesh", *mesh_offset.component);
+    InputFloat3("scale##mesh", *mesh_scale.component);
+    imgui_quaternion_input_as_euler_angles("orientation##mesh", mesh_orientation, *build_mode_data.mesh_orientation_takes_keyboard_input);
+
+}
+
 // eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.
 add_entity_pocket :: () {
     if context.world == null {
@@ -614,57 +729,7 @@ add_entity_pocket :: () {
         }
     }
     if CollapsingHeader("transform") {
-        selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
-        if selected_entity != null {
-            InputFloat3("center", *selected_entity.center.component);
 
-            euler_angles := to_euler_angles(selected_entity.orientation);
-            if build_mode_data.orientation_takes_keyboard_input {
-                if InputFloat3("orientation", *euler_angles.component) {
-                    selected_entity.orientation = to_quaternion(euler_angles);
-                }
-            } else {
-                if SliderFloat3("orientation", *euler_angles.component, -180., 180.) {
-                    selected_entity.orientation = to_quaternion(euler_angles);
-                }
-            }
-            SameLine();
-            Checkbox("keyboard", *build_mode_data.orientation_takes_keyboard_input);
-
-            // sin_ht := length(axis_angle);
-            // axis := 
-            // InputFloat4("orientation", *selected_entity.orientation.component);
-
-            if selected_entity.meshes.field.count > 0 {
-                using build_mode_data;
-                entity_transform_interface_selected_mesh = clamp(entity_transform_interface_selected_mesh, (0).(s32), selected_entity.meshes.field.count.(s32));
-                checkbox_bools := alloc_array(bool, selected_entity.meshes.field.count, temp);
-                memset(checkbox_bools.data, 0, checkbox_bools.count * size_of(type_of(checkbox_bools[0])));
-                for *selected_entity.meshes.field {
-                    asset := it.(*Mesh_Asset);
-                    asset_name: string;
-                    // if asset.asset_ref != null && asset.asset_ref.path.data != null {
-                    //     asset_name = path_filename(asset.asset_ref.path);
-                    // } else {
-                        asset_name = "mesh scale";
-                    // }
-                    use_name := temp_c_string(tprint("%##%", asset_name, it_index));
-                    InputFloat3(use_name, *it.scale.component);
-                    // if it_index == entity_transform_interface_selected_mesh {
-                    //     checkbox_bools[it_index] = true;
-                    //     Checkbox(temp_c_string(tprint("%##%", asset_name, it_index)), *checkbox_bools[it_index]);
-                    //     checkbox_bools[it_index] = false;
-                    // } else {
-                    //     Checkbox(temp_c_string(tprint("%##%", asset_name, it_index)), *checkbox_bools[it_index]);
-                    // }
-                }
-                // for *checkbox_bools {
-                //     if it.* {
-                //         entity_transform_interface_selected_mesh = xx it_index;
-                //     }
-                // }
-            }
-        }
     }
 }
 

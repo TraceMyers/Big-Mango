@@ -229,6 +229,8 @@ Build_Mode_Data :: struct {
     entity_transform_interface_selected_mesh: s32;
     scale_initial_dimension_value: float;
     orientation_takes_keyboard_input: bool;
+    mesh_orientation_takes_keyboard_input: bool;
+    mesh_color_picker_on: bool;
 }
 
 build_mode_data: Build_Mode_Data;

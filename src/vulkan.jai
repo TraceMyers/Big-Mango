@@ -4373,3 +4373,30 @@ get_viewport :: () -> Vector2 {
     viewport := Vector2.{xx draw_image.extent.width, xx draw_image.extent.height};
     return viewport;
 }
+
+get_mesh_name :: (mesh_asset: *Mesh_Asset) -> string {
+    mesh_name := "a mesh!";
+    if mesh_asset.asset_ref == null || mesh_asset.asset_ref.path.data == null {
+        if mesh_asset.loader.load_type == .PRIMITIVE {
+            if mesh_asset.loader.primitive_type == {
+            case .NONE;
+                mesh_name = "none";
+            case .SPHERE;
+                mesh_name = "sphere";
+            case .CAPSULE;
+                mesh_name = "capsule";
+            case .RECT;
+                mesh_name = "rect";
+            case .BOX;
+                mesh_name = "box";
+            case .AABB;
+                mesh_name = "aabb";
+            case .HALF_SPACE;
+                mesh_name = "half space";
+            }
+        }
+    } else {
+        mesh_name = path_filename(mesh_asset.asset_ref.path);
+    }
+    return mesh_name;
+}

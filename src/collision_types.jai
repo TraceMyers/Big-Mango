@@ -40,6 +40,7 @@ Contact_Pair :: struct {
     last_tangent_impulse: float;
 }
 
+
 feed_contact_impulse :: inline (pair: *Contact_Pair, normal_magnitude: float, tangent_magnitude: float) -> normal: float, tangent: float {
     old_normal_sum := pair.normal_impulse_sum;
     new_normal_sum := old_normal_sum + normal_magnitude;
