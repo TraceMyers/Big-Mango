@@ -95,6 +95,14 @@ update_input :: () {
         window_active_for_frame_count = 0;
     }
 
+    for 0..input_button_pressed_time.count-1 {
+        if (Input.input_button_states[it] & .DOWN) == 0 {
+           input_button_pressed_time[it] = 0; 
+        } else {
+           input_button_pressed_time[it] += delta_time; 
+        }
+    }
+
     if window_is_active() then for Input.events_this_frame {
         imgui_process_event(it);
         if it.type == .QUIT then quit = true;
@@ -122,7 +130,7 @@ update_input :: () {
                             toggle_cursor_first_person_mode();
                         }
                     case #char "0";
-                        breakpoint_switch_0 = !breakpoint_switch_0;
+                        toggle(*ui_options_open);
                     case #char "9";
                         breakpoint_switch_9 = !breakpoint_switch_9;
                     case #char "8";
@@ -131,6 +139,12 @@ update_input :: () {
                         breakpoint_switch_7 = !breakpoint_switch_7;
                     case #char "L";
                         context_index = (!context_index).(s32);
+                    case #char "F";
+                        if control_mode == .BUILD {
+                            build_mode_data.focus_pressed = true;
+                        }
+                    case 0x60;
+                        rm_log("numpad 0");
                     case .MOUSE_BUTTON_LEFT;
                         if !ImGui.GetIO().WantCaptureMouse {
                             if (control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE) != 0 {
@@ -161,6 +175,7 @@ update_input :: () {
             }
         }
     }
+
     // NOTE: these resizes give the drawable (client) rect, not the full size
     resizes := Input.get_window_resizes();  // We might want to collapse all resizes down to 1 for each window, but we don't currently do this, I think.
     for record: resizes {
@@ -256,6 +271,10 @@ get_rm_log_message :: inline (i: s64) -> string, s32 {
     return string.{string_count, allocation_ref.data}, repeat_count;
 }
 
+get_input_button_pressed_time :: (key_code: Input.Key_Code) -> float {
+    return input_button_pressed_time[key_code];
+}
+
 rm_log_messages: []RM_Log_Message;
 rm_log_message_top: s32;
 rm_log_message_allocator: Nesting_Allocator;
@@ -276,6 +295,9 @@ window_height: s32;
 window_active_for_frame_count: s32;
 
 do_mouse_move := true;
+
+// $todo: consider just using timestamps so float error isn't accrued (this happens surprisingly quickly)
+input_button_pressed_time: [#run enum_highest_value(Input.Key_Code)+1]float;
 
 user32 :: #system_library "user32";
 SetCursorPos :: (x: s32, y: s32) -> Win32.BOOL #foreign user32;

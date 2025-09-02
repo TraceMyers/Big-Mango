@@ -10,13 +10,17 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
     // ground entity
     {
-        ground := spawn_floor(.{}, .{g=0.8,b=0.7}, 400);
-        // ground := spawn_entity("ground", .[]);
-        // ground_ref = ground.ref;
-
-        // set_shape_and_mass(ground, .{type=.RECT, rect=.{200, 200, false}}, IMMOVABLE_ENTITY_MASS);
-        // set_orientation(ground, .{0,0,1}, .{1,0,0});
-        ground.physics_properties.elasticity = 0.4;
+        RANGE_END : s32 : 10;
+        TILE_WIDTH :: 200.0;
+        for x : 0..RANGE_END {
+            for y : 0..RANGE_END {
+                center_indices := Int_Vector2.{RANGE_END / 2, RANGE_END / 2};
+                center_index_diff := Int_Vector2.{x, y} - center_indices;
+                center_pos := Vector3.{xy=to_vector2(center_index_diff) * TILE_WIDTH};
+                ground := spawn_floor(center_pos, .{g=0.8,b=0.7}, TILE_WIDTH);
+                ground.physics_properties.elasticity = 0.4;
+            }
+        }
     }
     // wall entity
     {
@@ -30,7 +34,6 @@ _scratch :: (stage: Boot_Stage) -> bool {
     // door entity
     {
         door := spawn_swinging_door(.{y=100}, .{y=-1}, .{r=1}, 80, 80 * (3./5));
-        door_ref = door.ref;
         add_gadget_child(door, .{another_door.ref});
         set(*door.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT);
         door.door.rotation_speed = PI / 16;
@@ -65,7 +68,6 @@ _scratch :: (stage: Boot_Stage) -> bool {
         radius := 3.0;
         ball_init_z := player_entity.center.z + player_entity.shape.half_height + radius;
         ball := spawn_ball(.{y=10,z=ball_init_z} , .{r=0.7,g=0.5}, radius);
-        ball_ref = ball.ref;
     }
     // button
     {
@@ -89,14 +91,21 @@ _scratch :: (stage: Boot_Stage) -> bool {
             .{data=cube, albedo=.{tint=.{r=1,g=1,b=1}}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
             .{data=capsule_mesh, albedo=.{tint=.{r=1}}}
         ]);
-        add_gadget_child(button, .{door_ref});
         set(*button.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT);
         set(*button.flags, .NEVER_SHOW_COLLIDER_MESH);
-        button_ref = button.ref;
     }
     {
-        add_gadget_child(another_door, .{button_ref});
         set(*another_door.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT);
+    }
+    // elephant
+    {
+        // elephant := spawn_entity("elephant", .[]);
+        // elephant_mesh := get_or_load_mesh(*MESH_ELEPHANT);
+        // set_meshes(elephant, .[
+        //     .{data=elephant_mesh, albedo=.{tint=.{r=0.9, b=0.5}}, scale=.{0.25, 0.25, 0.25}}
+        // ]);
+        // elephant.collision_channels = 0;
+        // elephant.center.z += 50.0;
     }
     // ai guy
     {

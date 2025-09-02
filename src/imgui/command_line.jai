@@ -1,8 +1,23 @@
 
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------
+
+using ImGui;
+
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_export // ------------------------------------------------------------------------------------------ SCOPE_EXPORT
+// ---------------------------------------------------------------------------------------------------------------------
+
 add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_readout_width: float32) -> input_begin_x: float32, bar_height: float32 {
     if input_focus != .COMMAND_LINE then return 0,0;
+    if !is_set(*dev_ui_enabled, .CMD) {
+        return 0,0;
+    }
 
-    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=0.9});
+    scope_set_alpha(dev_ui_opacities[Dev_UI_Module.CMD]);
+
+    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
     defer PopStyleColor();
 
     Begin("CommandLine_InputBar", flags=.NoTitleBar | .NoMove | .NoResize);
@@ -168,7 +183,3 @@ command_line_autocomplete_callback :: (data: *InputTextCallbackData) -> s32 #c_c
     }
     return 0;
 }
-
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
-
-using ImGui;

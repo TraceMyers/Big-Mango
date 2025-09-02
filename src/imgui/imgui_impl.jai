@@ -1,6 +1,14 @@
 
-cursor_position: Int_Vector2;
-cursor_norm_position: Vector2;
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------
+
+using ImGui;
+
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_export // ------------------------------------------------------------------------------------------ SCOPE_EXPORT
+// ---------------------------------------------------------------------------------------------------------------------
+
 imgui_pool: VkDescriptorPool;
 imgui_context: *ImGuiContext;
 command_line_text_buffer: [1024]u8;
@@ -9,6 +17,7 @@ log_paused: bool;
 
 DEEP_DARK_BLUE :: Color4f.{0.07, 0.07, 0.25, 1.0};
 DARK_GREY_BLUE :: Color4f.{0.14, 0.16, 0.3, 1.0};
+PERF_HEIGHT :: 220.0;
 
 INDENT_WIDTH :: 20.0;
 scope_push_indent :: () #expand {
@@ -18,10 +27,11 @@ scope_push_indent :: () #expand {
 
 // todo: metaprogram or whatever
 dev_ui_opacities := float.[
-    0.2,
-    0.2,
-    0.2,
-    0.4
+    0.5,
+    0.8,
+    0.58,
+    1.0,
+    1.0
 ];
 
 Dev_UI_Module :: enum {
@@ -29,7 +39,11 @@ Dev_UI_Module :: enum {
     LOG;
     CMD;
     LEFT_SIDEBAR;
+    MENU_BAR;
 }
+
+dev_ui_enabled: Long_Flag_Array(Dev_UI_Module);
+ui_options_open: bool;
 
 set_dev_ui_opacity :: (args: []Command_Line_Argument) {
     init_command_line_proc_or_return(args, 2);
@@ -44,6 +58,8 @@ set_dev_ui_opacity :: (args: []Command_Line_Argument) {
 _imgui :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // ----------------------------------------------------------------------------------------------------- startup
+        set_multiple(*dev_ui_enabled, .[.LEFT_SIDEBAR, .CMD]);
+
         pool_sizes := VkDescriptorPoolSize.[
             .{.SAMPLER,                   1000},
             .{.COMBINED_IMAGE_SAMPLER,    1000},
@@ -105,7 +121,6 @@ _imgui :: (stage: Boot_Stage) -> bool {
         DestroyContext(imgui_context);
     }
     return true;
-
 }
 
 draw_dev_ui :: () {
@@ -119,7 +134,14 @@ draw_dev_ui :: () {
         scope_set_allocator(temp);
         PushStyleVar(.WindowBorderSize, 0.0);
         defer PopStyleVar();
-        menu_bar_height := add_main_menu_bar();
+        // menu_bar_height := add_main_menu_bar();
+        if ui_options_open {
+            add_ui_options_menu();
+        }
+        menu_bar_height := 0.0;
+        app_window_dims := get_window_dimensions();
+        fixed_window_size := Vector2.{600, xx app_window_dims.y};
+        add_perf_graph(menu_bar_height, fixed_window_size.x);
         left_sidebar_width := add_left_sidebar(menu_bar_height);
         right_sidebar_width := add_right_sidebar(menu_bar_height);
         command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
@@ -196,10 +218,7 @@ add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
     text_size: Vector2;
     left_offset := 0.0;
 
-    perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
-    alpha := min(perf_opacity * 1.3, 1);
-
-    PushStyleColor(.Text, .{0.79, 0.79, 0.89, alpha});
+    PushStyleColor(.Text, .{0.79, 0.79, 0.89, 1.0});
     defer PopStyleColor();
 
     if is_profiling_on {
@@ -224,10 +243,19 @@ add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
 }
 
 add_perf_graph :: (menu_bar_height: float, parent_width: float) {
-    HEIGHT :: 220.0;
-    window_open := BeginChild("PerformanceGraph", .{parent_width, HEIGHT + 4.0});
-    defer EndChild();
-    if !window_open then return;
+    if !is_set(*dev_ui_enabled, .PERF) {
+        return; 
+    }
+
+    perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
+    scope_set_alpha(perf_opacity);
+
+    window_size := ImVec2.{parent_width, PERF_HEIGHT + 4.0};
+    SetNextWindowSize(*window_size);
+    window_pos := ImVec2.{y=menu_bar_height};
+    SetNextWindowPos(*window_pos);
+    window_open := Begin("PerformanceGraph", null, .NoTitleBar | .NoCollapse);
+    defer End();
 
     SetCursorPos(.{});
 
@@ -235,12 +263,10 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
     screen_pos := GetCursorScreenPos();
 
     graph_width := parent_width;
-    graph_height := HEIGHT;
+    graph_height := PERF_HEIGHT;
     time_scale := graph_width / xx DELTA_TIME_COUNT;
     max_frame_time := 0.001666;
     height_scale := graph_height / max_frame_time;
-
-    perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
 
     ul := screen_pos;
     lr := screen_pos + .{graph_width, graph_height};
@@ -269,11 +295,11 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
         sum_dt := simu_dt + rndr_dt;
 
         x_pos := x_offset + whole_bar_width * xx it;
-        simu_height := HEIGHT * (simu_dt / red_frame_time);
+        simu_height := PERF_HEIGHT * (simu_dt / red_frame_time);
         simu_top_y := lr.y - simu_height;
-        rndr_height := HEIGHT * (rndr_dt / red_frame_time);
+        rndr_height := PERF_HEIGHT * (rndr_dt / red_frame_time);
         rndr_top_y := simu_top_y - rndr_height;
-        sync_height := HEIGHT * (sync_dt / red_frame_time);
+        sync_height := PERF_HEIGHT * (sync_dt / red_frame_time);
         sync_top_y := min(lr.y - sync_height, graph_height-1.0);
 
         draw_list.AddLine(draw_list, .{x_pos, lr.y},       .{x_pos, simu_top_y}, simu_color._u32, part_bar_width);
@@ -317,51 +343,105 @@ add_main_menu_bar :: () -> float {
     PushStyleColor(.MenuBarBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
     defer PopStyleColor();
 
+    SetNextWindowPos(.{});
+    SetCursorPos(.{});
+
+    if !is_set(*dev_ui_enabled, .MENU_BAR) {
+        return 0.0;
+    }
+
     window_open := BeginMainMenuBar();
     defer EndMainMenuBar();
-
-    SetWindowPos(.{});
-    SetCursorPos(.{});
 
     if BeginMenu("ui opacities") {
         defer EndMenu();
         SliderFloat("perf", *dev_ui_opacities[Dev_UI_Module.PERF], 0, 1);
         SliderFloat("log", *dev_ui_opacities[Dev_UI_Module.LOG], 0, 1);
+        SliderFloat("left bar", *dev_ui_opacities[Dev_UI_Module.LEFT_SIDEBAR], 0, 1);
+        SliderFloat("command line", *dev_ui_opacities[Dev_UI_Module.CMD], 0, 1);
     }
 
     return GetWindowHeight();
 }
 
+add_ui_options_menu :: () {
+    SetNextWindowPos(.{});
+
+    SetNextWindowFocus();
+    if Begin("ui opacities", null, .NoTitleBar | .NoResize | .NoCollapse | .AlwaysAutoResize) {
+        checkbox_bool: bool;
+        #insert -> string {
+            builder: String_Builder;
+            ui_module_type := Dev_UI_Module.(*Type_Info_Enum);
+            log("ui_module_type: %", ui_module_type.*);
+            for ui_module_type.names {
+                print(*builder, 
+#string HERE
+    checkbox_bool = is_set(*dev_ui_enabled, .%);
+    Checkbox("##_%", *checkbox_bool);
+    if checkbox_bool {
+        set(*dev_ui_enabled, .%);
+    } else {
+        unset(*dev_ui_enabled, .%);
+    }
+    SameLine();
+    SliderFloat("%", *dev_ui_opacities[Dev_UI_Module.%], 0, 1);
+HERE,               
+                    it,
+                    it,
+                    it,
+                    it,
+                    it, it,
+                );
+            }
+            return builder_to_string(*builder);
+        }
+    }
+    End();
+}
+
 add_left_sidebar :: (main_menu_height: float) -> float {
-    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,dev_ui_opacities[Dev_UI_Module.LEFT_SIDEBAR]});
+    if !is_set(*dev_ui_enabled, .LEFT_SIDEBAR) {
+        return 0;
+    }
+
+    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,1.0});
+
+    scope_set_alpha(dev_ui_opacities[Dev_UI_Module.LEFT_SIDEBAR]);
     defer PopStyleColor();
     window_open := Begin("##LeftSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
     defer End();
 
-    SetWindowPos(.{0, main_menu_height});
-    // SetCursorPos(.{6, 6});
+    if is_set(*dev_ui_enabled, .PERF) {
+        SetWindowPos(.{y=PERF_HEIGHT});
+    } else {
+        SetWindowPos(.{});
+    }
+
     app_window_dims := get_window_dimensions();
     fixed_window_size := Vector2.{600, xx app_window_dims.y};
     SetWindowSize(*fixed_window_size);
     window_width := GetWindowSize().x;
 
     if window_open {
-        add_perf_graph(main_menu_height, fixed_window_size.x);
-        add_transform_controls();
-        add_debug_window_spawner();
-        add_player_character_readout();
-        add_camera_controls();
-        add_physics_debugger();
+        add_entity_controls();
         add_entity_pocket();
         add_dev_ui_scratch_space();
     }
+
+    SetWindowSize(.{600, GetCursorPos().y});
 
     return window_width;
 }
 
 add_right_sidebar :: (menu_bar_height: float) -> float {
+    if !is_set(*dev_ui_enabled, .LOG) {
+        return 0;
+    }
+
     alpha := dev_ui_opacities[Dev_UI_Module.LOG];
-    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=alpha});
+    scope_set_alpha(alpha);
+    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
     defer PopStyleColor();
 
     window_open := Begin("##RightSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
@@ -454,8 +534,7 @@ log_filter_callback :: (data: *InputTextCallbackData) -> s32 #c_call {
 }
 
 add_log_filter :: (parent_width: float) {
-    log_alpha := dev_ui_opacities[Dev_UI_Module.LOG];
-    PushStyleColor(.Text, Vector4.{0.8, 0.8, 0.8, 1.0} * log_alpha);
+    PushStyleColor(.Text, Vector4.{0.8, 0.8, 0.8, 1.0});
     defer PopStyleColor();
     InputText("filter##log_filter", log_filter_buffer.data, xx log_filter_buffer.count, .CallbackCharFilter, log_filter_callback);
     if IsItemClicked() {
@@ -585,6 +664,13 @@ add_physics_debugger :: () {
     */
 }
 
+scope_set_alpha :: (alpha: float) #expand {
+    style := ImGui.GetStyle();
+    save_alpha := style.Alpha;
+    style.Alpha = alpha;
+    `defer style.Alpha = save_alpha;
+}
+
 imgui_quaternion_input_as_euler_angles :: (text: *u8, q: *Quaternion, keyboard_switch: *bool) {
     euler_angles := to_euler_angles(q.*);
     if keyboard_switch.* {
@@ -601,7 +687,18 @@ imgui_quaternion_input_as_euler_angles :: (text: *u8, q: *Quaternion, keyboard_s
     Checkbox(keyboard_text, keyboard_switch);
 }
 
-add_transform_controls :: () {
+imgui_scale_input :: (text: *u8, scale: *Vector3, slider_min: float, slider_max: float, keyboard_switch: *bool) {
+    if keyboard_switch.* {
+        InputFloat3(text, *scale.component);
+    } else {
+        SliderFloat3(text, *scale.component, slider_min, slider_max);
+    }
+    SameLine();
+    keyboard_text := temp_c_string(tprint("keyboard##%", text));
+    Checkbox(keyboard_text, keyboard_switch);
+}
+
+add_entity_controls :: () {
     center_dummy: Vector3;
     orientation_dummy: Quaternion;
 
@@ -611,6 +708,8 @@ add_transform_controls :: () {
     name := "---";
 
     selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
+    next_selected_entity_ref := build_mode_data.selected_entity_ref;
+    
     if selected_entity != null {
         center = *selected_entity.center;
         orientation = *selected_entity.orientation;
@@ -621,32 +720,33 @@ add_transform_controls :: () {
     }
     
     Text_align_right(GetWindowPos().x, GetWindowWidth(), name);
+    SameLine();
+    SetCursorPosX(8);
+    if Button("duplicate") && selected_entity != null {
+        duplicated_entity := duplicate_entity(selected_entity);
+        next_selected_entity_ref = duplicated_entity.ref;
+    }
+    defer build_mode_data.selected_entity_ref = next_selected_entity_ref;
+
     SeparatorText("transform");
 
     InputFloat3("center", *center.component);
 
     imgui_quaternion_input_as_euler_angles("orientation", orientation, *build_mode_data.orientation_takes_keyboard_input);
+    if selected_entity != null {
+        set_orientation(selected_entity, orientation.*);
+    }
 
-    dummy_mesh_offset: Vector3;
-    dummy_mesh_scale: Vector3;
-    dummy_mesh_orientation: Quaternion;
-    dummy_mesh_color: Color4f;
-    mesh_offset := *dummy_mesh_offset;
-    mesh_scale := *dummy_mesh_scale;
-    mesh_orientation := *dummy_mesh_orientation;
-    mesh_color := *dummy_mesh_color;
+    dummy_mesh: Mesh_Instance;
+    selected_mesh := *dummy_mesh;
     mesh_name: string;
 
     if meshes.count > 0 {
         build_mode_data.entity_transform_interface_selected_mesh = clamp(build_mode_data.entity_transform_interface_selected_mesh, (0).(s32), meshes.count.(s32) - 1);
-        selected_mesh := *meshes[build_mode_data.entity_transform_interface_selected_mesh];
+        selected_mesh = *meshes[build_mode_data.entity_transform_interface_selected_mesh];
         mesh_asset := selected_mesh.data.(*Mesh_Asset);
         mesh_name = get_mesh_name(mesh_asset);
         scope_push_indent();
-        mesh_offset = *selected_mesh.offset;
-        mesh_scale = *selected_mesh.scale;
-        mesh_orientation = *selected_mesh.orientation;
-        mesh_color = *selected_mesh.albedo.tint;
     }
 
     mesh_separator_text := temp_c_string("selected_mesh: ---");
@@ -665,17 +765,13 @@ add_transform_controls :: () {
     }
     if build_mode_data.mesh_color_picker_on {
         if Begin("mesh color##mesh", *build_mode_data.mesh_color_picker_on, .NoScrollbar | .NoCollapse) {
-            ColorPicker4("color##mesh", *mesh_color.component);
+            ColorPicker4("color##mesh", *selected_mesh.albedo.tint.component);
         } 
         End();
     }
 
     if BeginPopup("entity_meshes_list") {
         for meshes {
-            // asset := it.(*Mesh_Asset);
-            // asset_name := "mesh scale"; // $todo: mesh names or some way of identifying which...
-            // use_name := temp_c_string(tprint("%##%", asset_name, it_index));
-            // InputFloat3(use_name, *it.scale.component);
             mesh_asset := it.data.(*Mesh_Asset);
             mesh_name := get_mesh_name(mesh_asset);
             if Selectable(temp_c_string(mesh_name)) {
@@ -685,10 +781,24 @@ add_transform_controls :: () {
         EndPopup();
     }
 
-    InputFloat3("offset##mesh", *mesh_offset.component);
-    InputFloat3("scale##mesh", *mesh_scale.component);
-    imgui_quaternion_input_as_euler_angles("orientation##mesh", mesh_orientation, *build_mode_data.mesh_orientation_takes_keyboard_input);
+    InputFloat3("offset##mesh", *selected_mesh.offset.component);
+    imgui_scale_input("scale##mesh", *selected_mesh.scale, 1, 300, *build_mode_data.mesh_scale_takes_keyboard_input);
+    imgui_quaternion_input_as_euler_angles("orientation##mesh", *selected_mesh.orientation, *build_mode_data.mesh_orientation_takes_keyboard_input);
 
+    if selected_entity != null && selected_mesh.flags & .IS_COLLISION_SHAPE_PARENT {
+        if selected_entity.shape.type == {
+        case .NONE;
+        case .SPHERE;
+            selected_entity.shape.sphere.radius = max(selected_mesh.scale);
+        case .CAPSULE;
+        case .RECT;
+            selected_entity.shape.rect.half_height = selected_mesh.scale.z * 0.5;
+            selected_entity.shape.rect.half_width = selected_mesh.scale.x * 0.5;
+        case .BOX;
+        case .AABB;
+        case .HALF_SPACE;
+        }
+    }
 }
 
 // eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.
@@ -728,48 +838,22 @@ add_entity_pocket :: () {
             spawn_ball(spawn_location, .{r=0.9,g=0.3,b=0.2});
         }
     }
-    if CollapsingHeader("transform") {
-
-    }
 }
 
 add_dev_ui_scratch_space :: () {
     if CollapsingHeader("scratch") {
         scope_push_indent();
-        door := get_entity(context.world.door_ref);
-        door_volume := try_get_entity(*door.gadget_interaction_volume);
-        Text("door is overlapped: %", is_set(*door.flags, .GADGET_EVENT_VOLUME_IS_OVERLAPPED));
-        Text("door is active: %", is_gadget_active(door));
-        Text("door is working: %", is_set(*door.flags, .GADGET_WORKING));
-        Text("door volume overlaps");
-        scope_push_indent();
-        if door_volume != null {
-            if door_volume.event_volume.overlaps.field.count == 0 {
-                Text("none");
-            } else for door_volume.event_volume.overlaps.field {
-                e := try_get_entity(*it.entity);
-                if e != null {
-                    Text("overlapper: %, can_interact %", e.name.field, is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY));
-                } else {
-                    Text("null entity");
-                }
-            }
-        }
-        Text("cursor window pos     : %", cursor_position);
-        Text("cursor window norm pos: %", cursor_norm_position);
-        selected_entity := try_get_entity(*build_mode_data.selected_entity_ref);
-        if selected_entity != null {
-            Text("interacting with selected entity: %", build_mode_data.interacting_with_selected_entity);
-            TextWrapped("selected entity: %", FormatStruct.{value=selected_entity.*, use_long_form_if_more_than_this_many_members=1, use_newlines_if_long_form=false, long_form_separator_between_fields ="\n"});
-        }
+        
     }
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // command line procs
 
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
-using ImGui;
+
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------
 
 imgui_update_key_modifiers :: (using io: *IO, event: *Input.Event) {
     AddKeyEvent(io, .Mod_Ctrl,  event.ctrl_pressed);

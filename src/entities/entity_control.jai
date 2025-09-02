@@ -221,6 +221,7 @@ handle_player_input :: (entity: *Entity) {
 
 Build_Mode_Data :: struct {
     lmb_pressed: bool;
+    focus_pressed: bool;
     selected_entity_ref: Entity_Ref;
     entity_interaction_grab_offset: Vector3;
     interacting_with_selected_entity: bool;
@@ -230,6 +231,7 @@ Build_Mode_Data :: struct {
     scale_initial_dimension_value: float;
     orientation_takes_keyboard_input: bool;
     mesh_orientation_takes_keyboard_input: bool;
+    mesh_scale_takes_keyboard_input: bool;
     mesh_color_picker_on: bool;
 }
 
@@ -239,9 +241,20 @@ handle_world_build_input :: (camera: *Entity) {
     using build_mode_data;
 
     defer lmb_pressed = false;
+    defer focus_pressed = false;
 
     selected_entity := try_get_entity(*selected_entity_ref);
     if selected_entity != null {
+        if focus_pressed {
+            to_entity_diff := selected_entity.center - camera.center;
+            to_entity_dist := length(to_entity_diff);
+            to_entity_dir  := to_entity_diff / to_entity_dist;
+            camera.center = selected_entity.center - to_entity_dir * 100.0;
+            new_right := normalize(cross(to_entity_dir, WORLD_UP));
+            new_up := cross(to_entity_dir, -new_right);
+            set_orientation(camera, to_entity_dir, new_up);
+        }
+
         draw_aabb(selected_entity, .{r=1.0,g=1.0,b=1.0,a=0.4}, 2);
         // $todo: handles should be sized to screenspace
         // or just use a screenspace shader 
@@ -346,12 +359,14 @@ handle_world_build_input :: (camera: *Entity) {
             closest_pt_on_ray, closest_pt_on_axis: Vector3;
             norm_ray_dist, norm_axis_dist := closest_point_on_each_line_segment(ray_begin, ray_end, axis_begin, axis_end, *closest_pt_on_ray, *closest_pt_on_axis);
 
-            if physical_manipulation_widget == {
-            case .TRANSLATE;
-                selected_entity.center = closest_pt_on_axis - entity_interaction_grab_offset;
-            case .ROTATE;
-
-            case .SCALE;
+            // avoid accidental touch-edits
+            if get_input_button_pressed_time(.MOUSE_BUTTON_LEFT) > 0.05 {
+                if physical_manipulation_widget == {
+                case .TRANSLATE;
+                    selected_entity.center = closest_pt_on_axis - entity_interaction_grab_offset;
+                case .ROTATE;
+                case .SCALE;
+                }
             }
         } else if hovered_translation_handle == {
         case .UP;
@@ -427,6 +442,3 @@ teleport_player_to_free_fly_camera :: (args: []Command_Line_Argument) {
     get_entity(context.world.player_entity_ref).center = get_entity(context.world.camera_2_ref).center;
 } @command_line
 
-// --------------------------------------------------------------------------------------------------------------------------
-#scope_file
-// --------------------------------------------------------------------------------------------------------------------------

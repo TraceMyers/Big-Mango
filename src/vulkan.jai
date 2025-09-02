@@ -3,6 +3,15 @@
 
 UNLIT :: false;
 ENABLE_VALIDATION_LAYERS :: true;
+// $todo: figure out how to make reverse z depth work so that farther things can be rendered without z fighting
+PROJECTION_REVERSE_Z :: false;
+DEPTH_COMPARE_OP :: #run ifx PROJECTION_REVERSE_Z then VkCompareOp.GREATER_OR_EQUAL else VkCompareOp.LESS_OR_EQUAL;
+DEPTH_CLEAR_VALUE :: #run ifx PROJECTION_REVERSE_Z then 0.0 else 1.0;
+MIN_DEPTH :: 0.0;
+MAX_DEPTH :: 1.0;
+// $todo: (closer to release or for playtesting) implement a D24_UNORM_S8_UINT fallback
+// DEPTH_FORMAT :: VkFormat.D24_UNORM_S8_UINT;
+DEPTH_FORMAT :: VkFormat.D32_SFLOAT_S8_UINT;
 
 LINES_MAX :: 65_536;
 MESHES_MAX :: 4096;
@@ -12,7 +21,6 @@ MESHES_MAX :: 4096;
 // Notes:
 // - just using the one queue is probably all I need
 // - apparently dynamic rendering is available in < 1.3 as an extension
-// - wtf is dynamic rendering?
 // - make a deletion queue? (frame-late: simpler. dependencies-met-before deletion version: scary)
 // - fifo is just vsync
 // - need one VkCommandPool and ! VkCommandBuffer to each thread, and commands can be recorded in parallel
@@ -20,7 +28,6 @@ MESHES_MAX :: 4096;
 //      "big engines" have a thread just for submitting. I suppose that would be easy to do, so why not?
 // - a combined immage sampler is where the image and the sampler are.. combined. SAMPLED_IMAGE, I guess
 // you store once, and create multiple samplers.
-
 
 // TODO: I *think* uniforms are aligned to 16 bytes, soo.....
 // TODO: custom validation layer callback
@@ -260,9 +267,6 @@ render_frame :: () {
     render_dt = exponential_interp(render_dt, target_dt, 2.0, delta_time);
 }
 
-
-// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
-
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // tick:15
 
@@ -285,7 +289,7 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         imageLayout = .DEPTH_ATTACHMENT_OPTIMAL,
         loadOp = .CLEAR,
         storeOp = .STORE,
-        clearValue.depthStencil = .{1.0, 0}
+        clearValue.depthStencil = .{DEPTH_CLEAR_VALUE, 0}
     };
 
     rendering_info := VkRenderingInfo.{
@@ -307,8 +311,8 @@ begin_rendering :: (cmd: VkCommandBuffer) {
         y = 0,
         width = xx draw_extent.width,
         height = xx draw_extent.height,
-        minDepth = 0.0,
-        maxDepth = 1.0
+        minDepth = MIN_DEPTH,
+        maxDepth = MAX_DEPTH 
     };
     scissor := VkRect2D.{
         .{0,0},
@@ -724,6 +728,8 @@ create_depth_image :: () {
 
     vk_init_validate(vmaCreateImage(vk_allocator, *info, *image_alloc_info, *depth_image.vk_obj, *depth_image.allocation, null), "failed to create the main image for drawing");
     
+    // $chapgpt .STENCIL_BIT -> .DEPTH_BIT
+    // view_info := image_view_create_info(depth_image.format, depth_image.vk_obj, .DEPTH_BIT);
     view_info := image_view_create_info(depth_image.format, depth_image.vk_obj, .STENCIL_BIT);
     vk_init_validate(vkCreateImageView(logical_device, *view_info, null, *depth_image.image_view), "failed to create the view of the main image for drawing");
 }
@@ -1176,8 +1182,8 @@ create_transparency_pipeline :: () {
     viewport := VkViewport.{
         width = xx swapchain.extent.width,
         height = xx swapchain.extent.height,
-        minDepth = 0.0,
-        maxDepth = 1.0
+        minDepth = MIN_DEPTH,
+        maxDepth = MAX_DEPTH 
     };
 
     scissor := VkRect2D.{
@@ -1275,13 +1281,13 @@ create_transparency_pipeline :: () {
     rendering_create_info := VkPipelineRenderingCreateInfo.{
         colorAttachmentCount=1,
         pColorAttachmentFormats = *color_attachment_format,
-        depthAttachmentFormat = .D24_UNORM_S8_UINT
+        depthAttachmentFormat = DEPTH_FORMAT
     };
 
     depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
         depthTestEnable = VK_TRUE,
         depthWriteEnable = VK_FALSE,
-        depthCompareOp = .LESS,
+        depthCompareOp = DEPTH_COMPARE_OP,
         depthBoundsTestEnable = VK_FALSE,
         stencilTestEnable = VK_FALSE,
         // front:                 VkStencilOpState;
@@ -1348,8 +1354,8 @@ create_graphics_pipeline :: () {
     viewport := VkViewport.{
         width = xx swapchain.extent.width,
         height = xx swapchain.extent.height,
-        minDepth = 0.0,
-        maxDepth = 1.0
+        minDepth = MIN_DEPTH,
+        maxDepth = MAX_DEPTH
     };
 
     scissor := VkRect2D.{
@@ -1367,8 +1373,7 @@ create_graphics_pipeline :: () {
         polygonMode = .FILL,
         lineWidth = 1.0,
         // cullMode = .FRONT_BIT,
-        // cullMode = .BACK_BIT,
-        cullMode = .NONE,
+        cullMode = .BACK_BIT,
         frontFace = .CLOCKWISE,
         depthBiasEnable = VK_FALSE,
         depthBiasConstantFactor = 0.0,
@@ -1447,13 +1452,13 @@ create_graphics_pipeline :: () {
     rendering_create_info := VkPipelineRenderingCreateInfo.{
         colorAttachmentCount=1,
         pColorAttachmentFormats = *color_attachment_format,
-        depthAttachmentFormat = .D24_UNORM_S8_UINT
+        depthAttachmentFormat = DEPTH_FORMAT
     };
 
     depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
         depthTestEnable = VK_TRUE,
         depthWriteEnable = VK_TRUE,
-        depthCompareOp = .LESS,
+        depthCompareOp = DEPTH_COMPARE_OP,
         depthBoundsTestEnable = VK_FALSE,
         stencilTestEnable = VK_FALSE,
         // front:                 VkStencilOpState;
@@ -1520,8 +1525,8 @@ create_line_pipeline :: () {
     viewport := VkViewport.{
         width = xx swapchain.extent.width,
         height = xx swapchain.extent.height,
-        minDepth = 0.0,
-        maxDepth = 1.0
+        minDepth = MIN_DEPTH,
+        maxDepth = MAX_DEPTH
     };
 
     scissor := VkRect2D.{
@@ -1619,13 +1624,13 @@ create_line_pipeline :: () {
     rendering_create_info := VkPipelineRenderingCreateInfo.{
         colorAttachmentCount=1,
         pColorAttachmentFormats = *color_attachment_format,
-        depthAttachmentFormat = .D24_UNORM_S8_UINT
+        depthAttachmentFormat = DEPTH_FORMAT
     };
 
     depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
         depthTestEnable = VK_TRUE,
         depthWriteEnable = VK_TRUE,
-        depthCompareOp = .LESS,
+        depthCompareOp = DEPTH_COMPARE_OP,
         depthBoundsTestEnable = VK_FALSE,
         stencilTestEnable = VK_FALSE,
         // front:                 VkStencilOpState;
@@ -1692,8 +1697,8 @@ create_draw_line_in_front_pipeline :: () {
     viewport := VkViewport.{
         width = xx swapchain.extent.width,
         height = xx swapchain.extent.height,
-        minDepth = 0.0,
-        maxDepth = 1.0
+        minDepth = MIN_DEPTH,
+        maxDepth = MAX_DEPTH
     };
 
     scissor := VkRect2D.{
@@ -1791,7 +1796,7 @@ create_draw_line_in_front_pipeline :: () {
     rendering_create_info := VkPipelineRenderingCreateInfo.{
         colorAttachmentCount=1,
         pColorAttachmentFormats = *color_attachment_format,
-        depthAttachmentFormat = .D24_UNORM_S8_UINT
+        depthAttachmentFormat = DEPTH_FORMAT
     };
 
     depth_stencil_info := VkPipelineDepthStencilStateCreateInfo.{
@@ -2510,13 +2515,9 @@ device_extensions_are_supported :: (device: VkPhysicalDevice, extensions: []*u8)
 
 depth_buffer_format :: (device: VkPhysicalDevice) -> VkFormat {
     props: VkFormatProperties;
-    vkGetPhysicalDeviceFormatProperties(device, .D24_UNORM_S8_UINT, *props);
+    vkGetPhysicalDeviceFormatProperties(device, DEPTH_FORMAT, *props);
     if (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0 {
-        return .D24_UNORM_S8_UINT;
-    }
-    vkGetPhysicalDeviceFormatProperties(device, .D32_SFLOAT_S8_UINT, *props);
-    if (props.optimalTilingFeatures & .DEPTH_STENCIL_ATTACHMENT_BIT) != 0 {
-        return .D32_SFLOAT_S8_UINT;
+        return DEPTH_FORMAT;
     }
     return .UNDEFINED;
 }
@@ -2667,6 +2668,15 @@ choose_swapchain_extent :: (using info: *Swapchain_Support_Info) -> VkExtent2D {
 }
 
 rendering_attachment_info :: (view: VkImageView, clear_value: *VkClearValue, layout: VkImageLayout) -> VkRenderingAttachmentInfo {
+// VkClearColorValue :: union {
+//     _float32: [4] float;
+//     int32:    [4] s32;
+//     uint32:   [4] u32;
+// }
+// VkClearValue :: union {
+//     color:        VkClearColorValue;
+//     depthStencil: VkClearDepthStencilValue;
+// }
     return VkRenderingAttachmentInfo.{
         imageView=view,
         imageLayout=layout,
@@ -2846,8 +2856,6 @@ roll_submit_info :: inline (cmd: *VkCommandBufferSubmitInfo, signal_semaphore_in
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// #scope_export // -------------------------------------------------------------------------------------------- { EXPORT }
-
 immediate_submit :: () {
     cmd := immediate_command_buffer;
     if immediate_command_count > 0 {
@@ -2973,8 +2981,6 @@ Immediate_Mode :: enum u8 {
 rect_draws: [..]Rect_Draw;
 immediate_mode: Immediate_Mode;
 immediate_texture: Texture;
-
-// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 copy_depth_image_to_draw_image :: (cmd: VkCommandBuffer) {
     if draw_extent.width == 0 || draw_extent.height == 0 then return;
@@ -3129,6 +3135,11 @@ draw_primitive :: (cmd: VkCommandBuffer, primitive: Primitive_Draw, view_project
     mesh_instance := Mesh_Instance.{data=get_or_load_mesh(*MESH_CUBE), albedo=primitive.color};
     draw_mesh(cmd, *entity, *mesh_instance, view_projection, true);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_export // ------------------------------------------------------------------------------------------ SCOPE_EXPORT
+// ---------------------------------------------------------------------------------------------------------------------
+
 
 draw_mesh :: (cmd: VkCommandBuffer, entity: *Entity, emesh: *Mesh_Instance, view_projection: *Matrix4, is_collision_mesh := false) {
     mesh := emesh.data;
@@ -3614,7 +3625,9 @@ Swapchain :: struct {
     image_views: []VkImageView;
 }
 
-// #scope_export // -------------------------------------------------------------------------------------------- { EXPORT }
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_export // ------------------------------------------------------------------------------------------ SCOPE_EXPORT
+// ---------------------------------------------------------------------------------------------------------------------
 
 Texture :: struct {
     vk_obj: VkImage;   
@@ -3624,8 +3637,6 @@ Texture :: struct {
     format: VkFormat;
     cpu_memory: []u8;
 }
-
-// #scope_file // ------------------------------------------------------------------------------------------------ { FILE }
 
 Deletion_Queue_Item :: struct {
     arg1: *void;
@@ -3764,7 +3775,6 @@ Render_Buffer :: struct {
     buffer: VkBuffer;
     allocation: VmaAllocation;
 }
-
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // methods

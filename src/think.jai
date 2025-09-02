@@ -27,14 +27,15 @@ player_entity_think :: (e: *Entity) {
             request.ray = .{look_origin(e), look_direction(e)};
 
             request.channels = .DEFAULT;
+            just_picked_up_entity: bool;
             if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
                 hit_entity := get_entity(result.hit_entity);
                 if is_set(*hit_entity.flags, .CAN_BE_HELD) {
                     e.holding_entity = result.hit_entity;
+                    just_picked_up_entity = true;
                 }
             }
-
-            if is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY) {
+            if !just_picked_up_entity && is_set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY) {
                 result = .{};
                 request.channels = .GADGET;
                 request.hit_back_face = true;

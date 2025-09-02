@@ -1,0 +1,16 @@
+
+8/26/2025
+before the next test, I want to see the following things done:
+- the tools are slow and awkward to use compared to unreal. 
+    - it's awkward to only be able to update a collider with an entity's orientation or a mesh's scale. if a mesh's visual drives the collider (IS_COLLISION_SHAPE_PARENT), then it should actually work, including the mesh's offset
+    - add handles for scale and orientation. (alternative design possibility: orientation: hold down the handle w/ lmb and use a and d keys to rotate. scale: same thing but use w and s keys to scale up and down. seems easier to implement and maybe a little better, actually.)
+    - add move/scale/rotate scales like in unreal. e.g. rotating 5 degrees at a time.
+    - figure out the orientation freakout bug
+- the sidebars get in the way of clicking too much. I rarely even use the log right now, so I should probably just have a single keypress hotkey to toggle it on and off, or maybe cycle through opacities (0 -> 30 -> 100 -> 0)
+- same for the left sidebar
+- perf should be its own thing that pushes the left sidebar down, also toggle-able
+- left sidebar shouldn't waste vertical space it isn't using.
+- make it so the top bar just selects what the left sidebar is, rather than doing all of the collapsing headers
+- add texturing, point lights, and drop shadows.
+- make a basic patrol-and-chase AI prefab & think.
+

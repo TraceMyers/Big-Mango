@@ -1,8 +1,4 @@
 
-// TODO: investigate possiblity of using rpmalloc as default allocator if it seems like a decent idea
-// TODO: global entity pointers need to be re-set every frame like before
-// TODO: entity fabrication tool would be nice.
-
 main :: () {
     rm_log("starting...", header="STARTUP");
     defer rm_log("good exit", header="SHUTDOWN");
@@ -346,15 +342,12 @@ simulation_times: [DELTA_TIME_COUNT]float32;
 render_times: [DELTA_TIME_COUNT]float32;
 dt_index: s32;
 
-breakpoint_switch_0: bool;
 breakpoint_switch_9: bool;
 breakpoint_switch_8: bool;
 breakpoint_switch_7: bool;
 
 switch_break :: (val := -1) {
-    if (val == -1 || val == 0) && breakpoint_switch_0 {
-        debug_break();
-    } else if (val == -1 || val == 9) && breakpoint_switch_9 {
+    if (val == -1 || val == 9) && breakpoint_switch_9 {
         debug_break();
     } else if (val == -1 || val == 8) && breakpoint_switch_8 {
         debug_break();

@@ -51,6 +51,13 @@ Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {
     allocation: Nested_Allocation;
 }
 
+array_copy :: (dest: *Nested_Array($T, $N), source: *Nested_Array(T, N), allocator: *Nesting_Allocator(N)) {
+    array_resize(dest, allocator, source.field.count.(s32));
+    if source.field.count > 0 {
+        memcpy(dest.field.data, source.field.data, source.field.count * size_of(T));
+    }
+}
+
 maybe_shrink :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B)) {
     if array.field.count == 0 {
         if array.allocation.count > 0 {
@@ -631,6 +638,8 @@ Nesting_Allocator {
 
 */
 
-#scope_file // ------------------------------------------------------------------------------------------------ { FILE }
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------
 
 did_small_chunk_count_warning := false;

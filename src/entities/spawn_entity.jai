@@ -1,3 +1,8 @@
+// in lieu of metaprogramming, to save time, I'm just manually handling entity array datas. here's the list of locations that need to be managed for all datas / allocators:
+// - delete_entity()
+// - duplicate_entity()
+// - world : initialize()
+// - world : save_or_load()
 
 spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orientation := QUATERNION_IDENTITY, physics_properties := Physics_Properties.{}) -> *Entity {
     using context.world;
@@ -40,7 +45,7 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
     }
     set(*entity.flags, .JUST_SPAWNED);
 
-    use_name := tprint("[%]: %", entity.id, name);
+    use_name := prefix_entity_name_with_id(name, entity.id);
     set_name(entity, use_name);
 
     get_axes(entity.orientation, *entity.axes.fore, *entity.axes.up, *entity.axes.right);
@@ -80,71 +85,29 @@ delete_entity :: (ref: Entity_Ref) {
     entities.count -= 1;
 }
 
-spawn_human :: (name: string, center := Vector3.{}, sphere_radius := 10.0, orientation := QUATERNION_IDENTITY) -> *Entity {
-    default_props := Physics_Properties.{
-        linear_acceleration=500,
-        linear_speed_max=35
-    };
+duplicate_entity :: (e: *Entity) -> *Entity {
+    name_without_prefix := entity_name_strip_prefix(e.name.field);
+    duplicate_entity := spawn_entity(name_without_prefix, .[]);
+    save_ref := duplicate_entity.ref;
+    save_name := duplicate_entity.name;
+    // easiest way to start: just copy everything...
+    memcpy(duplicate_entity, e, size_of(Entity));
+    duplicate_entity.ref = save_ref;
+    duplicate_entity.name = save_name;
+    duplicate_entity.collision_cell_hash = INVALID_COLLISION_CELL_HASH;
+    duplicate_entity.frame_counter = 0;
+    // $todo: insane metaprogramming could actually be used to do interesting things with recursive duplication... probably
+    duplicate_entity.holding_entity = .{};
+    duplicate_entity.attached_camera = .{};
+    // then go back and fix the array datas
 
-    e := spawn_entity(name, .[.MOVED_BY_PHYSICS, .APPLY_GRAVITY], center, orientation, default_props);
-    e.physics_properties.elasticity = 0.09;
+    duplicate_entity.meshes = .{};
+    array_copy(*duplicate_entity.meshes, *e.meshes, *context.world.meshes_allocator);
+    duplicate_entity.linear_impulses = .{};
+    duplicate_entity.event_volume.overlaps = .{};
+    duplicate_entity.gadget_interactions = .{};
+    duplicate_entity.gadget_children = .{};
+    array_copy(*duplicate_entity.gadget_children, *e.gadget_children, *context.world.gadget_children_allocator);
 
-    set_shape_and_mass(e, .{type=.SPHERE, sphere=.{radius=sphere_radius}}, 1);
-
-    // reorient_mesh_quat: Quaternion;
-    // set_orientation(*reorient_mesh_quat, .{0,0,1}, .{0,1,0});
-    // mesh := get_or_load_mesh("experimental/FinalBaseMesh.obj", true, reorient_mesh_quat, .{0,0,-5.0});
-    mesh := get_or_load_mesh(*MESH_FINALBASEMESH);
-    set_meshes(e, .[.{data=mesh, albedo=.{tint=.{0.7,0.7,0.9,1.0}}}]);
-
-    set(*e.flags, .CAN_INTERACT_WITH_GADGETS_IN_PROXIMITY);
-
-    return e;
-}
-
-spawn_camera :: (name: string, center := Vector3.{}, orientation := QUATERNION_IDENTITY) -> *Entity {
-    e := spawn_entity(name, .[.USES_CAMERA, .ACCELERATE_IN_3D, .APPLY_AIR_FRICTION, .MOVED_BY_PHYSICS, .DOES_NOT_DIE_TO_Z_FLOOR], center, orientation);
-    e.collision_channels = 0;
-    e.physics_properties.linear_acceleration = 400;
-    e.physics_properties.air_friction_multiplier = 3.0;
-    e.physics_properties.linear_speed_max = 50;
-    return e;
-}
-
-// also spawns an owned event volume
-spawn_gadget :: (name: string, in_gadget: Gadget, center := Vector3.{}, orientation := Quaternion.{}, event_volume_extent := Vector3.{10,10,10}, event_volume_offset := Vector3.{}, event_volume_offset_is_local := true) -> *Entity {
-    gadget := spawn_entity(name, .[.USES_GADGET], center=center, orientation=orientation);
-    gadget.gadget = in_gadget;
-    gadget.ray_channels = .GADGET;
-    gadget.overlap_channels = 0;
-
-    volume := spawn_entity(tprint("%'s event volume", name), .[.USES_EVENT_VOLUME]);
-    // initialize event volume that keeps track of which entities are within range
-    {
-        volume.ray_channels = 0;
-        volume.collision_channels = 0;
-        volume.overlap_channels = ALL_OVERLAP_CHANNELS;
-        set_shape_and_mass(volume, .{type=.AABB, aabb=.{extent=event_volume_extent}}, IMMOVABLE_ENTITY_MASS);
-        if event_volume_offset_is_local {
-            set(*volume.flags, .EVENT_VOLUME_OFFSET_IS_LOCAL);
-        }
-
-        using volume.event_volume;
-        on_begin_overlap = .ON_GADGET_EVENT_VOLUME_BEGIN_OVERLAP;
-        on_end_overlap = .ON_GADGET_EVENT_VOLUME_END_OVERLAP;
-        attached_to = gadget.ref;
-        offset_from_attachment = event_volume_offset;
-
-        set_event_volume_center(volume, gadget, offset_from_attachment);
-    }
-
-    gadget.gadget_interaction_volume = volume.ref;
-
-    if in_gadget.gadget_type == {
-    case .DOOR;
-    case .BUTTON;
-        gadget.delay_interacting_with_gadgets = .{type=.BY_DISTANCE, value=.{by_distance=.{constant=0.1, time_per_unit=0.003}}};
-    }
-
-    return gadget;
+    return duplicate_entity;
 }

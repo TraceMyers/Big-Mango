@@ -25,11 +25,7 @@ queued_world_load: string;
 context_index: s32;
 
 World :: struct {
-    world_heap_index: s32;
-    world_runtime_allocator: Bump_Allocator;
-
     world_id: u64;
-    world_frame: s32;
     world_name := "world";
     
     // entities
@@ -39,7 +35,9 @@ World :: struct {
     entity_id_counter: u32;
     collision_mesh_color_state: Random_State;
 
-    // allocators
+    // allocation
+    world_heap_index: s32;
+    world_runtime_allocator: Bump_Allocator;
     name_allocator: Nesting_Allocator(NAME_ALLOCATOR_MIN_BLOCK_SIZE);
     meshes_allocator: Nesting_Allocator(MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
     linear_impulses_allocator: Nesting_Allocator(LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
@@ -56,22 +54,20 @@ World :: struct {
     seen_entity_in_group: Bit_Array(1);
     color_group_random_state: Random_State;
     altered_cells: [..]s32;
-    collision_frame: s32;
-    physics_frame: s32;
+
+    // frame counters
+    world_frame: s32; // counted every step of the program that the world is active
+    collision_frame: s32; // counted every step of the program wherein collision & physics is run
+    physics_frame: s32; // counted every physics step (substeps)
 
     // misc
     entity_deletion_queue_empty_frame_count: s32;
     save_queued: bool;
 
-    // cached entity refs, mostly for development convenience.
-    ground_ref: Entity_Ref;
+    // cached entity refs
     camera_1_ref: Entity_Ref;
     camera_2_ref: Entity_Ref;
     player_entity_ref: Entity_Ref;
-    ball_ref: Entity_Ref;
-    door_ref: Entity_Ref;
-    ai_guy_ref: Entity_Ref;
-    button_ref: Entity_Ref;
 }
 
 // $todo: think more on thread safety of allocators, when multithreading is actually called for (but obviously writing terminally single-threaded code and trying to convert it later sucks, so... I'm not trying to make it TOO painful when I add threading in). my current thinking is:
@@ -95,6 +91,7 @@ _world :: (stage: Boot_Stage) -> bool {
         context.world = array_add(*worlds);
         initialize(context.world);
 
+        // just to test switching between worlds
         push_context world_contexts[1].* {
             context.world = array_add(*worlds);
             initialize(context.world);
@@ -254,7 +251,6 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     serialize(*record, (*color_group_random_state).(*u8), size_of(Random_State));
     serialize(*record, *collision_frame);
     serialize(*record, *physics_frame);
-    serialize(*record, *ground_ref);
     serialize(*record, *camera_1_ref);
     serialize(*record, *camera_2_ref);
     serialize(*record, *player_entity_ref);
@@ -310,18 +306,6 @@ save_or_load :: (using world: *World, rw_mode: Rw_Mode, load_file_path := "") {
     serialize(*record, *color_group_random_state);
     serialize(*record, *collision_frame);
     serialize(*record, *physics_frame);
-
-    // woops doubled
-    serialize(*record, *camera_1_ref);
-    serialize(*record, *camera_2_ref);
-    serialize(*record, *player_entity_ref);
-
-    // temp
-    serialize(*record, *ground_ref);
-    serialize(*record, *ball_ref);
-    serialize(*record, *door_ref);
-    serialize(*record, *ai_guy_ref);
-    serialize(*record, *button_ref);
 
     if rw_mode == .WRITE {
         write_entire_file(file_path, *record);

@@ -152,3 +152,7 @@ sum :: inline (a: Int_Vector3) -> s32 {
 vector :: inline (scalar: float) -> Vector3 {
     return Vector3.{scalar, scalar, scalar};
 }
+
+max :: (a: Vector3) -> float {
+    return max(a.x, max(a.y, a.z));
+}

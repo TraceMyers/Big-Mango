@@ -302,6 +302,10 @@ flush_entity_deletion_queue :: () {
 
 // ------------------------------------------------------------------------------------------------------------- components
 
+Mesh_Instance_Flags :: enum_flags u8 {
+    IS_COLLISION_SHAPE_PARENT;
+}
+
 Controller :: struct {
     linear_input: Vector3;
 }
@@ -312,6 +316,7 @@ Mesh_Instance :: struct {
     scale := VECTOR3_ONES;
     offset: Vector3;
     orientation := Quaternion.{};
+    flags: Mesh_Instance_Flags;
 }
 
 AI :: struct {
@@ -355,6 +360,7 @@ Physics_Body :: struct {
     velocity: Vector3;
     shape: Collision_Shape;
     orientation: Quaternion = QUATERNION_IDENTITY;
+    scale: Vector3;
     angular_velocity: Vector3;
     inv_inertia_tensor: Matrix3;
     collision_cell_hash: s64;
@@ -564,4 +570,37 @@ update_event_volumes :: () {
             i -= 1;
         }
     }
+}
+
+// ------------------------------------------------------------
+// just keeping these two together so they don't get misaligned
+
+prefix_entity_name_with_id :: (name: string, id: u32) -> string {
+    return tprint("%: %", id, name);
+}
+
+entity_name_strip_prefix :: (name: string) -> string {
+    colon_index := find_index_from_left(name, #char ":");
+    assert(colon_index != -1);
+    name_starts_at_index := colon_index + 2;
+    assert(name_starts_at_index < name.count);
+    return string.{name.count - name_starts_at_index, name.data + name_starts_at_index};
+}
+
+// ------------------------------------------------------------
+
+collect_entity_flags :: (e: *Entity) -> []Entity_Flags {
+    FLAGS_MAX_VALUE :: #run enum_highest_value(Entity_Flags);
+
+    out_flags: [..]Entity_Flags;
+    out_flags.allocator = temp;
+    array_reserve(*out_flags, 128);
+
+    for 0..FLAGS_MAX_VALUE {
+        if is_set(*e.flags, it.(Entity_Flags)) {
+            array_add(*out_flags, it.(Entity_Flags));
+        }
+    }
+
+    return out_flags;
 }

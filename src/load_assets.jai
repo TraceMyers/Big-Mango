@@ -209,6 +209,8 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         }
     }
 
+    log("loaded obj at %. tri count: %", asset_path, temp_mesh_data.index_count / 3);
+
     return temp_mesh_data.vertices, temp_mesh_data.indices;
 }
 

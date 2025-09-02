@@ -9,15 +9,6 @@
 // cell size: 10 x 10 
 // world cell counts: 200 x 200 = 80_000
 
-// note:
-// quickest path to fun: 
-//(x)pick up object
-//(x)throw object
-//(x)door
-// - human moves through door if open
-// - physics button controlling door
-// - throw object at button
-
 // later
 // - planned jump; jumping is typically awkward. could I make decent way of doing jumps that isn't awkward but fits a real time first person thinky actionish vibe? closest thing I can think of is talos principle jump, but it's too puzzle-gamey. something in-between would be nice.
 // - there should be a basketball court in at least one level, and it should make use of the following gameplay elements:
@@ -56,6 +47,7 @@ solve_contacts :: () {
         return;
     }
     collision_frame += 1;
+    time_step_accumulator -= PHYSICS_FIXED_TIME_STEP * time_step_count.(float);
 
     update_collision_grid_cell_occupations();
 
@@ -179,7 +171,6 @@ solve_contacts_narrow_phase :: (time_step_count: s32) {
     scope_timer();
 
     for 0..time_step_count-1 {
-        defer time_step_accumulator -= PHYSICS_FIXED_TIME_STEP;
         apply_impulses();
         solve_contact_velocities();
         move_stuff(PHYSICS_FIXED_TIME_STEP);

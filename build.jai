@@ -1,14 +1,14 @@
 
 // BUILDVAR_ ...
 // options that change the program to something different whenever they are changed.
-PROFILERS_ACTIVE :: true;
-COLLISION_DEBUG :: true;
-GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
+PROFILERS_ACTIVE :: false;
+COLLISION_DEBUG :: false;
+GENERATE_PRIMITIVE_MESH_LOADER_FILES :: true;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
 REGENERATE_ASSET_REFERENCES :: true;
-GENERATE_PROCEDURE_BODY_CAPTURES :: true;
+GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {
     // make sure environment is set up

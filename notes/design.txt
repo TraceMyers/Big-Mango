@@ -6,3 +6,4 @@
 I guess I know AI pretty well so maybe I could get it in place pretty quickly? but, the playable areas still can't be that big, so it would have to suggest size more than being an actually large playable city.
 - the two aesthetics (punchy over-saturated internet) and the dim, grungy world might make for an interesting contrast.
 - probably need to have small scale for hacking. prob just one minigame. it can't suck if you have to do it, but I'd rather you never have to... I know deus ex (original) didn't do this and is maybe better for it. something to think about. I guess if it's a real arcade game, it's worth doing. if not, it's not.
+- stuff flying upward more than it should is I think just funny on a basic level

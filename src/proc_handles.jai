@@ -12,7 +12,7 @@ Proc_Handle_Gen :: struct {
 // manually numbering the handles in case any ever need to be removed, it just continues to work
 PROCEDURES_FOR_HANDLE_GENERATION :: Proc_Handle_Gen.[
     .{"on_gadget_event_volume_begin_overlap",   Event_Volume_Overlap_Proc, 1},
-    .{"on_gadget_event_volume_end_overlap",     Event_Volume_Overlap_Proc, 2}
+    .{"on_gadget_event_volume_end_overlap",     Event_Volume_Overlap_Proc, 2},
 ];
 
 generate_procedure_handles :: () -> string {
