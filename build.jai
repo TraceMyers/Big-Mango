@@ -3,11 +3,11 @@
 // options that change the program to something different whenever they are changed.
 PROFILERS_ACTIVE :: false;
 COLLISION_DEBUG :: false;
-GENERATE_PRIMITIVE_MESH_LOADER_FILES :: true;
+GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 
 // options that need to be turned on whenever some new stuff needs to be generated
 COMPILE_SHADERS :: false;
-REGENERATE_ASSET_REFERENCES :: true;
+REGENERATE_ASSET_REFERENCES :: false;
 GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {

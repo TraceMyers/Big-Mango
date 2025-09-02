@@ -4,16 +4,7 @@
 			"path": ".."
 		},
 		{
-			"path": "../../../../compilers/jai-beta-2-014/jai/modules"
-		},
-		{
-			"path": "../../../../compilers/jai-beta-2-016/jai/examples/skeletal-animation"
-		},
-		{
-			"path": "../../../../compilers/jai-beta-2-014/jai/examples"
-		},
-		{
-			"path": "../../../../compilers/jai-beta-2-014/jai/how_to"
+			"path": "../../../build_tools/jai-beta-2-016/jai"
 		}
 	],
 	"settings": {}

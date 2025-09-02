@@ -109,6 +109,10 @@ update_input :: () {
         if it.type == .KEYBOARD {
             if it.key_pressed {
                 if it.key_code == .ESCAPE then quit = true;
+                if it.key_code == {
+                    case #char "/";
+                        toggle(*ui_options_open);
+                }
                 if input_focus == .GAME {
                     if it.key_code == {
                     case .F1;
@@ -129,8 +133,7 @@ update_input :: () {
                         if control_mode != .BUILD {
                             toggle_cursor_first_person_mode();
                         }
-                    case #char "0";
-                        toggle(*ui_options_open);
+
                     case #char "9";
                         breakpoint_switch_9 = !breakpoint_switch_9;
                     case #char "8";
@@ -143,8 +146,6 @@ update_input :: () {
                         if control_mode == .BUILD {
                             build_mode_data.focus_pressed = true;
                         }
-                    case 0x60;
-                        rm_log("numpad 0");
                     case .MOUSE_BUTTON_LEFT;
                         if !ImGui.GetIO().WantCaptureMouse {
                             if (control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE) != 0 {

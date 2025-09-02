@@ -28,8 +28,8 @@ scope_push_indent :: () #expand {
 // todo: metaprogram or whatever
 dev_ui_opacities := float.[
     0.5,
-    0.8,
-    0.58,
+    0.62,
+    0.7,
     1.0,
     1.0
 ];
@@ -85,8 +85,8 @@ _imgui :: (stage: Boot_Stage) -> bool {
 
         imgui_context = CreateContext();
 
-        // StyleColorsDark();
-        StyleColorsClassic();
+        imgui_set_theme_paper_and_ink();
+        // imgui_set_theme_graphite_glass();
 
         assert(ImplWin32_Init(window), "failed to initialize imgui win32 implementation");
 
@@ -121,6 +121,136 @@ _imgui :: (stage: Boot_Stage) -> bool {
         DestroyContext(imgui_context);
     }
     return true;
+}
+
+imgui_rgba :: (r: u8, g: u8, b: u8, a : u8 = 255) -> ImColor {
+    return .{r.(float) / 255.0, g.(float) / 255.0, b.(float) / 255.0, a.(float) / 255.0};
+}
+
+imgui_set_theme_paper_and_ink :: () {
+    s := ImGui.GetStyle();
+
+    ROUNDING :: 4.0;
+    s.WindowRounding    = ROUNDING;
+    s.ChildRounding     = ROUNDING;
+    s.PopupRounding     = ROUNDING;
+    s.FrameRounding     = ROUNDING;
+    s.ScrollbarRounding = ROUNDING;
+    s.GrabRounding      = ROUNDING;
+    s.TabRounding       = ROUNDING;
+    s.TreeLinesRounding = ROUNDING;
+
+    main_bg_color       := imgui_rgba(243,237,226);
+    main_bg_color.xyz *= 0.85;
+    secondary_bg_color  := imgui_rgba(239,232,219);
+    secondary_bg_color.xyz *= 0.85;
+
+    s.Colors[ImGui.Col.Text]                  = imgui_rgba(43,43,43);
+    s.Colors[ImGui.Col.TextDisabled]          = imgui_rgba(111,106,96);
+    s.Colors[ImGui.Col.WindowBg]              = main_bg_color;
+    s.Colors[ImGui.Col.ChildBg]               = secondary_bg_color;
+    s.Colors[ImGui.Col.PopupBg]               = secondary_bg_color;
+    s.Colors[ImGui.Col.Border]                = imgui_rgba(0,0,0,35);
+    s.Colors[ImGui.Col.FrameBg]               = imgui_rgba(255,255,255,180);
+    s.Colors[ImGui.Col.FrameBgHovered]        = imgui_rgba(42,127,98,60);
+    s.Colors[ImGui.Col.FrameBgActive]         = imgui_rgba(178,76,99,70);
+    s.Colors[ImGui.Col.TitleBg]               = imgui_rgba(243,237,226);
+    s.Colors[ImGui.Col.TitleBgActive]         = imgui_rgba(243,237,226);
+    s.Colors[ImGui.Col.MenuBarBg]             = imgui_rgba(239,232,219);
+    s.Colors[ImGui.Col.ScrollbarBg]           = imgui_rgba(239,232,219);
+    s.Colors[ImGui.Col.ScrollbarGrab]         = imgui_rgba(42,127,98,120);
+    s.Colors[ImGui.Col.ScrollbarGrabHovered]  = imgui_rgba(42,127,98,180);
+    s.Colors[ImGui.Col.ScrollbarGrabActive]   = imgui_rgba(178,76,99,200);
+    s.Colors[ImGui.Col.CheckMark]             = imgui_rgba(42,127,98);
+    s.Colors[ImGui.Col.SliderGrab]            = imgui_rgba(42,127,98,220);
+    s.Colors[ImGui.Col.SliderGrabActive]      = imgui_rgba(178,76,99,230);
+    s.Colors[ImGui.Col.Button]                = imgui_rgba(42,127,98,230);
+    s.Colors[ImGui.Col.ButtonHovered]         = imgui_rgba(42,127,98,255);
+    s.Colors[ImGui.Col.ButtonActive]          = imgui_rgba(178,76,99,240);
+    s.Colors[ImGui.Col.Header]                = imgui_rgba(42,127,98,80);
+    s.Colors[ImGui.Col.HeaderHovered]         = imgui_rgba(178,76,99,120);
+    s.Colors[ImGui.Col.HeaderActive]          = imgui_rgba(42,127,98,160);
+    s.Colors[ImGui.Col.Separator]             = imgui_rgba(0,0,0,50);
+    s.Colors[ImGui.Col.ResizeGrip]            = imgui_rgba(0,0,0,40);
+    s.Colors[ImGui.Col.ResizeGripHovered]     = imgui_rgba(0,0,0,80);
+    s.Colors[ImGui.Col.ResizeGripActive]      = imgui_rgba(0,0,0,120);
+    s.Colors[ImGui.Col.Tab]                   = imgui_rgba(255,255,255,200);
+    s.Colors[ImGui.Col.TabHovered]            = imgui_rgba(178,76,99,160);
+    s.Colors[ImGui.Col.TabActive]             = imgui_rgba(42,127,98,160);
+    s.Colors[ImGui.Col.TableHeaderBg]         = imgui_rgba(255,255,255,180);
+    s.Colors[ImGui.Col.TableBorderStrong]     = imgui_rgba(0,0,0,40);
+    s.Colors[ImGui.Col.TableBorderLight]      = imgui_rgba(0,0,0,20);
+
+    font_config: ImGui.ImFontConfig;
+    font_config.OversampleH = 3;
+    font_config.OversampleV = 3;
+    font_config.PixelSnapH = false;
+
+    io := ImGui.GetIO();
+    io.Fonts.AddFontFromFileTTF(io.Fonts, "../fonts/PkgTTC-IosevkaAile-33.2.9/IosevkaAile-Regular.ttc", 14.0, null, io.Fonts.GetGlyphRangesDefault(io.Fonts));
+
+    io.Fonts.Build(io.Fonts);
+}
+
+imgui_set_theme_graphite_glass :: () {
+    s := ImGui.GetStyle();
+
+    ROUNDING :: 14.0;
+    s.WindowRounding    = ROUNDING;
+    s.ChildRounding     = ROUNDING;
+    s.PopupRounding     = ROUNDING;
+    s.FrameRounding     = ROUNDING;
+    s.ScrollbarRounding = ROUNDING;
+    s.GrabRounding      = ROUNDING;
+    s.TabRounding       = ROUNDING;
+    s.TreeLinesRounding = ROUNDING;
+
+    s.Colors[ImGui.Col.Text]                  = imgui_rgba(245,245,245);
+    s.Colors[ImGui.Col.TextDisabled]          = imgui_rgba(154,160,166);
+    s.Colors[ImGui.Col.WindowBg]              = imgui_rgba(15,17,21,235);
+    s.Colors[ImGui.Col.ChildBg]               = imgui_rgba(21,25,34,204);
+    s.Colors[ImGui.Col.PopupBg]               = imgui_rgba(21,25,34,235);
+    s.Colors[ImGui.Col.Border]                = imgui_rgba(138,180,248,80);
+    s.Colors[ImGui.Col.FrameBg]               = imgui_rgba(21,25,34,220);
+    s.Colors[ImGui.Col.FrameBgHovered]        = imgui_rgba(138,180,248,80);
+    s.Colors[ImGui.Col.FrameBgActive]         = imgui_rgba(194,194,194,110);
+    s.Colors[ImGui.Col.TitleBg]               = imgui_rgba(15,17,21,235);
+    s.Colors[ImGui.Col.TitleBgActive]         = imgui_rgba(15,17,21,235);
+    s.Colors[ImGui.Col.ScrollbarBg]           = imgui_rgba(15,17,21,200);
+    s.Colors[ImGui.Col.ScrollbarGrab]         = imgui_rgba(138,180,248,110);
+    s.Colors[ImGui.Col.ScrollbarGrabHovered]  = imgui_rgba(138,180,248,170);
+    s.Colors[ImGui.Col.ScrollbarGrabActive]   = imgui_rgba(138,180,248,220);
+    s.Colors[ImGui.Col.CheckMark]             = imgui_rgba(138,180,248);
+    s.Colors[ImGui.Col.SliderGrab]            = imgui_rgba(138,180,248,220);
+    s.Colors[ImGui.Col.SliderGrabActive]      = imgui_rgba(194,194,194,240);
+    s.Colors[ImGui.Col.Button]                = imgui_rgba(138,180,248,220);
+    s.Colors[ImGui.Col.ButtonHovered]         = imgui_rgba(194,194,194,240);
+    s.Colors[ImGui.Col.ButtonActive]          = imgui_rgba(138,180,248,255);
+    s.Colors[ImGui.Col.Header]                = imgui_rgba(138,180,248,90);
+    s.Colors[ImGui.Col.HeaderHovered]         = imgui_rgba(194,194,194,130);
+    s.Colors[ImGui.Col.HeaderActive]          = imgui_rgba(138,180,248,160);
+    s.Colors[ImGui.Col.Separator]             = imgui_rgba(194,194,194,80);
+    s.Colors[ImGui.Col.ResizeGrip]            = imgui_rgba(194,194,194,120);
+    s.Colors[ImGui.Col.ResizeGripHovered]     = imgui_rgba(194,194,194,180);
+    s.Colors[ImGui.Col.ResizeGripActive]      = imgui_rgba(194,194,194,240);
+    s.Colors[ImGui.Col.Tab]                   = imgui_rgba(21,25,34,220);
+    s.Colors[ImGui.Col.TabHovered]            = imgui_rgba(138,180,248,180);
+    s.Colors[ImGui.Col.TabActive]             = imgui_rgba(138,180,248,140);
+    s.Colors[ImGui.Col.TableHeaderBg]         = imgui_rgba(21,25,34,220);
+    s.Colors[ImGui.Col.TableBorderStrong]     = imgui_rgba(194,194,194,60);
+    s.Colors[ImGui.Col.TableBorderLight]      = imgui_rgba(194,194,194,30);
+    // Optional: emphasize focus
+    s.Colors[ImGui.Col.NavHighlight]          = imgui_rgba(138,180,248,220);
+
+    font_config: ImGui.ImFontConfig;
+    font_config.OversampleH = 3;
+    font_config.OversampleV = 3;
+    font_config.PixelSnapH = false;
+
+    io := ImGui.GetIO();
+    io.Fonts.AddFontFromFileTTF(io.Fonts, "../fonts/SegoeUI-VF/SegoeUI-VF.ttf", 16.0, null, io.Fonts.GetGlyphRangesDefault(io.Fonts));
+
+    io.Fonts.Build(io.Fonts);   
 }
 
 draw_dev_ui :: () {
@@ -218,8 +348,8 @@ add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
     text_size: Vector2;
     left_offset := 0.0;
 
-    PushStyleColor(.Text, .{0.79, 0.79, 0.89, 1.0});
-    defer PopStyleColor();
+    // PushStyleColor(.Text, .{0.79, 0.79, 0.89, 1.0});
+    // defer PopStyleColor();
 
     if is_profiling_on {
         time_delta := seconds_since_init() - profiling_started_at_time;
@@ -229,10 +359,11 @@ add_perf_stats :: (menu_bar_height: float, parent_width: float) -> float32 {
     SameLine();
 
     // Text_align_right_for_auto_resize(*text_size, tprint("% | % ", input_focus, control_mode), left_offset);
-    Text_align_right_for_auto_resize(*text_size, tprint("frames per second: %   ", FormatFloat.{value=calc_avg_fps(), trailing_width=2, width=6, zero_removal=.NO}), left_offset);
-    Text_align_right_for_auto_resize(*text_size, tprint("frame time: % ms", FormatFloat.{value=calc_avg(delta_times) * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
-    Text_align_right_for_auto_resize(*text_size, tprint("simulation time: % ms", FormatFloat.{value=simulation_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
-    Text_align_right_for_auto_resize(*text_size, tprint("render time: % ms", FormatFloat.{value=render_dt * 1000.0, trailing_width=2, width=6, zero_removal=.NO}), left_offset);
+    avg_fps := round(calc_avg_fps());
+    Text_align_right_for_auto_resize(*text_size, tprint("frames per second:   %         ", avg_fps), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("frame time: % ms", FormatFloat.{value=calc_avg(delta_times) * 1000.0, trailing_width=1, width=8, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("simulation time: % ms", FormatFloat.{value=simulation_dt * 1000.0, trailing_width=1, width=8, zero_removal=.NO}), left_offset);
+    Text_align_right_for_auto_resize(*text_size, tprint("render time: % ms", FormatFloat.{value=render_dt * 1000.0, trailing_width=1, width=8, zero_removal=.NO}), left_offset);
 
     text_size.y += 6;
     window_size := GetWindowSize();
@@ -246,6 +377,9 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
     if !is_set(*dev_ui_enabled, .PERF) {
         return; 
     }
+
+    ImGui.PushStyleColor(.Text, imgui_rgba(200, 200, 200));
+    defer PopStyleColor();
 
     perf_opacity := dev_ui_opacities[Dev_UI_Module.PERF];
     scope_set_alpha(perf_opacity);
@@ -340,8 +474,8 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
 }
 
 add_main_menu_bar :: () -> float {
-    PushStyleColor(.MenuBarBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
-    defer PopStyleColor();
+    // PushStyleColor(.MenuBarBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
+    // defer PopStyleColor();
 
     SetNextWindowPos(.{});
     SetCursorPos(.{});
@@ -405,10 +539,10 @@ add_left_sidebar :: (main_menu_height: float) -> float {
         return 0;
     }
 
-    PushStyleColor(.WindowBg, .{0.1,0.1,0.1,1.0});
+    // PushStyleColor(.WindowBg, .{0.1,0.1,0.1,1.0});
+    // defer PopStyleColor();
 
     scope_set_alpha(dev_ui_opacities[Dev_UI_Module.LEFT_SIDEBAR]);
-    defer PopStyleColor();
     window_open := Begin("##LeftSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
     defer End();
 
@@ -441,8 +575,8 @@ add_right_sidebar :: (menu_bar_height: float) -> float {
 
     alpha := dev_ui_opacities[Dev_UI_Module.LOG];
     scope_set_alpha(alpha);
-    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
-    defer PopStyleColor();
+    // PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
+    // defer PopStyleColor();
 
     window_open := Begin("##RightSidebar", flags=.NoTitleBar | .NoScrollbar | .NoResize | .NoMove); 
     defer End();
@@ -471,13 +605,13 @@ add_log :: (parent_width: float) {
     defer /*if window_open then*/ EndChild();
 
     alpha := dev_ui_opacities[Dev_UI_Module.LOG];
-    PushStyleColor(.ChildBg, .{0.07, 0.07, 0.25, alpha});
-    defer PopStyleColor();
+    // PushStyleColor(.ChildBg, .{0.07, 0.07, 0.25, alpha});
+    // defer PopStyleColor();
 
     filter := string.{c_style_strlen(log_filter_buffer.data), log_filter_buffer.data};
 
-    PushStyleColor(.Text, .{0.6, 0.6, 0.6, alpha});
-    defer PopStyleColor();
+    // PushStyleColor(.Text, .{0.6, 0.6, 0.6, alpha});
+    // defer PopStyleColor();
 
     i := decrement_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
     while i != rm_log_message_top {
@@ -494,16 +628,16 @@ add_log :: (parent_width: float) {
         LOG_HEADER :: "[LOG]";
         pushed_style := false;
         if begins_with(log_message, STARTUP_HEADER) {
-            PushStyleColor(.Text, .{0.4, 0.85, 0.72, alpha});
+            // PushStyleColor(.Text, .{0.4, 0.85, 0.72, alpha});
             pushed_style = true;
         } else if begins_with(log_message, WARNING_HEADER) {
-            PushStyleColor(.Text, .{0.82, 0.85, 0.4, alpha});
+            // PushStyleColor(.Text, .{0.82, 0.85, 0.4, alpha});
             pushed_style = true;
         } else if begins_with(log_message, ERROR_HEADER) {
-            PushStyleColor(.Text, .{0.92, 0.65, 0.59, alpha});
+            // PushStyleColor(.Text, .{0.92, 0.65, 0.59, alpha});
             pushed_style = true;
         } else if begins_with(log_message, LOG_HEADER) {
-            PushStyleColor(.Text, .{0.6, 0.84, 0.88, alpha});
+            // PushStyleColor(.Text, .{0.6, 0.84, 0.88, alpha});
             pushed_style = true;
         }
         cursor_pos := GetCursorPos();
@@ -514,9 +648,9 @@ add_log :: (parent_width: float) {
             SameLine();
             Text_align_right(0, parent_width, tprint("%", repeat_count));
         }
-        if pushed_style {
-            PopStyleColor();
-        }
+        // if pushed_style {
+        //     PopStyleColor();
+        // }
     }
 }
 
@@ -534,8 +668,8 @@ log_filter_callback :: (data: *InputTextCallbackData) -> s32 #c_call {
 }
 
 add_log_filter :: (parent_width: float) {
-    PushStyleColor(.Text, Vector4.{0.8, 0.8, 0.8, 1.0});
-    defer PopStyleColor();
+    // PushStyleColor(.Text, Vector4.{0.8, 0.8, 0.8, 1.0});
+    // defer PopStyleColor();
     InputText("filter##log_filter", log_filter_buffer.data, xx log_filter_buffer.count, .CallbackCharFilter, log_filter_callback);
     if IsItemClicked() {
         set_input_focus(.LOG_FILTER);
@@ -698,6 +832,15 @@ imgui_scale_input :: (text: *u8, scale: *Vector3, slider_min: float, slider_max:
     Checkbox(keyboard_text, keyboard_switch);
 }
 
+imgui_button :: (text: string) -> bool {
+    s := ImGui.GetStyle();
+    save_color := s.Colors[ImGui.Col.Text];
+    s.Colors[ImGui.Col.Text] = imgui_rgba(230,250,200);
+    button_pressed := Button(text.data);
+    s.Colors[ImGui.Col.Text] = save_color;
+    return button_pressed;
+}
+
 add_entity_controls :: () {
     center_dummy: Vector3;
     orientation_dummy: Quaternion;
@@ -722,7 +865,7 @@ add_entity_controls :: () {
     Text_align_right(GetWindowPos().x, GetWindowWidth(), name);
     SameLine();
     SetCursorPosX(8);
-    if Button("duplicate") && selected_entity != null {
+    if imgui_button("duplicate") && selected_entity != null {
         duplicated_entity := duplicate_entity(selected_entity);
         next_selected_entity_ref = duplicated_entity.ref;
     }
@@ -755,12 +898,12 @@ add_entity_controls :: () {
     }
     SeparatorText(mesh_separator_text);
 
-    if Button("select mesh") {
+    if imgui_button("select mesh") {
         OpenPopup("entity_meshes_list");
     }
     
     SameLine();
-    if Button("color##mesh") {
+    if imgui_button("color##mesh") {
         build_mode_data.mesh_color_picker_on = true;
     }
     if build_mode_data.mesh_color_picker_on {
@@ -818,23 +961,23 @@ add_entity_pocket :: () {
     direction_3d := Vector3.{xy=direction_2d};
 
     if CollapsingHeader("entity pocket") {
-        if Button("door") {
+        if imgui_button("door") {
             spawn_swinging_door(spawn_location, direction_3d, .{r=0.5,g=0.5,b=0.5});
         }
         SameLine();
-        if Button("button") {
+        if imgui_button("button") {
             spawn_button(spawn_location, direction_3d, .{r=0.8,g=0.8,b=0.8}, .{r=1});
         }
         SameLine();
-        if Button("wall") {
+        if imgui_button("wall") {
             spawn_wall(spawn_location, .{r=0.5,g=0.5,b=0.5});
         }
         SameLine();
-        if Button("floor") {
+        if imgui_button("floor") {
             spawn_floor(spawn_location, .{r=0.5,g=0.5,b=0.5});
         }
         SameLine();
-        if Button("ball") {
+        if imgui_button("ball") {
             spawn_ball(spawn_location, .{r=0.9,g=0.3,b=0.2});
         }
     }

@@ -87,14 +87,14 @@ pre_boot :: () {
 }
 
 respond_to_scope_timer_commands :: inline () {
-    if profiling_on {
+    if start_profiling {
         is_profiling_on = true;
-        profiling_on = false;
+        start_profiling = false;
         profiling_started_at_time = seconds_since_init();
     }
-    if profiling_off {
+    if stop_profiling {
         is_profiling_on = false;
-        profiling_off = false;
+        stop_profiling = false;
     }
 }
 
@@ -328,8 +328,8 @@ non_render_time: float64;
 cpu_frequency: s64;
 quit := false;
 
-profiling_on: bool; @command_line
-profiling_off: bool; @command_line
+start_profiling: bool; @command_line
+stop_profiling: bool; @command_line
 is_profiling_on: bool;
 profiling_started_at_time: float64;
 

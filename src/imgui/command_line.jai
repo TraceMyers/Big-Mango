@@ -17,10 +17,10 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
 
     scope_set_alpha(dev_ui_opacities[Dev_UI_Module.CMD]);
 
-    PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
-    defer PopStyleColor();
+    // PushStyleColor(.WindowBg, .{xyz=DEEP_DARK_BLUE.vec3, w=1.0});
+    // defer PopStyleColor();
 
-    Begin("CommandLine_InputBar", flags=.NoTitleBar | .NoMove | .NoResize);
+    Begin("CommandLine_InputBar", flags=.NoTitleBar | .NoMove | .NoResize | .NoScrollbar);
     defer End();
 
     line_height := GetFrameHeight() * 2 - 2;
@@ -28,11 +28,11 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
     SetWindowPos(.{sidebar_width, main_menu_height});
 
     // SetCursorPos(.{sidebar_width, line_height*0.1});
-    PushStyleColor(.Text, 0xff_8f_a2_8a);
+    // PushStyleColor(.Text, 0xff_8f_a2_8a);
     cmd_header_text := " cmd: ";
     cmd_header_text_size := text_size(cmd_header_text);
     Text(cmd_header_text);
-    PopStyleColor();
+    // PopStyleColor();
 
     input_text_x_offset := cmd_header_text_size.x - 12;
     SetCursorPos(.{input_text_x_offset, 6});
@@ -41,7 +41,6 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
     PushItemWidth(-1);
     PushStyleVar(.WindowPadding, .{});
 
-    reclaim_focus: bool;
     if InputText("##CommandLine_InputText", command_line_text_buffer.data, command_line_text_buffer.count, .EnterReturnsTrue | .CallbackCompletion, command_line_autocomplete_callback) {
         input_str := string.{c_style_strlen(command_line_text_buffer.data), command_line_text_buffer.data};
         tokens := tokenize_and_trim(input_str, #char " ");
@@ -80,8 +79,9 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
             }
             memset(command_line_text_buffer.data, 0, command_line_text_buffer.count);
         }
-
-        reclaim_focus = true;
+        if !Input.input_button_states[Input.Key_Code.SHIFT] {
+            revert_input_focus();
+        }
     }
     PopStyleVar();
     PopItemWidth();
@@ -103,69 +103,76 @@ add_command_line :: (main_menu_height: float, sidebar_width: float32, perf_reado
     return input_text_x_offset, window_size.y;
 }
 
-add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height: float32) -> suggestion_count: s32 {
+get_command_line_suggestions :: () -> []*Command_Line_Procedure {
+    out_procs: []*Command_Line_Procedure;
+
     input_mem := string.{c_style_strlen(command_line_text_buffer.data), command_line_text_buffer.data};
     input_tokens := tokenize_and_trim(input_mem, #char " ");
     if input_tokens.count == 0 || input_tokens[0].count == 0 {
-        return 0;
+        return out_procs;
     }
 
-    PushStyleColor(.ChildBg, .{xyz=DARK_GREY_BLUE.vec3, w=0.9});
-    defer PopStyleColor();
+    Matching_Procedure :: struct {
+        proc: s32;
+        score: s32;
+    }
+    matching_procedures := alloc_array(Matching_Procedure, command_line_procedures.count, temp);
+    
+    out_count: s32;
+    for proc : command_line_procedures {
+        i := find_index_from_left(proc.name, input_tokens[0], true);
+        if i != -1 {
+            score : s32 = proc.name.count.(s32) - i.(s32);
+            if input_tokens.count > 1 {
+                for 1..input_tokens.count-1 {
+                    token_index := find_index_from_left(proc.name, input_tokens[it], true);
+                    if token_index != -1 {
+                        score += proc.name.count.(s32) - token_index.(s32);
+                    }
+                }
+            }
+            matching_procedures[out_count] = .{xx it_index, score};
+            out_count += 1;
+        }
+    }
+
+    if out_count == 0 {
+        return out_procs;
+    }
+
+    matching_procedures.count = out_count;
+    quick_sort(matching_procedures, (a, b) => b.score - a.score);
+    out_procs = alloc_array(*Command_Line_Procedure, matching_procedures.count, temp);
+    for matching_procedures {
+        out_procs[it_index] = *command_line_procedures[it.proc];
+    }
+
+    return out_procs;
+}
+
+add_command_line_input_suggestions :: (input_begin_x: float32, input_bar_height: float32) -> suggestion_count: s32 {
+    suggestions := get_command_line_suggestions();
+    if suggestions.count == 0 {
+        return 0;
+    }
 
     is_open := BeginChild("##CommandLine_InputSuggestions"/*, flags=.NoTitleBar | .NoResize | .NoInputs | .NoNav*/);
     defer EndChild();
     if !is_open then return 0;
 
-    out_count: s32;
-    best_suggestion_index: s64 = -1;
-    best_suggestion_matched_at: s64 = S64_MAX;
-
-    Matching_Procedure :: struct {
-        proc: s32;
-        index_of_matched_pattern: s32; // the lower the matched index of the pattern, the better
-    }
-    matching_procedures := alloc_array(Matching_Procedure, command_line_procedures.count, temp);
-    
-    for command_line_procedures {
-        i := find_index_from_left(it.name, input_tokens[0], true);
-        if i != -1 {
-            matching_procedures[out_count] = .{xx it_index, xx i};
-            out_count += 1;
-        }
-    }
-
-    matching_procedures.count = out_count;
-    quick_sort(matching_procedures, (a, b) => a.index_of_matched_pattern - b.index_of_matched_pattern);
-    for matching_procedures {
+    for suggestions {
         SetCursorPosX(input_begin_x-4);
-        proc_name := command_line_procedures[it.proc].name;
-        Text(proc_name);
+        Text(it.name);
     }
 
-    return out_count;
+    return xx suggestions.count;
 }
 
 copy_best_suggestion_to_command_line_input :: (buf: *u8, size: s64) {
-    input_mem := string.{c_style_strlen(buf), buf};
-    input_tokens := tokenize_and_trim(input_mem, #char " ");
-    defer array_reset(*input_tokens);
-    if input_tokens.count == 0 || input_tokens[0].count == 0 {
-        memset(buf, 0, size);
-        return;
-    }
-    best_suggestion_index: s64 = -1;
-    best_suggestion_matched_at: s64 = S64_MAX;
-    for command_line_procedures {
-        i := find_index_from_left(it.name, input_tokens[0], true);
-        if i != -1 && i < best_suggestion_matched_at {
-            best_suggestion_matched_at = i;
-            best_suggestion_index = it_index;
-        }
-    }
+    suggestions := get_command_line_suggestions();
 
-    if best_suggestion_index != -1 {
-        proc_name := command_line_procedures[best_suggestion_index].name;
+    if suggestions.count > 0 {
+        proc_name := suggestions[0].name;
         assert(proc_name.count < size);
         memset(buf, 0, size);
         memcpy(buf, proc_name.data, proc_name.count);
