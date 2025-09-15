@@ -6,6 +6,7 @@ Entity_Flags :: enum {
     USES_AI;
     USES_EVENT_VOLUME;
     USES_GADGET;
+    IS_PRIMITIVE_SHAPE;
 
     // ========================================================================== behavior description
     PHYSICS_DRIVEN_ROTATION;

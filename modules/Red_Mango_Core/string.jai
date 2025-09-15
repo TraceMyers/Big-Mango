@@ -228,7 +228,8 @@ c_strings_equal :: (a: *u8, b: *u8, max_read_count: s64) -> bool {
     return true;
 }
 
-tokenize_and_trim :: (s: string, separator: u8) -> []string {
+tokenize_and_trim :: (s: string, separator: u8, allocator:=context.allocator) -> []string {
+    scope_set_allocator(allocator);
     strings := split(s, separator);
     for *strings {
         it.* = trim(it.*);

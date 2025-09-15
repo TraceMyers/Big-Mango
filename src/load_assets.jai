@@ -1,6 +1,8 @@
 
 // OBJ doesn't guarantee a winding order. just have to know.
 load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
+    scope_timer();
+
     scope_set_working_directory("../assets");
     data := read_entire_file(asset_path);
     defer free(data);
@@ -59,7 +61,11 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
     }
 
     counts: Mesh_Data_Counts;
-    line_ct := process_per_line(data, counter, *counts);
+    line_ct: s64;
+    {
+        scope_timer("get data counts");
+        line_ct = process_per_line(data, counter, *counts);
+    }
 
     assert(counts.vertex_count > counts.max_index);
     if counts.vertex_count != counts.max_index + 1 {
@@ -96,7 +102,7 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         vertex_position_max = .{};
     }
 
-    collector := (line: *string, line_index: s64, mesh_data_v: *void) {
+    collector :: (line: *string, line_index: s64, mesh_data_v: *void) {
         if line.count < 2 {
             return;
         }
@@ -111,9 +117,34 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
             components := tokenize_and_trim(line.*, xx #char " ");
             vertex := *mesh_data.vertices[mesh_data.vertex_count];
             cmp_idx := 0;
-            for components {
-                val, success := parse_float(*it);
-                if success {
+            {
+                for float_str : components {
+                    pre_decimal: s64;
+                    post_decimal: s64;
+                    sign : float = 1.0;
+                    start_index: s64;
+                    if float_str[0] == #char "-" {
+                        sign = -1.0;
+                        start_index = 1;
+                    }
+                    found_decimal: bool;
+                    post_decimal_pow10 : s64 = 1;
+                    for start_index..float_str.count-1 {
+                        c := float_str[it];
+                        if c == #char "." {
+                            found_decimal = true;
+                            continue;
+                        } 
+                        digit := c - 48;
+                        if found_decimal {
+                            post_decimal = post_decimal * 10 + digit;
+                            post_decimal_pow10 *= 10;
+                        } else {
+                            pre_decimal = pre_decimal * 10 + digit;
+                        }
+                    }
+                    val: float = pre_decimal.(float) + post_decimal.(float) / post_decimal_pow10;
+                    val *= sign;
                     vertex.position.component[cmp_idx] = val;
                     cmp_idx += 1;
                 }
@@ -126,24 +157,34 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
             }
             mesh_data.vertex_count += 1;
         } else if c0 == #char "f" && c1 == #char " " { // face
-            face := tokenize_and_trim(line.*, #char " ");
-            face_i := 0;
-            for face {
-                indices := tokenize_and_trim(it, cast(u8)(#char "/"));
-                index := -1;
-                for indices {
-                    val, success := parse_int(*it, s64); 
-                    if !success {
+            val : s64;
+            pos : s64;
+            face_i : s64;
+            seeking_space : bool;
+
+            while pos < line.count {
+                line_char := line.*[pos];
+                pos += 1;
+                if seeking_space {
+                    if line_char == #char " " {
+                        seeking_space = false;
+                    }
+                    continue;
+                } else if line_char >= #char "0" && line_char <= #char "9" {
+                    // first number (in pattern #//#//#) is the position index
+                    val = val * 10 + (line_char - #char "0");
+                    if pos < line.count {
                         continue;
                     }
-                    assert(val >= 1);
-                    val -= 1; // obj is 1-indexed
-                    index = val;
-                    break;
-                }
-                if index == -1 {
+                } else if val == 0 {
                     continue;
                 }
+
+                assert(val >= 1);
+                index := val - 1; // obj is 1-indexed
+                val = 0;
+                seeking_space = line_char != #char " ";
+
                 if face_i < 3 {
                     if face_i == 0 {
                         assert(mesh_data.index_count % 3 == 0);
@@ -175,9 +216,13 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         }
     }
 
-    process_per_line(data, collector, *temp_mesh_data);
+    {
+        scope_timer("gather data");
+        process_per_line(data, collector, *temp_mesh_data);
+    }
 
     {
+        scope_timer("flip winding and stuff");
         using temp_mesh_data;
         vertices.count = vertex_count;
         if indices.type == .U16 {
@@ -209,7 +254,7 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         }
     }
 
-    log("loaded obj at %. tri count: %", asset_path, temp_mesh_data.index_count / 3);
+    log("loaded obj at %. tri count: %, file size: % KB", asset_path, temp_mesh_data.index_count / 3, data.count / 1024);
 
     return temp_mesh_data.vertices, temp_mesh_data.indices;
 }

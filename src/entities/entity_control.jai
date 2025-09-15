@@ -233,6 +233,7 @@ Build_Mode_Data :: struct {
     mesh_orientation_takes_keyboard_input: bool;
     mesh_scale_takes_keyboard_input: bool;
     mesh_color_picker_on: bool;
+    selected_entity_scale: Vector3;
 }
 
 build_mode_data: Build_Mode_Data;
@@ -394,6 +395,7 @@ handle_world_build_input :: (camera: *Entity) {
             draw_sphere(selected_entity.center, 1.8, .{r=0.9,g=0.9,b=0.9,a=0.6});
         }
     }
+
 
     if Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_RIGHT] & .DOWN {
         build_mode_data.lmb_pressed = false;

@@ -45,6 +45,7 @@ Dev_UI_Module :: enum {
 dev_ui_enabled: Long_Flag_Array(Dev_UI_Module);
 ui_options_open: bool;
 
+
 set_dev_ui_opacity :: (args: []Command_Line_Argument) {
     init_command_line_proc_or_return(args, 2);
     module, success := try_parse_command_line_arg(*args[0], Dev_UI_Module);
@@ -272,6 +273,7 @@ draw_dev_ui :: () {
         app_window_dims := get_window_dimensions();
         fixed_window_size := Vector2.{600, xx app_window_dims.y};
         add_perf_graph(menu_bar_height, fixed_window_size.x);
+        player := get_entity(context.world.player_entity_ref);
         left_sidebar_width := add_left_sidebar(menu_bar_height);
         right_sidebar_width := add_right_sidebar(menu_bar_height);
         command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
@@ -281,7 +283,7 @@ draw_dev_ui :: () {
 }
 
 imgui_process_event :: (event: Input.Event) {
-    using io := ImGui.GetIO();
+    using io := GetIO();
 
     mouse_button: s32 = -1;
     if event.key_code == {
@@ -880,6 +882,89 @@ add_entity_controls :: () {
         set_orientation(selected_entity, orientation.*);
     }
 
+    // inserts code and pads out to 3 lines (can either pass in 1 or 2 for 'widget_lines')
+    // maybe this is dumb, but it captures the height of the passed-in widget lines and uses it to make sure the lines are all the same height. there's probably a better way.
+    add_empty_lines_after_widget :: ($widget_code: string, widget_lines: s64) #expand {
+        assert(widget_lines == 1 || widget_lines == 2);
+        begin_y := GetCursorPos().y;
+        #insert widget_code;
+        new_y := GetCursorPos().y;
+        multiplier := 2.0;
+        if widget_lines == 2 {
+            multiplier = 0.5;
+        }
+        y_diff := (new_y - begin_y) * multiplier;
+        SetCursorPosY(new_y + y_diff);
+    }
+
+    if selected_entity != null {
+        if is_set(*selected_entity.flags, .IS_PRIMITIVE_SHAPE) {
+            if selected_entity.shape.type == {
+            case .NONE;
+            case .SPHERE;
+                using_lowpoly := mesh_at_index_is_asset(selected_entity, 0, MESH_SPHERE_LOW_POLY);
+                using_midpoly := mesh_at_index_is_asset(selected_entity, 0, MESH_SPHERE_MID_POLY);
+                using_highpoly := mesh_at_index_is_asset(selected_entity, 0, MESH_SPHERE_HIGH_POLY);
+                assert(using_lowpoly || using_midpoly || using_highpoly);
+                using selected_entity.shape.sphere;
+                add_empty_lines_after_widget("SliderFloat(\"sphere radius\", *`radius, `radius * 0.99, 1.01 * `radius);", 1);
+                selected_entity.meshes.field[0].scale = .{radius, radius, radius};
+            case .CAPSULE;
+                assert(mesh_at_index_is_asset(selected_entity, 0, MESH_CAPSULE_1_6_0_5_0_5));
+                using selected_entity.shape.capsule;
+                // $todo: due to constraints on capsule meshes as they are, capsules can have only one controllable scalar. maybe just grey the other out. (also, later, capsule meshes will be drawn in a more flexible way)
+                add_empty_lines_after_widget(
+#string HERE
+                    SliderFloat("capsule half height", *`half_height, 0, 4 * `half_height); 
+                    SliderFloat("capsule radius", *`radius, 0, 4 * `radius);
+HERE,
+                    2
+                );
+            case .RECT;
+                // assert(mesh_at_index_is_asset(selected_entity, 0, MESH_PLANE));
+                using selected_entity.shape.rect;
+                add_empty_lines_after_widget(
+#string HERE
+                    SliderFloat("rect half height", *`half_height, `half_height * 0.99, `half_height * 1.01);
+                    SliderFloat("rect half width", *`half_width, `half_width * 0.99, `half_width * 1.01);
+HERE,
+                    2
+                );
+                if mesh_at_index_is_asset(selected_entity, 0, MESH_PLANE) || mesh_at_index_is_asset(selected_entity, 0, MESH_CUBE) {
+                    selected_entity.meshes.field[0].scale = .{
+                        half_width * 2.0,
+                        1.0,
+                        half_height * 2.0
+                    };                   
+                } else {
+                    assert(false, "entity % has is primitive with rect collider, but invalid mesh at index 0", selected_entity.name.field);
+                }
+            case .BOX; #through;
+            case .AABB;
+                assert(mesh_at_index_is_asset(selected_entity, 0, MESH_CUBE));
+                using selected_entity.shape.box;
+                SliderFloat("box half height", *half_height, 0, 4 * half_height);
+                SliderFloat("box half width", *half_width, 0, 4 * half_width);
+                SliderFloat("box half length", *half_length, 0, 4 * half_length);
+                selected_entity.meshes.field[0].scale = .{
+                    half_width * 2.0,
+                    half_length * 2.0,
+                    half_height * 2.0
+                };                   
+            case .HALF_SPACE;
+            }
+        } else {
+            SliderFloat("scale##entity_controls_2", *build_mode_data.selected_entity_scale.x, 0.0, 4.0);
+        }
+
+        // if apply_scale {
+        //     build_mode_data.selected_entity_scale = VECTOR3_ONES;
+        // }
+    } else {
+        scale: float;
+        SliderFloat("scale##entity_controls_2", *scale, 0, 4);
+    }
+
     dummy_mesh: Mesh_Instance;
     selected_mesh := *dummy_mesh;
     mesh_name: string;
@@ -927,21 +1012,6 @@ add_entity_controls :: () {
     InputFloat3("offset##mesh", *selected_mesh.offset.component);
     imgui_scale_input("scale##mesh", *selected_mesh.scale, 1, 300, *build_mode_data.mesh_scale_takes_keyboard_input);
     imgui_quaternion_input_as_euler_angles("orientation##mesh", *selected_mesh.orientation, *build_mode_data.mesh_orientation_takes_keyboard_input);
-
-    if selected_entity != null && selected_mesh.flags & .IS_COLLISION_SHAPE_PARENT {
-        if selected_entity.shape.type == {
-        case .NONE;
-        case .SPHERE;
-            selected_entity.shape.sphere.radius = max(selected_mesh.scale);
-        case .CAPSULE;
-        case .RECT;
-            selected_entity.shape.rect.half_height = selected_mesh.scale.z * 0.5;
-            selected_entity.shape.rect.half_width = selected_mesh.scale.x * 0.5;
-        case .BOX;
-        case .AABB;
-        case .HALF_SPACE;
-        }
-    }
 }
 
 // eventually this should be the 'favorites' and 'workspace' for entities that I might want to place in the world during a given work session.

@@ -31,6 +31,7 @@ Entity :: struct {
     using gadget: Gadget;
     ai: AI;
     event_volume: Event_Volume;
+    // using creature: Creature;
 
     collision_mesh_albedo: Mesh_Albedo;
 
@@ -302,10 +303,6 @@ flush_entity_deletion_queue :: () {
 
 // ------------------------------------------------------------------------------------------------------------- components
 
-Mesh_Instance_Flags :: enum_flags u8 {
-    IS_COLLISION_SHAPE_PARENT;
-}
-
 Controller :: struct {
     linear_input: Vector3;
 }
@@ -316,7 +313,6 @@ Mesh_Instance :: struct {
     scale := VECTOR3_ONES;
     offset: Vector3;
     orientation := Quaternion.{};
-    flags: Mesh_Instance_Flags;
 }
 
 AI :: struct {
@@ -603,4 +599,16 @@ collect_entity_flags :: (e: *Entity) -> []Entity_Flags {
     }
 
     return out_flags;
+}
+
+
+// $todo: maybe something like the physics properties template system if that ever comes back - same thing could be done for this (max hp, etc.)
+// Creature :: struct {
+//     hp: float;
+//     max_hp: float; 
+// }
+
+mesh_at_index_is_asset :: (entity: *Entity, mesh_index: s64, asset_ref: Asset_Reference) -> bool {
+    mesh_asset := entity.meshes.field[mesh_index].data.(*Mesh_Asset);
+    return mesh_asset.asset_ref.name_hash == asset_ref.name_hash;
 }

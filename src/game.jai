@@ -16,6 +16,12 @@ main :: () {
 
     pre_boot();
 
+    turn_on_profiling_before_first_frame();
+
+    // raddebugger_attached := raddbg_is_attached();
+    // log("attached: %", raddebugger_attached);
+    // add_breakpoint();
+
     startup_success := true;
     scope_system_init(_context,             *startup_success);
     scope_system_init(_program,             *startup_success);
@@ -23,6 +29,8 @@ main :: () {
     scope_system_init(_vulkan,              *startup_success);
     scope_system_init(_imgui,               *startup_success);
     scope_system_init(_world,               *startup_success);
+
+    // ran_scratch := false;
 
     push_context world_contexts[context_index].* {
         // temp, stands in for having a world loaded
@@ -88,9 +96,11 @@ pre_boot :: () {
 
 respond_to_scope_timer_commands :: inline () {
     if start_profiling {
-        is_profiling_on = true;
+        if !is_profiling_on {
+            profiling_started_at_time = seconds_since_init();
+            is_profiling_on = true;
+        }
         start_profiling = false;
-        profiling_started_at_time = seconds_since_init();
     }
     if stop_profiling {
         is_profiling_on = false;
@@ -173,6 +183,11 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
     }
 }
 
+turn_on_profiling_before_first_frame :: () {
+    start_profiling = true;
+    respond_to_scope_timer_commands();
+}
+
 scope_timer :: ($name := "", is_program_frame_timer := false) #expand {
     #if BUILDVAR_PROFILERS_ACTIVE {
         proc_name :: #procedure_name();
@@ -180,7 +195,7 @@ scope_timer :: ($name := "", is_program_frame_timer := false) #expand {
         id :: #run get_scope_timer_id();
 
         if is_profiling_on {
-            if scope_timers.count <= id {
+            if id >= scope_timers.count {
                 array_resize(*scope_timers, id+1);
             }
             scope_timers[id].name = timer_name;
@@ -224,7 +239,6 @@ report_scope_times :: () {
 
             {
                 using trackers[it.timer_id];
-
                 if it.is_program_frame {
                     if it.is_scope_begin {
                         assert(!program_frame_began);
@@ -258,15 +272,15 @@ report_scope_times :: () {
         array_reset(*scope_timer_stack_diffs);
 
         get_array_stats :: (arr: []s64, percentile := 0.99) -> (min: float64, median: float64, high_percentile: float64) {
-            if arr.count < 3 {
+            if arr.count < 1 {
                 return 0,0,0;
             }
             quick_sort(arr, (a, b) => a - b);
             min_cpu_time := arr[0];
             median_cpu_time: s64;
             if arr.count & 0x1 == 0 {
-                median_part_1 := arr[arr.count/2];
-                median_part_2 := arr[arr.count/2+1];
+                median_part_1 := arr[(arr.count-1)/2];
+                median_part_2 := arr[(arr.count-1)/2+1];
                 median_cpu_time = (median_part_1 + median_part_2) / 2;
             } else {
                 median_cpu_time = arr[arr.count/2];
@@ -311,6 +325,12 @@ HERE,
     }
 }
 
+add_breakpoint :: () {
+    a := 0;
+    raddbg_add_breakpoint(*a, size_of(type_of(a)), 0, 1, 0);
+    a += 1;
+}
+
 Boot_Stage :: enum {
     STARTUP;
     SHUTDOWN;
@@ -326,7 +346,7 @@ program_frame: s32;
 per_frame_time: float64;
 non_render_time: float64;
 cpu_frequency: s64;
-quit := false;
+quit := false; @command_line
 
 start_profiling: bool; @command_line
 stop_profiling: bool; @command_line
@@ -371,6 +391,7 @@ switch_break :: (val := -1) {
 #import "Flat_Pool";
 #import "Sort";
 #import "File_Utilities";
+#import "jai-raddebugger";
 ImGui :: #import "ImGui_VulkanWin32";
 Input :: #import "Input";
 

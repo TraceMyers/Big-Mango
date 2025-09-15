@@ -11,6 +11,7 @@ before the next test, I want to see the following things done:
 [x] perf should be its own thing that pushes the left sidebar down, also toggle-able
 [x] left sidebar shouldn't waste vertical space it isn't using.
 [x] make it so the top bar just selects what the left sidebar is, rather than doing all of the collapsing headers
-[-] add texturing, point lights, and drop shadows.
-[-] make a basic patrol-and-chase AI prefab & think.
+[-] when overing a slider field, if I start typing numbers, bring up an inputfloat popup. If I click away, it cancels. if I hit enter, the new number is put into the field's value.
+[-] add texturing and drop shadows (decal?).
+[-] make a basic patrol-and-chase AI think.
 

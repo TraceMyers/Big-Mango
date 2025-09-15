@@ -3975,6 +3975,7 @@ allocate_descriptor_set :: (pool: VkDescriptorPool, layout: VkDescriptorSetLayou
 }
 
 setup_mesh_data_for_flat_shading :: (in_vertices: []Mesh_Vertex, indices: []$T, out_vertices: *[..]Mesh_Vertex) {
+    scope_timer();
     vertex_has_led_tri: Bit_Array(1);
     vertex_has_led_tri.items.allocator = temp;
     set_capacity(*vertex_has_led_tri, indices.count);
@@ -4286,6 +4287,15 @@ generate_mesh_loader_files :: () {
         norm_translation_offsets = .{0,0,-5};
         flip_winding = true;
         generate_mesh_loader_file("finalbasemesh", *loader);
+    }
+    {
+        loader: Mesh_Loader;
+        using loader.from_file;
+        asset_hash = OBJ_TREE1.name_hash;
+        set_orientation(*reorient, .{0,0,1}, .{0,1,0});
+        norm_translation_offsets = .{0,0,-5};
+        flip_winding = true;
+        generate_mesh_loader_file("tree1", *loader);
     }
 }
 #if BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES then #run generate_mesh_loader_files();

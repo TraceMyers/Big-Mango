@@ -7,3 +7,39 @@ I guess I know AI pretty well so maybe I could get it in place pretty quickly? b
 - the two aesthetics (punchy over-saturated internet) and the dim, grungy world might make for an interesting contrast.
 - probably need to have small scale for hacking. prob just one minigame. it can't suck if you have to do it, but I'd rather you never have to... I know deus ex (original) didn't do this and is maybe better for it. something to think about. I guess if it's a real arcade game, it's worth doing. if not, it's not.
 - stuff flying upward more than it should is I think just funny on a basic level
+- ai that is run by an actual, player-manipulatable 8086 emulator
+    - unlikely to be worthwhile on its own, but a fun idea and maybe a better idea will come of it.
+
+Game designs are islands. they form around clusters of mechanics that work well together. games within these clusters play similarly because they share mechanics in common, and because they share mechanics in common, they are part of a cluster. 
+
+I feel like I have to define what "mechanic" means to me right now: as a culture is to a population, a mechanic is to a game. you can sample a population, using cultural aspects as a filter in order to define an arbitrarily small or specific culture. in the same way, you can also filter aspects of a game to define a mechanic. You can define an incoherent culture by, say, changing your sampling method randomly throughout the sampling process. In the same way, you can define an incoherent mechanic by poorly identifying what aspects of the game's input responses are related to each other.
+
+An interesting side effect of this idea of mechanics, in combination with the idea of design islands, now has me thinking of design islands as fractals - recursively defined cultures of game all the way down to the bits.
+
+Also, 'bad' and 'good' are fine normative thingies.
+
+Anyway, game design clusters form because of the complex relationships between mechanics and other mechanics. Mechanics just don't often play nicely with each other. If you find an island of mechanics you can use effectively, there's your wellspring. Try to deviate and the game begins to suck. building bridges between these clusters is often a lengthy and expensive process.
+
+Randomly selecting a set of mechanics isn't likely to yield a coherent result. If that is true, it follows that there are more bad mechanics and bad combinations of mechanics (which are themselves composite mechanics) than good mechanics.
+
+A designer's job is to navigate this weblike and infinitely deep structure of designs in order to make accurate guesses about which direction yields fun or whatever. So far, nobody has proven to be very good at this job.
+
+The same is true for programming. The power of software, individually and in aggregate, is limited most by the human brain.
+
+It's good we have the capacity to make video games.
+
+A job is a thing you do.
+
+- character idea: a complete autodidact - a able to do anything for themselves, including their own healthcare; lives alone and is made sad by their inability to enjoy simple things.
+
+- it would be much easier to make a game like ico or shadow than any other idea I've had. scope-wise, anyway. art, music, visuals, play feel - I can try.
+    - (obviously the music I can't do myself)
+    - this has been done in 2d quite a bit, but has it been done well in 3d since those games? the worlds of ico and shadow work as well as they do only in 3d.
+    - I would love to work on this kind of game.
+- (loosely) emulating ps2 style would be economical in terms of asset creation time.
+    - if you think you're saving time by using free and store-bought assets, they always need work done in order to be put into a game of any serious complexity. it does save time, but asset creation for a world where the player has already accepted and expects ps2-quality geometry, might not be so bad. lots of very lowpoly, shifting some work to textures, but actually the textures can't be that complicated, either. well, they could - you can always be flexible... either way, there are savings all over the place, I think.
+    - also, lower fidelity art means lower expectations for animation quality.
+    - dune music
+    - *some* form of multiplayer would be a good idea. it's unlikely that I could do the obvious version in a reasonable amountof time (two players taking down colossi together or whatever the gameplay is). souls games have a pattern for this that might be good to follow (just the messages). death stranding's 'let's build this road together' thing is also an example of an on-rails multiplayer experience that might be doable. though, I didn't find the road as fulfilling as the bridges and ladders, so I suppose that would be better.
+    - if I did the 'bridges and ladders' version, it might be interesting to allow players to easily destroy those things. they can play the game without help as long as they permanently get rid of the help. maybe that sucks. seems interesting.
+    - I think 'bridges and ladders' could easily be handled with a single cpu / database for a fairly large number of concurrent players. it's unlikely I'd need anything crazy powerful as long as I did things efficiently. bandwidth-wise I can do my best, but I'm not sure about that.

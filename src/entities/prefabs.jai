@@ -91,8 +91,10 @@ spawn_swinging_door :: (floor_location: Vector3, forward_direction: Vector3, col
 
     cube_mesh := get_or_load_mesh(*MESH_CUBE);
     set_meshes(door, .[
-        .{data=cube_mesh, albedo=.{tint=color}, scale=.{half_width*2, half_width*0.1, half_height*2}, flags=.IS_COLLISION_SHAPE_PARENT}
+        .{data=cube_mesh, albedo=.{tint=color}, scale=.{half_width*2, half_width*0.1, half_height*2}}
     ]);
+
+    set(*door.flags, .IS_PRIMITIVE_SHAPE);
 
     return door;
 }
@@ -122,7 +124,7 @@ spawn_button :: (location: Vector3, forward_direction: Vector3, base_color: Colo
     cube := get_or_load_mesh(*MESH_CUBE);
     set_meshes(button, .[
         .{data=cube, albedo=.{tint=base_color}, scale=.{1.5,1.5,2.0}, offset=.{z=-0.7}},
-        .{data=capsule_mesh, albedo=.{tint=button_color}, flags=.IS_COLLISION_SHAPE_PARENT}
+        .{data=capsule_mesh, albedo=.{tint=button_color}}
     ]);
     set(*button.flags, .GADGET_FORCE_INTERACTIONS_AS_PARENT);
 
@@ -130,11 +132,11 @@ spawn_button :: (location: Vector3, forward_direction: Vector3, base_color: Colo
 }
 
 spawn_wall :: (location: Vector3, color: Color4f, scale := 10.0) -> *Entity {
-    wall := spawn_entity("wall", .[], location);
+    wall := spawn_entity("wall", .[.IS_PRIMITIVE_SHAPE], location);
     set_shape_and_mass(wall, .{type=.RECT, rect=.{scale*0.5, scale*0.5, true}}, IMMOVABLE_ENTITY_MASS);
     cube := get_or_load_mesh(*MESH_CUBE);
     set_meshes(wall, .[
-        .{data=cube, albedo=.{tint=color}, scale=.{scale, scale*(1./200), scale}, flags=.IS_COLLISION_SHAPE_PARENT}
+        .{data=cube, albedo=.{tint=color}, scale=.{scale, scale*(1./200), scale}}
     ]);
     return wall;
 }
@@ -142,12 +144,12 @@ spawn_wall :: (location: Vector3, color: Color4f, scale := 10.0) -> *Entity {
 spawn_floor :: (location: Vector3, color: Color4f, scale := 10.0) -> *Entity {
     orientation: Quaternion;
     set_orientation(*orientation, .{0,0,1}, .{1,0,0});
-    floor := spawn_entity("floor", .[], location, orientation);
+    floor := spawn_entity("floor", .[.IS_PRIMITIVE_SHAPE], location, orientation);
     set_shape_and_mass(floor, .{type=.RECT, rect=.{scale*0.5, scale*0.5, false}}, IMMOVABLE_ENTITY_MASS);
 
     plane := get_or_load_mesh(*MESH_PLANE);
     set_meshes(floor, .[
-        .{data=plane, albedo=.{tint=color}, scale=.{scale, 1.0, scale}, flags=.IS_COLLISION_SHAPE_PARENT}
+        .{data=plane, albedo=.{tint=color}, scale=.{scale, 1.0, scale}}
     ]);
 
     // cube := get_or_load_mesh(*MESH_CUBE);
@@ -159,7 +161,7 @@ spawn_floor :: (location: Vector3, color: Color4f, scale := 10.0) -> *Entity {
 }
 
 spawn_ball :: (location: Vector3, color: Color4f, radius := 3.0) -> *Entity {
-    ball := spawn_entity("ball", .[.PHYSICS_DRIVEN_ROTATION, .APPLY_GRAVITY, .ACCELERATE_IN_3D, .CAN_BE_HELD], location);
+    ball := spawn_entity("ball", .[.PHYSICS_DRIVEN_ROTATION, .APPLY_GRAVITY, .ACCELERATE_IN_3D, .CAN_BE_HELD, .IS_PRIMITIVE_SHAPE], location);
 
     // just having some fun making mass a function of radius
     MASS_FACTOR :: 3.0 / PI; // the factor that takes an input radius of 0.5 and outputs a mass of 0.5
@@ -171,7 +173,7 @@ spawn_ball :: (location: Vector3, color: Color4f, radius := 3.0) -> *Entity {
 
     sphere := get_or_load_mesh(*MESH_SPHERE_MID_POLY);
     set_meshes(ball, .[
-        .{data=sphere, albedo=.{tint=color}, scale=.{radius, radius, radius}, flags=.IS_COLLISION_SHAPE_PARENT}
+        .{data=sphere, albedo=.{tint=color}, scale=.{radius, radius, radius}}
     ]);
 
     ball.physics_properties.elasticity = 0.9;

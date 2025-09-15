@@ -99,13 +99,13 @@ _scratch :: (stage: Boot_Stage) -> bool {
     }
     // elephant
     {
-        // elephant := spawn_entity("elephant", .[]);
-        // elephant_mesh := get_or_load_mesh(*MESH_ELEPHANT);
-        // set_meshes(elephant, .[
-        //     .{data=elephant_mesh, albedo=.{tint=.{r=0.9, b=0.5}}, scale=.{0.25, 0.25, 0.25}}
-        // ]);
-        // elephant.collision_channels = 0;
-        // elephant.center.z += 50.0;
+        elephant := spawn_entity("tree", .[]);
+        elephant_mesh := get_or_load_mesh(*MESH_TREE1);
+        set_meshes(elephant, .[
+            .{data=elephant_mesh, albedo=.{tint=.{r=0.9, b=0.5}}, scale=.{0.25, 0.25, 0.25}}
+        ]);
+        elephant.collision_channels = 0;
+        elephant.center.z += 50.0;
     }
     // ai guy
     {
