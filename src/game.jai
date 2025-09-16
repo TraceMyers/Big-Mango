@@ -1,3 +1,4 @@
+// $todo: debug the occasional scope timer crash on program exit
 
 main :: () {
     rm_log("starting...", header="STARTUP");
@@ -16,7 +17,7 @@ main :: () {
 
     pre_boot();
 
-    turn_on_profiling_before_first_frame();
+    start_profiling_before_first_frame();
 
     // raddebugger_attached := raddbg_is_attached();
     // log("attached: %", raddebugger_attached);
@@ -30,16 +31,15 @@ main :: () {
     scope_system_init(_imgui,               *startup_success);
     scope_system_init(_world,               *startup_success);
 
-    // ran_scratch := false;
-
     push_context world_contexts[context_index].* {
         // temp, stands in for having a world loaded
+        // could be doing that but it's volatile rn
         scope_system_init(_scratch, *startup_success);
     }
     if !startup_success then return;
 
     per_frame_time = seconds_since_init();
-    non_render_time = seconds_since_init();
+    non_render_time = per_frame_time;
 
     while !quit {
         respond_to_scope_timer_commands();
@@ -54,6 +54,7 @@ main :: () {
             entity_ai_updates();
             update_thinks();
             solve_contacts();
+            post_physics_update();
             update_event_volumes();
             scratch_think();
             draw_dev_ui();
@@ -62,7 +63,7 @@ main :: () {
         }
         // --------------------
 
-        end_frame();
+        end_program_frame();
     }
 
     report_scope_times();
@@ -94,6 +95,10 @@ pre_boot :: () {
     load_handle_procedure_array();
 }
 
+post_physics_update :: () {
+    move_third_person_camera();
+}
+
 respond_to_scope_timer_commands :: inline () {
     if start_profiling {
         if !is_profiling_on {
@@ -108,7 +113,7 @@ respond_to_scope_timer_commands :: inline () {
     }
 }
 
-end_frame :: () {
+end_program_frame :: () {
     scope_timer();
 
     program_frame += 1;
@@ -183,7 +188,7 @@ scope_system_init :: ($system_proc: Code, boot_success: *bool) #expand {
     }
 }
 
-turn_on_profiling_before_first_frame :: () {
+start_profiling_before_first_frame :: () {
     start_profiling = true;
     respond_to_scope_timer_commands();
 }
@@ -270,6 +275,8 @@ report_scope_times :: () {
             }
         }
         array_reset(*scope_timer_stack_diffs);
+
+        log("tracker id count: %", trackers.count);
 
         get_array_stats :: (arr: []s64, percentile := 0.99) -> (min: float64, median: float64, high_percentile: float64) {
             if arr.count < 1 {

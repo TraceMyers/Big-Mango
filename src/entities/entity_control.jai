@@ -40,13 +40,12 @@ process_entity_input :: () {
                 apply_acceleration(player_entity);
             }
         }
-    } else if control_mode == .FIRST_PERSON_PLAYER_FREE_FLY {
+    } else if control_mode == .THIRD_PERSON_PLAYER {
         if player_entity != null && camera_1 != null {
-            set(*player_entity.flags, .ACCELERATE_IN_3D);
-            unset(*player_entity.flags, .APPLY_GRAVITY);
+            unset(*player_entity.flags, .ACCELERATE_IN_3D);
             first_person_camera_offset := Vector3.{z=player_entity.body.shape.half_height * 0.92};
-            handle_first_person_input(player_entity, camera_1, first_person_camera_offset, true);
-            handle_player_input(player_entity);
+            // handle_first_person_input(player_entity, camera_1, first_person_camera_offset, true);
+            handle_camera_relative_movement(player_entity, camera_1, false);
             apply_acceleration(player_entity);
         }
     } else if control_mode == .BUILD {
@@ -66,6 +65,22 @@ process_entity_input :: () {
             handle_ortho_input(player_entity, camera_2);
             handle_player_input(player_entity);
             apply_acceleration(player_entity);
+        }
+    }
+}
+
+move_third_person_camera :: () {
+    using context.world;
+
+    player_entity := try_get_entity(*player_entity_ref);
+    camera_1 := try_get_entity(*camera_1_ref);
+    camera_2 := try_get_entity(*camera_2_ref);
+
+    if input_focus != .GAME then return;
+
+    if control_mode == .THIRD_PERSON_PLAYER {
+        if player_entity != null && camera_1 != null {
+            handle_third_person_input(player_entity, camera_1, .{30, 15, player_entity.body.shape.half_height * 0.9});
         }
     }
 }
@@ -123,6 +138,62 @@ handle_first_person_input :: (entity: *Entity, fp_camera: *Entity, camera_offset
         xy_2d_forward := fore_direction_xy(*fp_camera.orientation);
         set_orientation(entity, xy_2d_forward, WORLD_UP);
     }
+}
+
+// camera_offset: x = horizontal distance (degrees), y = vertical distance (degrees). 
+// camera_aim_target_offset: world coordinate 2d aim offset. 0,0 would make the camera aim directly at the target entity's center
+handle_third_person_input :: (entity: *Entity, camera: *Entity, camera_offset: Vector3) {
+    assert(camera != entity);
+
+    if control_mode != prev_control_mode {
+        camera.orientation = entity.orientation;
+    }
+
+    camera.camera.projection = .PERSPECTIVE;
+    camera.camera.perspective.vertical_fov = 100.0;
+    camera.camera.perspective.aspect_ratio = 0.0;
+
+    if !cursor_locked_to_center then return;
+
+    rot_dt_speed := first_person_mouse_look_speed * delta_time;
+
+    if abs(Input.mouse_delta_x) > 0 {
+        angle := -rot_dt_speed * Input.mouse_delta_x.(float);
+        rotate(camera, WORLD_UP, angle);
+    }
+    if abs(Input.mouse_delta_y) > 0 {
+        vert_angle_delta := -rot_dt_speed * Input.mouse_delta_y.(float);
+        cam_forward := camera.axes.fore;
+        cam_forward_2d := fore_direction_xy(*camera.orientation);
+
+        // if cos_t < -1 or > 1, then acos(cos_t) is nan.
+        // not sure what is going on with normalization s.t. it has noticeable error. maybe that's normal and I'm used to systems that handle it well for me.
+        cos_t := clamp(dot(cam_forward, cam_forward_2d), -1, 1);
+        t := acos(cos_t);
+
+        VERT_ANGLE_PROPORTION :: 0.9;
+        MAX_ANGLE :: PI * 0.5 * VERT_ANGLE_PROPORTION;
+        MIN_ANGLE :: -MAX_ANGLE;
+        ANGLE_DIFFERENCE :: MAX_ANGLE - MIN_ANGLE;
+        angle_remain := max(MAX_ANGLE - t, 0);
+        cos_phi := dot(cam_forward, WORLD_UP);
+        clamped_delta: float;
+        if cos_phi > 0 {
+            clamped_delta = clamp(vert_angle_delta, MIN_ANGLE - ANGLE_DIFFERENCE * 0.5 + angle_remain, angle_remain);
+        } else {
+            clamped_delta = clamp(vert_angle_delta, -angle_remain, MAX_ANGLE + ANGLE_DIFFERENCE * 0.5 - angle_remain);
+        }
+        cam_right := Vector3.{xy=right_direction_xy(camera)};
+        rotate(camera, cam_right, clamped_delta);
+    }
+
+    cam_forward := camera.axes.fore;
+    cam_forward_2d := Vector3.{xy=fore_direction_xy(camera)};
+    cam_right_2d := Vector3.{xy=right_direction_xy(camera)};
+    weighted_cam_forward := normalize(cam_forward * 0.7 + cam_forward_2d * 0.3);
+    target_cam_center := entity.center - weighted_cam_forward * camera_offset.x + cam_right_2d * camera_offset.y + Vector3.{z=camera_offset.z};
+    // camera.center = exponential_interp(camera.center, target_cam_center, 45.0, delta_time);
+    camera.center = target_cam_center;
 }
 
 handle_ortho_input :: (entity: *Entity, follow_camera: *Entity) {
@@ -197,17 +268,17 @@ handle_camera_relative_movement :: (entity: *Entity, rel_camera: *Entity, move_i
     // paranoid/safe
     if !move_in_3d {
         move_dir.z = 0;
-    } else if move_dir != .{0,0,0} {
-        a := 0;
     }
 
     if move_dir == .{0,0,0} {
         move_dir = dbg_character_move_input;
-    }
-
-    if move_dir != .{0,0,0} {
+    } else {
         move_dir = normalize(move_dir);
         entity.linear_input = move_dir;
+        if entity != rel_camera {
+            target_orientation := make_quat(Vector3.{xy=normalize(move_dir.xy)}, Vector3.{z=1});
+            interp_rotate(entity, *target_orientation, 16.0, delta_time);
+        }
     }
 }
 

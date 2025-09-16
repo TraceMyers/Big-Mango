@@ -1,110 +1,30 @@
+// $todo: binary mesh format:
+// - header says "read 10k verts" -> then 10k verts follow (simple, no parsing except for headers)
+// - multithreading: have a table at the top that tells each thread where to begin reading and how much to read. essentially, encode jobs into a header.
+// - save_mgo_file :: ()
 
-// OBJ doesn't guarantee a winding order. just have to know.
+// OBJ doesn't guarantee or communicate a winding order. just have to know.
 load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
-    scope_timer();
-
-    scope_set_working_directory("../assets");
-    data := read_entire_file(asset_path);
-    defer free(data);
-
-    Mesh_Data_Counts :: struct {
-        vertex_count: u32;
-        triangle_count: u32;
-        max_index: u32;
-        quads: bool;
-    };
-
-    counter := (line: *string, line_index: s64, counts_void: *void) {
-        if line.count < 2 {
-            return;
-        }
-        counts := counts_void.(*Mesh_Data_Counts);
-
-        c0 := to_lower(line.*[0]);
-        c1 := to_lower(line.*[1]);
-        line.data += 2;
-        line.count -= 2;
-
-        if c0 == #char "v" && c1 == #char " " { // vertex
-            counts.vertex_count += 1;
-        } else if c0 == #char "f" && c1 == #char " " { // face
-            scope_set_allocator(temp);
-            auto_release_temp();
-
-            face_component_count := 0;
-            face := tokenize_and_trim(line.*, #char " ");
-
-            for face {
-                indices := tokenize_and_trim(it, cast(u8)(#char "/"));
-                for indices {
-                    val, success := parse_int(*it);
-                    assert(val >= 1);
-                    val -= 1;
-                    if !success {
-                        continue;
-                    }
-                    face_component_count += 1;
-                    counts.max_index = max(counts.max_index, val.(u32));
-                    break;
-                }
-            }
-            if face_component_count == 3 {
-                assert(!counts.quads, "obj loading doesn't currently support a mix of tris and quads");
-                counts.triangle_count += 1;
-            } else if face_component_count == 4 {
-                counts.triangle_count += 2;
-                counts.quads = true;
-            } else {
-                assert(false);
-            }
-        }
-    }
-
-    counts: Mesh_Data_Counts;
-    line_ct: s64;
-    {
-        scope_timer("get data counts");
-        line_ct = process_per_line(data, counter, *counts);
-    }
-
-    assert(counts.vertex_count > counts.max_index);
-    if counts.vertex_count != counts.max_index + 1 {
-        rm_warning("mesh [%]: vertex count [%] does not equal max index + 1 [%]", asset_path, counts.vertex_count, counts.max_index+1);
-    }
+    // ---
 
     Temp_Mesh_Data :: struct {
-        vertices: []Mesh_Vertex;
-        indices: Index_Buffer;
+        vertices: [..]Mesh_Vertex;
+        indices: [..]u32;
         vertex_position_max: Vector3;
         reorientation_quat: Quaternion;
-        vertex_count: s64;
-        index_count: s64;
         quads: bool;
         reorient: bool;
         calc_vertex_position_max: bool;
+        flip_tri_winding: bool;
+        seeking_vertex_start_point := true;
+        seeking_index_start_point := true;
     }
 
-    temp_mesh_data: Temp_Mesh_Data;
-    {
-        using temp_mesh_data;
-        quads = counts.quads;
-        reorient = reorientation != QUATERNION_IDENTITY;
-        reorientation_quat = reorientation;
-        vertices = alloc_array(Mesh_Vertex, xx counts.vertex_count, allocator);
-        if counts.max_index > U16_MAX {
-            indices.type = .U32;
-            indices._u32 = alloc_array(u32, xx (counts.triangle_count * 3), allocator);
-        } else {
-            indices.type = .U16;
-            indices._u16 = alloc_array(u16, xx (counts.triangle_count * 3), allocator);
-        }
-        calc_vertex_position_max = norm_translation_offsets != .{};
-        vertex_position_max = .{};
-    }
+    // ---
 
-    collector :: (line: *string, line_index: s64, mesh_data_v: *void) {
+    collector :: (line: *string, line_index: s64, mesh_data_v: *void) -> bool {
         if line.count < 2 {
-            return;
+            return true;
         }
         mesh_data := mesh_data_v.(*Temp_Mesh_Data);
 
@@ -114,53 +34,74 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         line.count -= 2;
 
         if c0 == #char "v" && c1 == #char " " { // vertex
-            components := tokenize_and_trim(line.*, xx #char " ");
-            vertex := *mesh_data.vertices[mesh_data.vertex_count];
+            vertex := array_add(*mesh_data.vertices);
             cmp_idx := 0;
-            {
-                for float_str : components {
-                    pre_decimal: s64;
-                    post_decimal: s64;
-                    sign : float = 1.0;
-                    start_index: s64;
-                    if float_str[0] == #char "-" {
-                        sign = -1.0;
-                        start_index = 1;
+            float_str : string;
+
+            for c : line.* {
+                if c == #char " " {
+                    if float_str.data != null {
+                        float_str.count = (line.data + it_index) - float_str.data;
+                    } else {
+                        continue;
                     }
-                    found_decimal: bool;
-                    post_decimal_pow10 : s64 = 1;
-                    for start_index..float_str.count-1 {
-                        c := float_str[it];
-                        if c == #char "." {
-                            found_decimal = true;
-                            continue;
-                        } 
-                        digit := c - 48;
-                        if found_decimal {
-                            post_decimal = post_decimal * 10 + digit;
-                            post_decimal_pow10 *= 10;
-                        } else {
-                            pre_decimal = pre_decimal * 10 + digit;
-                        }
+                } else {
+                    if float_str.data == null {
+                        float_str.data = (line.data + it_index);
                     }
-                    val: float = pre_decimal.(float) + post_decimal.(float) / post_decimal_pow10;
-                    val *= sign;
-                    vertex.position.component[cmp_idx] = val;
-                    cmp_idx += 1;
+                    if it_index != line.count-1 {
+                        continue;
+                    }
                 }
+
+                pre_decimal: s64;
+                post_decimal: s64;
+                sign : float = 1.0;
+                start_index: s64;
+                if float_str[0] == #char "-" {
+                    sign = -1.0;
+                    start_index = 1;
+                }
+                found_decimal: bool;
+                post_decimal_pow10 : s64 = 1;
+                for start_index..float_str.count-1 {
+                    c := float_str[it];
+                    if c == #char "." {
+                        found_decimal = true;
+                        continue;
+                    }
+                    digit := c - 48;
+                    if found_decimal {
+                        post_decimal = post_decimal * 10 + digit;
+                        post_decimal_pow10 *= 10;
+                    } else {
+                        pre_decimal = pre_decimal * 10 + digit;
+                    }
+                }
+
+                float_str.data = null;
+                val: float = pre_decimal.(float) + post_decimal.(float) / post_decimal_pow10;
+                val *= sign;
+                vertex.position.component[cmp_idx] = val;
+                cmp_idx += 1;
             }
+
             if mesh_data.calc_vertex_position_max {
                 mesh_data.vertex_position_max = max(mesh_data.vertex_position_max, vertex.position);
             }
             if mesh_data.reorient {
-                vertex.position = rotate(vertex.position, mesh_data.reorientation_quat);
+                // inlined quat rotation (likely small effect)
+                t := cross_product(mesh_data.reorientation_quat.xyz, vertex.position) * 2.0;
+                vertex.position = vertex.position + t * mesh_data.reorientation_quat.w + cross_product(mesh_data.reorientation_quat.xyz, t);
             }
-            mesh_data.vertex_count += 1;
         } else if c0 == #char "f" && c1 == #char " " { // face
             val : s64;
             pos : s64;
             face_i : s64;
             seeking_space : bool;
+
+            prev_index_count := mesh_data.indices.count;
+            array_resize(*mesh_data.indices, mesh_data.indices.count+3);
 
             while pos < line.count {
                 line_char := line.*[pos];
@@ -171,7 +112,7 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
                     }
                     continue;
                 } else if line_char >= #char "0" && line_char <= #char "9" {
-                    // first number (in pattern #//#//#) is the position index
+                    // first number (in pattern #//#//# or #/#/#) is the position index
                     val = val * 10 + (line_char - #char "0");
                     if pos < line.count {
                         continue;
@@ -186,34 +127,78 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
                 seeking_space = line_char != #char " ";
 
                 if face_i < 3 {
-                    if face_i == 0 {
-                        assert(mesh_data.index_count % 3 == 0);
-                    }
-                    if mesh_data.indices.type == .U16 {
-                        mesh_data.indices._u16[mesh_data.index_count] = xx index;
+                    if mesh_data.flip_tri_winding {
+                        if face_i == {
+                        case 0;
+                            mesh_data.indices[prev_index_count+1] = xx index;
+                        case 1;
+                            mesh_data.indices[prev_index_count+0] = xx index;
+                        case 2;
+                            mesh_data.indices[prev_index_count+2] = xx index;
+                        }
                     } else {
-                        mesh_data.indices._u32[mesh_data.index_count] = xx index;
+                        mesh_data.indices[prev_index_count+face_i] = xx index;
                     }
-                    mesh_data.index_count += 1;
                 } else {
                     // triangulizing the quad = use the final vertex + 2 of the previous verts
-                    assert(mesh_data.quads);
                     assert(face_i == 3);
-                    assert(mesh_data.index_count % 3 == 0);
-                    if mesh_data.indices.type == .U16 {
-                        mesh_data.indices._u16[mesh_data.index_count+0] = mesh_data.indices._u16[mesh_data.index_count-3];
-                        mesh_data.indices._u16[mesh_data.index_count+1] = mesh_data.indices._u16[mesh_data.index_count-1];
-                        mesh_data.indices._u16[mesh_data.index_count+2] = xx index;
+                    assert(mesh_data.indices.count % 3 == 0);
+                    array_resize(*mesh_data.indices, mesh_data.indices.count+3);
+                    if mesh_data.flip_tri_winding {
+                        mesh_data.indices[prev_index_count+3] = mesh_data.indices[prev_index_count+2];
+                        mesh_data.indices[prev_index_count+4] = mesh_data.indices[prev_index_count+1];
+                        mesh_data.indices[prev_index_count+5] = xx index;
                     } else {
-                        mesh_data.indices._u32[mesh_data.index_count+0] = mesh_data.indices._u32[mesh_data.index_count-3];
-                        mesh_data.indices._u32[mesh_data.index_count+1] = mesh_data.indices._u32[mesh_data.index_count-1];
-                        mesh_data.indices._u32[mesh_data.index_count+2] = xx index;
+                        mesh_data.indices[prev_index_count+3] = mesh_data.indices[prev_index_count+0];
+                        mesh_data.indices[prev_index_count+4] = mesh_data.indices[prev_index_count+2];
+                        mesh_data.indices[prev_index_count+5] = xx index;
                     }
-                    mesh_data.index_count += 3;
                 }
                 face_i += 1;
             }
         }
+        return true;
+    }
+
+    // ---
+
+    scope_timer();
+    begin_time := seconds_since_init();
+
+    scope_set_working_directory("../assets");
+    data : string;
+    {
+        scope_timer("load file");
+        data = read_entire_file(asset_path);
+    }
+    defer free(data);
+
+    FILE_SIZE_MIN_FOR_ESTIMATION :: 1_200_000; // ~1.2MB
+    file_size := max(data.count, FILE_SIZE_MIN_FOR_ESTIMATION); // vertex bias is negative. need to overcome the bias.
+    OVERESTIMATION_FACTOR :: 1.1;
+
+    // based on linear regression with n=3 samples. not great, but it's something
+    // $todo: estimate coefficients with n > 30 samples covering a good range of sizes, alpha = 0.025
+    vertex_bias := -21_492.37;
+    vertex_coef := 0.024554;
+    vertex_count_estimate := ((vertex_bias + vertex_coef * file_size.(float)) * OVERESTIMATION_FACTOR).(s64);
+
+    index_bias := 11_386.34;
+    index_coef := 0.047907;
+    index_count_estimate := ((index_bias + index_coef * file_size.(float)) * OVERESTIMATION_FACTOR).(s64);
+
+    temp_mesh_data: Temp_Mesh_Data;
+    {
+        using temp_mesh_data;
+        reorient = reorientation != QUATERNION_IDENTITY;
+        reorientation_quat = reorientation;
+        vertices.allocator = allocator;
+        indices.allocator = allocator;
+        array_reserve(*vertices, vertex_count_estimate);
+        array_reserve(*indices, index_count_estimate);
+        calc_vertex_position_max = norm_translation_offsets != .{};
+        vertex_position_max = .{};
+        flip_tri_winding = flip_winding;
     }
 
     {
@@ -222,30 +207,7 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
     }
 
     {
-        scope_timer("flip winding and stuff");
-        using temp_mesh_data;
-        vertices.count = vertex_count;
-        if indices.type == .U16 {
-            indices._u16.count = index_count;
-        } else {
-            indices._u32.count = index_count;
-        }
-
-        if flip_winding {
-            i := 0;
-            if indices.type == .U16 {
-                while i+1 < indices._u16.count {
-                    indices._u16[i], indices._u16[i+1] = indices._u16[i+1], indices._u16[i];
-                    i += 3;
-                }
-            } else {
-                while i+1 < indices._u32.count {
-                    indices._u32[i], indices._u32[i+1] = indices._u32[i+1], indices._u32[i];
-                    i += 3;
-                }
-            }
-        }
-
+        scope_timer("translate vertex positions");
         if temp_mesh_data.calc_vertex_position_max {
             offset := norm_translation_offsets * temp_mesh_data.vertex_position_max;
             for *temp_mesh_data.vertices {
@@ -254,9 +216,23 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         }
     }
 
-    log("loaded obj at %. tri count: %, file size: % KB", asset_path, temp_mesh_data.index_count / 3, data.count / 1024);
+    {
+        scope_timer("shrink arrays");
+        array_shrink_if_small_enough(*temp_mesh_data.vertices, 0.85);
+        array_shrink_if_small_enough(*temp_mesh_data.indices, 0.85);
+    }
 
-    return temp_mesh_data.vertices, temp_mesh_data.indices;
+    // $todo: u16 indices, probably best to make 'allow_u16' an option. this makes it so any stuff coming after this function that might add more vertices (like setup for flat shading), can wait until checking if it can be made into a u16 index array.
+    out_index_buffer: Index_Buffer;
+    out_index_buffer.type = .U32;
+    out_index_buffer._u32 = temp_mesh_data.indices;
+
+    end_time := seconds_since_init();
+    time_spent_loading := end_time - begin_time;
+
+    rm_log("loaded obj at %, file size: % KB. vertex count: %, tri count: %. time taken: % ms", asset_path, data.count / 1024, temp_mesh_data.vertices.count, temp_mesh_data.indices.count / 3, time_spent_loading * 1000.0);
+
+    return temp_mesh_data.vertices, out_index_buffer;
 }
 
 // https://code.blender.org/2013/08/fbx-binary-file-format-specification/
@@ -566,3 +542,7 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
         array_add(*nodes, node);
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------

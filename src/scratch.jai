@@ -107,6 +107,16 @@ _scratch :: (stage: Boot_Stage) -> bool {
         elephant.collision_channels = 0;
         elephant.center.z += 50.0;
     }
+    // elephant 2
+    {
+        elephant := spawn_entity("guy2", .[]);
+        elephant_mesh := get_or_load_mesh(*MESH_BASEMODEL);
+        set_meshes(elephant, .[
+            .{data=elephant_mesh, albedo=.{tint=.{r=0.9, b=0.5}}, scale=.{1.25, 1.25, 1.25}}
+        ]);
+        elephant.collision_channels = 0;
+        elephant.center.z += 50.0;
+    }
     // ai guy
     {
         // context.ai_guy = spawn_human("derek");

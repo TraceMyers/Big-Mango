@@ -1,7 +1,7 @@
 
-DEFAULT_CONTROL_MODE :: Control_Mode.BUILD;
+DEFAULT_CONTROL_MODE :: Control_Mode.THIRD_PERSON_PLAYER;
 control_mode := DEFAULT_CONTROL_MODE;
-prev_control_mode := Control_Mode.FIRST_PERSON_PLAYER_FREE_FLY;
+prev_control_mode := Control_Mode.THIRD_PERSON_PLAYER;
 input_focus := Input_Focus.GAME;
 previous_input_focus: Input_Focus;
 
@@ -18,14 +18,15 @@ Control_Mode :: enum_flags {
     BUILD;
     FIRST_PERSON_CAMERA_ONLY;
     FIRST_PERSON_PLAYER;
-    FIRST_PERSON_PLAYER_FREE_FLY;
+    THIRD_PERSON_PLAYER;
     ORTHO_YZ_45_DOWN;
     ORTHO_YZ;
     ORTHO_XZ;
     ORTHO_XY;
 }
-FIRST_PERSON_CONTROL_MODE : Control_Mode : .BUILD | .FIRST_PERSON_CAMERA_ONLY | .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
-FIRST_PERSON_PLAYER_CONTROL_MODE : Control_Mode : .FIRST_PERSON_PLAYER | .FIRST_PERSON_PLAYER_FREE_FLY;
+FIRST_PERSON_CONTROL_MODE : Control_Mode : .BUILD | .FIRST_PERSON_CAMERA_ONLY | .FIRST_PERSON_PLAYER;
+FIRST_PERSON_PLAYER_CONTROL_MODE : Control_Mode : .FIRST_PERSON_PLAYER;
+THIRD_PERSON_PLAYER_CONTROL_MODE : Control_Mode : .THIRD_PERSON_PLAYER;
 ORTHO_CONTROL_MODE : Control_Mode : .ORTHO_YZ_45_DOWN | .ORTHO_YZ | .ORTHO_XZ | .ORTHO_XY;
 
 _input :: (stage: Boot_Stage) -> bool {
@@ -126,7 +127,7 @@ update_input :: () {
                     case .F5;
                         control_mode = .FIRST_PERSON_PLAYER;
                     case .F6;
-                        control_mode = .FIRST_PERSON_PLAYER_FREE_FLY;
+                        control_mode = .THIRD_PERSON_PLAYER;
                     case .F7;
                         control_mode = .BUILD;
                     case #char "M";
@@ -231,6 +232,14 @@ window_is_active :: inline () -> bool {
     return window_active_for_frame_count > 2;
 }
 
+window_is_open :: inline () -> bool {
+    return xx IsWindow(window);
+}
+
+window_is_minimized :: inline () -> bool {
+    return xx IsIconic(window);
+}
+
 rm_log_callback :: (text: string) {
     if log_paused then return;
 
@@ -304,3 +313,5 @@ user32 :: #system_library "user32";
 SetCursorPos :: (x: s32, y: s32) -> Win32.BOOL #foreign user32;
 SetForegroundWindow :: (window: Win32.HWND) -> Win32. BOOL #foreign user32;
 SetFocus :: (window: Win32.HWND) -> Win32.BOOL #foreign user32;
+IsWindow :: (window: Win32.HWND) -> Win32.BOOL #foreign user32;
+IsIconic :: (window: Win32.HWND) -> Win32.BOOL #foreign user32;

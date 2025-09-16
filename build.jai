@@ -1,13 +1,13 @@
 
-// BUILDVAR_ ...
-// options that change the program to something different whenever they are changed.
-PROFILERS_ACTIVE :: true;
+// build vars
+PROFILERS_ACTIVE :: false;
 COLLISION_DEBUG :: false;
-GENERATE_PRIMITIVE_MESH_LOADER_FILES :: true;
+GRAPHICS_DEBUG :: true;
+GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 
-// options that need to be turned on whenever some new stuff needs to be generated
+// code gen
 COMPILE_SHADERS :: false;
-REGENERATE_ASSET_REFERENCES :: true;
+REGENERATE_ASSET_REFERENCES :: false;
 GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {
@@ -115,14 +115,17 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 BUILDVAR_PROFILERS_ACTIVE :: %;
 BUILDVAR_COLLISION_DEBUG :: %;
 BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES :: %;
+BUILDVAR_GRAPHICS_DEBUG :: %;
 HERE, 
         PROFILERS_ACTIVE,
         COLLISION_DEBUG,
-        GENERATE_PRIMITIVE_MESH_LOADER_FILES
+        GENERATE_PRIMITIVE_MESH_LOADER_FILES,
+        GRAPHICS_DEBUG
     ), w);
 
     add_build_string(tprint("Compiler :: #import \"Compiler\";\nBUILDVAR_BUILD_CONFIG :: Compiler.Optimization_Type.%;", optimization), w);
 
+    scope_timer_id_counter = 0;
     add_build_file("src/prebuild/scope_timer.jai", w);
     // add the definition of get_scope_timer_id() to compilation. its id counter is declared in this file, so it is only usable during compilation.
     add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);

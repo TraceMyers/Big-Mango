@@ -2,7 +2,7 @@
 // config
 
 UNLIT :: false;
-ENABLE_VALIDATION_LAYERS :: true;
+ENABLE_VALIDATION_LAYERS :: BUILDVAR_GRAPHICS_DEBUG;
 // $todo: figure out how to make reverse z depth work so that farther things can be rendered without z fighting
 PROJECTION_REVERSE_Z :: false;
 DEPTH_COMPARE_OP :: #run ifx PROJECTION_REVERSE_Z then VkCompareOp.GREATER_OR_EQUAL else VkCompareOp.LESS_OR_EQUAL;
@@ -122,10 +122,17 @@ should_rebuild_swapchain :: () -> bool {
 }
 
 render_frame :: () {
+    defer array_reset_keeping_memory(*lines);
+    defer array_reset_keeping_memory(*layers);
+    defer array_reset_keeping_memory(*primitive_draws);
+
     if !init_success {
         return;
     }
     if quit {
+        return;
+    }
+    if !window_is_open() || window_is_minimized() {
         return;
     }
 
@@ -146,6 +153,11 @@ render_frame :: () {
             quit = true;
             return;
         }
+    }
+
+    window_dimensions := get_window_dimensions();
+    if window_dimensions.x == 0 || window_dimensions.y == 0 {
+        return;
     }
 
     image_index := acquire_next_swapchain_image(current_frame);
@@ -184,17 +196,12 @@ render_frame :: () {
         }
     }
 
-    // ship line draws to line draw buffer
-
     add_world_draw_commands(cmd, context.world, vp_mat);
 
-    defer array_reset_keeping_memory(*primitive_draws);
     for primitive_draws {
         draw_primitive(cmd, it, *vp_mat);
     }
 
-    defer array_reset_keeping_memory(*lines);
-    defer array_reset_keeping_memory(*layers);
     draw_spheres(cmd, *vp_mat);
     draw_lines(cmd, *vp_mat);
 
@@ -4296,6 +4303,15 @@ generate_mesh_loader_files :: () {
         norm_translation_offsets = .{0,0,-5};
         flip_winding = true;
         generate_mesh_loader_file("tree1", *loader);
+    }
+    {
+        loader: Mesh_Loader;
+        using loader.from_file;
+        asset_hash = OBJ_BASEMODEL.name_hash;
+        set_orientation(*reorient, .{0,0,1}, .{0,1,0});
+        norm_translation_offsets = .{0,0,-5};
+        flip_winding = true;
+        generate_mesh_loader_file("basemodel", *loader);
     }
 }
 #if BUILDVAR_GENERATE_PRIMITIVE_MESH_LOADER_FILES then #run generate_mesh_loader_files();

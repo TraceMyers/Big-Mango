@@ -63,7 +63,6 @@ solve_contacts :: () {
     solve_contacts_narrow_phase(time_step_count);
 
     {
-        scope_timer("unset transient collision flags");
         TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS];
         for e : context.world.entities {
             unset_multiple(*e.flags, TRANSIENT_COLLISION_FLAGS);
@@ -83,7 +82,6 @@ remove_entity_from_collision_grid :: (e: *Entity) {
 
 update_collision_grid_cell_occupations :: () {
     using context.world;
-    scope_timer();
     defer array_reset_keeping_memory(*altered_cells);
 
     for *e : context.world.entities {
@@ -112,7 +110,6 @@ update_collision_grid_cell_occupations :: () {
 
 solve_contacts_broad_phase :: (time_step_count: s32) {
     using context.world;
-    scope_timer();
 
     iteration_overlaps := temp_dynamic_array(Contact_Pair, 4096);
 
@@ -168,7 +165,6 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
 
 solve_contacts_narrow_phase :: (time_step_count: s32) {
     using context.world;
-    scope_timer();
 
     for 0..time_step_count-1 {
         apply_impulses();
@@ -181,7 +177,6 @@ solve_contacts_narrow_phase :: (time_step_count: s32) {
 
 apply_impulses :: () {
     using context.world;
-    scope_timer();
     for *e : context.world.entities {
         if is_set(*e.flags, .APPLY_GRAVITY) {
             e.velocity.z -= e.physics_properties.gravity_accel * PHYSICS_FIXED_TIME_STEP;
@@ -207,7 +202,6 @@ apply_impulses :: () {
 
 solve_contact_velocities :: () {
     using context.world;
-    scope_timer();
     for 0..COLLISION_VELOCITY_ITERATION_COUNT-1 {
         for *pair : contact_pairs {
             entity_a := get_entity(pair.a);
@@ -309,7 +303,6 @@ solve_contact_velocities :: () {
 
 solve_contact_positions :: () {
     using context.world;
-    scope_timer();
     for 0..COLLISION_POSITION_ITERATION_COUNT-1 {
         for pair : contact_pairs {
             entity_a := get_entity(pair.a);
@@ -337,7 +330,6 @@ solve_contact_positions :: () {
 
 warm_start_contacts :: () {
     using context.world;
-    scope_timer();
     for *pair : contact_pairs {
         entity_a := try_get_entity(*pair.a);
         entity_b := try_get_entity(*pair.b);

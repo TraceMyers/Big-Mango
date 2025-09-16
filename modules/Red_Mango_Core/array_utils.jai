@@ -161,6 +161,33 @@ copy_range_inside_array :: (array: []$T, dst: s64, src: s64, count: s64) {
     }
 }
 
+array_shrink :: (array: *[..]$T) {
+    if array.allocated > array.count {
+        new_allocation := alloc(array.count * size_of(T),, array.allocator);
+        memcpy(new_allocation, array.data, array.count * size_of(T));
+        {
+            scope_set_allocator(array.allocator);
+            free(array.data);
+        }
+        array.data = new_allocation;
+        array.allocated = array.count;
+    }
+}
+
+array_shrink_if_small_enough :: (array: *[..]$T, realloc_if_using_leq_proportion := 0.75) {
+    if array.count < 8 && array.count != 0 {
+        return;
+    }
+    if array.allocated == 0 {
+        assert(array.data == null);
+        assert(array.count == 0);
+        return;
+    }
+    if array.count.(float) / array.allocated.(float) <= realloc_if_using_leq_proportion {
+        array_shrink(array);
+    }
+}
+
 // dst: |-----|
 // src:    |-----|
 

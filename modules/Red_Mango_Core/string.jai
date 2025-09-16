@@ -183,12 +183,13 @@ string_data_overlaps :: inline (s1: string, s2: string) -> bool {
     return ordered_ranges_overlap(s1_min_address, s1_max_address, s2_min_address, s2_max_address);
 }
 
-process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64, in_data: *void), in_data: *void) -> line_count: s64 {
+process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64, in_data: *void) -> bool, in_data: *void) -> line_count: s64 {
     line_count: s64;
     left, right: string;
     right = str;
     success: bool;
-    while true {
+    end_loop: bool;
+    while !end_loop {
         prev_right := right;
         success, left, right = split_from_left(right, #char "\n");
         if !success {
@@ -197,11 +198,11 @@ process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64
                 line_count += 1;
             }
             break;
-        }
-        if left.count > 0 && left[left.count-1] == #char "\r" {
+        } else if left.count > 0 && left[left.count-1] == #char "\r" {
             left.count -= 1;
         }
-        per_line_proc(*left, line_count, in_data); 
+
+        end_loop = !per_line_proc(*left, line_count, in_data);
         line_count += 1;
     }
     return line_count;

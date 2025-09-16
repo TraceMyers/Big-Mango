@@ -374,13 +374,17 @@ distance :: inline (q1: Quaternion, q2: Quaternion) -> float {
 interp_rotate :: (origin: Quaternion, target: Quaternion, norm: float32) -> Quaternion {
     assert(norm >= 0.0 && norm <= 1.0);
     cos_theta := dot(origin, target);
+
+    // put target in the same hemisphere as the origin, so that the interpolation takes the shortest path
+    use_target := ifx cos_theta < 0 then -target else target;
+    
     if cos_theta >= ALMOST_COS_0 {
-        return target;
+        return use_target;
     } else if cos_theta >= COS_PI_OVER_12 {
         // small distances can be lerped without being able to tell the difference
-        return nlerp(origin, target, norm);
+        return nlerp(origin, use_target, norm);
     } else {
-        return slerp(origin, target, norm);
+        return slerp(origin, use_target, norm);
     }
 }
 
@@ -392,7 +396,9 @@ interp_rotate :: (origin: Quaternion, target: Quaternion, speed: float32, delta_
     t := 2.0 * acos_approx(cos_ht);
     if abs(rot_dist) >= t {
         return target;
-    } else return interp_rotate(origin, target, rot_dist / t);
+    } else {
+        return interp_rotate(origin, target, rot_dist / t);
+    }
 }
 
 // small abs max error (~0.0008) and ~15% faster when using cephes.jai acos() as the reference. thanks to Vasili at https://math.stackexchange.com/questions/4983100/finding-arcsin-or-arccos-from-other-mathmatical-functions

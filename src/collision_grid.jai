@@ -197,7 +197,6 @@ find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32,
 
 collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
     using context.world;
-    scope_timer();
     self := get_entity(entity_ref);
     self_aabb := get_aabb(self);
 
