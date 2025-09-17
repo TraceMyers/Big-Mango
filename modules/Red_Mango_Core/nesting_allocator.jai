@@ -30,10 +30,6 @@ Nesting_Allocator_Collection :: struct {
 }
 
 Nested_Allocation_Info :: struct {
-    list: s16;
-    outer_chunk: u16;
-    inner_chunk_count: u16;
-    inner_chunk: u8;
     using metadata: union {
         bin: enum u8 {
             STANDALONE;
@@ -41,8 +37,14 @@ Nested_Allocation_Info :: struct {
             MEDIUM;
             LARGE;
         }
+        // when an allocation is valid, the upper 4 bits are stamped with a specific bit pattern.
+        // this is intentionally placed at byte 0 of the struct because the lowest byte of data is the one most likely to change, and so (naively speaking) most likely to change when trashed.
         bit_pattern: u8 = ---;
     }
+    inner_chunk: u8;
+    inner_chunk_count: u16;
+    outer_chunk: u16;
+    list: s16;
 }
 
 Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {

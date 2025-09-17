@@ -134,7 +134,6 @@ update_input :: () {
                         if control_mode != .BUILD {
                             toggle_cursor_first_person_mode();
                         }
-
                     case #char "9";
                         breakpoint_switch_9 = !breakpoint_switch_9;
                     case #char "8";

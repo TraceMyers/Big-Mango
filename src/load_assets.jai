@@ -36,61 +36,57 @@ load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATE
         if c0 == #char "v" && c1 == #char " " { // vertex
             vertex := array_add(*mesh_data.vertices);
             cmp_idx := 0;
-            float_str : string;
+
+            pre_decimal: s64;
+            post_decimal: s64;
+            sign : = 1.0;
+            found_decimal: bool;
+            post_decimal_pow10 := 1;
+            started_parsing_component: bool;
 
             for c : line.* {
                 if c == #char " " {
-                    if float_str.data != null {
-                        float_str.count = (line.data + it_index) - float_str.data;
-                    } else {
+                    if !started_parsing_component {
                         continue;
                     }
                 } else {
-                    if float_str.data == null {
-                        float_str.data = (line.data + it_index);
+                    started_parsing_component = true;
+                    if c == #char "-" {
+                        sign = -1.0;
+                    } else if c == #char "." {
+                        found_decimal = true;
+                    } else {
+                        digit := c - 48;
+                        if found_decimal {
+                            post_decimal = post_decimal * 10 + digit;
+                            post_decimal_pow10 *= 10;
+                        } else {
+                            pre_decimal = pre_decimal * 10 + digit;
+                        }
                     }
                     if it_index != line.count-1 {
                         continue;
                     }
                 }
 
-                pre_decimal: s64;
-                post_decimal: s64;
-                sign : float = 1.0;
-                start_index: s64;
-                if float_str[0] == #char "-" {
-                    sign = -1.0;
-                    start_index = 1;
-                }
-                found_decimal: bool;
-                post_decimal_pow10 : s64 = 1;
-                for start_index..float_str.count-1 {
-                    c := float_str[it];
-                    if c == #char "." {
-                        found_decimal = true;
-                        continue;
-                    }
-                    digit := c - 48;
-                    if found_decimal {
-                        post_decimal = post_decimal * 10 + digit;
-                        post_decimal_pow10 *= 10;
-                    } else {
-                        pre_decimal = pre_decimal * 10 + digit;
-                    }
-                }
-
-                float_str.data = null;
                 val: float = pre_decimal.(float) + post_decimal.(float) / post_decimal_pow10;
                 val *= sign;
                 vertex.position.component[cmp_idx] = val;
                 cmp_idx += 1;
+
+                pre_decimal = 0;
+                post_decimal = 0;
+                sign = 1;
+                found_decimal = false;
+                post_decimal_pow10 = 1;
+                started_parsing_component = false;
             }
 
             if mesh_data.calc_vertex_position_max {
                 mesh_data.vertex_position_max = max(mesh_data.vertex_position_max, vertex.position);
             }
             if mesh_data.reorient {
-                // inlined quat rotation (likely small effect)
+                // inlined quat rotation (likely small or no effect)
                 t := cross_product(mesh_data.reorientation_quat.xyz, vertex.position) * 2.0;
                 vertex.position = vertex.position + t * mesh_data.reorientation_quat.w + cross_product(mesh_data.reorientation_quat.xyz, t);
             }

@@ -3696,8 +3696,11 @@ Line_Vertex :: struct {
 
 Mesh_Vertex :: struct {
     position: Vector3;
-    uv: Vector2;
     normal: Vector3;
+	// We can have at most 4 weights, but they have to sum up
+	// to 1, so the last one can be calculated and we don't store it.
+    weights: Vector3;
+    joints: [4]s16;
 }
 
 Mesh_Asset :: struct {
@@ -3871,6 +3874,23 @@ vk_format :: (info: *Type_Info_Struct_Member, depth := 0) -> VkFormat {
                     format = .R32G32B32A32_SFLOAT;
                 }
             }
+        }
+    } else if info.type.type == .ARRAY {
+        array_type_info := info.type.(*Type_Info_Array);
+        assert(array_type_info.array_count > 0 && array_type_info.array_type == .FIXED);
+        if array_type_info.element_type.type == {
+        case .INTEGER;
+            // $todo: rest of this
+            int_element_type := array_type_info.element_type.(*Type_Info_Integer);
+            if array_type_info.array_count == {
+            case 1;
+            case 2;
+            case 3;
+            case 4;
+                assert(int_element_type.runtime_size == 2 && int_element_type.signed);
+                return .R16G16B16A16_SINT;
+            }
+        case .FLOAT;
         }
     }
     return format;
@@ -4140,15 +4160,15 @@ meshes: [..]Mesh_Asset;
 sphere_draws: [..]Sphere_Draw_Data;
 
 cube_vertices := Mesh_Vertex.[
-    .{.{-0.5,  -0.5,  -0.5}, .{0,0}, .{0,0,-1}}, // ul 0
-    .{.{ 0.5,   0.5,  -0.5}, .{1,1}, .{0,0,-1}}, // lr 1
-    .{.{-0.5,   0.5,  -0.5}, .{0,1}, .{0,0,-1}}, // ll 2
-    .{.{ 0.5,  -0.5,  -0.5}, .{1,0}, .{0,0,-1}}, // ur 3
+    .{.{-0.5,  -0.5,  -0.5}, /*.{0,0},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ul 0
+    .{.{ 0.5,   0.5,  -0.5}, /*.{1,1},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // lr 1
+    .{.{-0.5,   0.5,  -0.5}, /*.{0,1},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ll 2
+    .{.{ 0.5,  -0.5,  -0.5}, /*.{1,0},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ur 3
 
-    .{.{-0.5,  -0.5,   0.5}, .{0,0}, .{0,0,-1}}, // ul 4
-    .{.{ 0.5,   0.5,   0.5}, .{1,1}, .{0,0,-1}}, // lr 5
-    .{.{-0.5,   0.5,   0.5}, .{0,1}, .{0,0,-1}}, // ll 6
-    .{.{ 0.5,  -0.5,   0.5}, .{1,0}, .{0,0,-1}}, // ur 7
+    .{.{-0.5,  -0.5,   0.5}, /*.{0,0},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ul 4
+    .{.{ 0.5,   0.5,   0.5}, /*.{1,1},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // lr 5
+    .{.{-0.5,   0.5,   0.5}, /*.{0,1},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ll 6
+    .{.{ 0.5,  -0.5,   0.5}, /*.{1,0},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ur 7
 ];
 
 cube_indices := u16.[
@@ -4167,10 +4187,10 @@ cube_indices := u16.[
 ];
 
 plane_vertices := Mesh_Vertex.[
-    .{.{-0.5, 0, -0.5}, .{0,0}, .{0,0,-1}},
-    .{.{ 0.5, 0, -0.5}, .{0,0}, .{0,0,-1}},
-    .{.{ 0.5,  0, 0.5}, .{0,0}, .{0,0,-1}},
-    .{.{-0.5,  0, 0.5}, .{0,0}, .{0,0,-1}},
+    .{.{-0.5, 0, -0.5}, .{0,0,-1}, .{}, .[-1,-1,-1,-1]},
+    .{.{ 0.5, 0, -0.5}, .{0,0,-1}, .{}, .[-1,-1,-1,-1]},
+    .{.{ 0.5, 0,  0.5}, .{0,0,-1}, .{}, .[-1,-1,-1,-1]},
+    .{.{-0.5, 0,  0.5}, .{0,0,-1}, .{}, .[-1,-1,-1,-1]},
 ];
 
 plane_indices := u16.[

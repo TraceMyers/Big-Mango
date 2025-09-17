@@ -1,5 +1,13 @@
 // $todo: debug the occasional scope timer crash on program exit
 
+// 3.3 x 10^-3  = 0.003 (ms)
+// 3.3 x 10^-6  = 0.000003 (us)
+// 3.3 x 10^-9  = 0.000000003 (ns)
+// 3.3 x 10^-10 = 0.0000000003 (1/10 ns)
+// -> 3ghz ~= 1 cycle per 1/10 nanosecond
+
+// .41 us = 410 ns ~= 4100 cycles
+
 main :: () {
     rm_log("starting...", header="STARTUP");
     defer rm_log("good exit", header="SHUTDOWN");
@@ -118,21 +126,24 @@ end_program_frame :: () {
 
     program_frame += 1;
 
-    // doing this after program_frame advances so the data are correct for the next generation of entities
-    // set_global_entities();
-
     new_time := seconds_since_init();
-    delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.25);
-    per_frame_time = new_time;
     if fixed_delta_time != 0.0 {
         delta_time = fixed_delta_time;
+    } else {
+        // 0 delta_time may result in NaN bugs. 0.1 max = simulation never has to take steps TOO big
+        delta_time = clamp((new_time - per_frame_time).(float32), 0.00001, 0.1);
     }
     delta_time *= delta_time_multiplier;
+    per_frame_time = new_time;
 
     delta_times[dt_index] = delta_time;
     render_times[dt_index] = render_dt;
     simulation_times[dt_index] = simulation_dt;
     dt_index = increment_wrap(dt_index, 0, delta_times.count-1);
+
+    if !window_is_open() {
+        quit = true;
+    }
 
     if queued_world_load != "" {
         if world_contexts[context_index].world != null {
@@ -149,7 +160,7 @@ end_program_frame :: () {
         estimated_frames_before_allocation := scope_timer_stack_diffs_this_frame.(float64) / scope_timer_stack_diffs_remaining.(float64);
         if scope_timer_stack_diffs_this_frame > 0 {
             if estimated_frames_before_allocation <= 10 {
-                array_reserve(*scope_timer_stack_diffs, 2 * scope_timer_stack_diffs.count);
+                array_reserve(*scope_timer_stack_diffs, 2 * scope_timer_stack_diffs.allocated);
             }
         }
         previous_scope_timer_stack_diffs_count = scope_timer_stack_diffs.count;
@@ -437,6 +448,7 @@ Zlib :: #import "zlib";
 #load "prebuild/asset.jai";
 #load "file.jai";
 #load "assets.jai";
+#load "skeletal_animation.jai";
 
 kernel32 :: #system_library "kernel32";
 GetConsoleWindow :: () -> Win32.HWND #foreign kernel32;

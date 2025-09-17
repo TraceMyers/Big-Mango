@@ -7,8 +7,9 @@ layout(push_constant) uniform constants {
 } pconst;
 
 layout(location=0) in vec4 in_position;
-layout(location=1) in vec2 in_tex_coords;
-layout(location=2) in vec3 in_normal;
+layout(location=1) in vec3 in_normal;
+layout(location=2) in vec3 weights;
+layout(location=3) in ivec4 joints;
 
 layout(location=0) out vec4 out_color;
 layout(location=1) flat out vec3 out_normal;
@@ -23,9 +24,7 @@ vec3 qtransform(vec4 q, vec3 v) {
 }
 
 void main() {
-    // tile nonsense
-    vec4 pos = in_position + vec4(2.0,0,0,0) * float(gl_InstanceIndex);
-    gl_Position = pos * pconst.mvp;
+    gl_Position = in_position * pconst.mvp;
     out_color = pconst.color;
     out_normal = qtransform(pconst.orientation, in_normal);
 }
