@@ -1,13 +1,13 @@
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// for writing forward into a buffer and reading backward.
 
 // note: don't need bit serialization. can just use separate bit flags for that. no reason to inline the bits I can think of.
 // note: don't need a struct for combining the data with a checksum. should just have the serializer leave the first
 // 128 bits open for the checksum if it's going to have one.
 // todo: if alignment isn't PRIMITIVE, structs need to be packed/unpacked
 
-SERIALIZER_CHECKSUM_TYPE :: [4]u32;
-SERIALIZER_CHECKSUM_SIZE :: size_of(SERIALIZER_CHECKSUM_TYPE);
+SERIALIZER_CHECKSUM_SIZE :: 32;
+CHECKSUM_UINT32_COUNT :: SERIALIZER_CHECKSUM_SIZE / 4;
+SERIALIZER_CHECKSUM_TYPE :: [CHECKSUM_UINT32_COUNT]u32;
 
 Rw_Mode :: enum u8 {
     WRITE;
@@ -16,11 +16,6 @@ Rw_Mode :: enum u8 {
 
 Serializer :: struct($in_alloc_mode: Serializer_Alloc_Mode = .STATIC, $in_align_mode: Serializer_Align_Mode = .BYTE) {
     memory: string;
-    // TODO: parallel array of tags. push on write, pop on read. check against T.
-    // #if SERIALIZE_DEBUG {
-        // dbg_tags: [..]Type_Info_Tag;
-    //     dbg_i: s64;
-    // }
     allocator: Allocator; // only used if dynamic
     // used only when reading out arrays. if not set, will default to using the above allocator.
     read_array_allocator: Allocator; 
@@ -30,6 +25,9 @@ Serializer :: struct($in_alloc_mode: Serializer_Alloc_Mode = .STATIC, $in_align_
     pad_for_checksum := false;
     alloc_mode :: in_alloc_mode;
     align_mode :: in_align_mode;
+#place memory; // for debug
+    memory_count: s64; 
+    memory_data: *u8;
 }
 
 Serializer_Alloc_Mode :: enum u8 {
@@ -277,7 +275,7 @@ serialize :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s
     }
 }
 
-serialize_bytes :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s32, $mode: Rw_Mode) {
+serialize_bytes :: inline (using buffer: *Serializer($alloc_m, $align_m), data: *u8, count: s32, $mode: Rw_Mode) {
     array: []u8 = ---;
     array.count = xx count;
     array.data = data;
@@ -286,13 +284,13 @@ serialize_bytes :: (using buffer: *Serializer($alloc_m, $align_m), data: *u8, co
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-validate_checksum ::(using buffer: *Serializer($alloc_m, $align_m)) -> bool {
+validate_checksum :: no_inline (using buffer: *Serializer($alloc_m, $align_m)) -> bool {
     assert(pad_for_checksum);
     assert(memory.count > SERIALIZER_CHECKSUM_SIZE);
-    calculated: [4]u32;
-    calculate_checksum(buffer, *calculated);
-    have : *[4]u32 = xx memory.data;
-    for 0..3 {
+    calculated: [CHECKSUM_UINT32_COUNT]u32;
+    calculate_checksum(buffer, calculated.data);
+    have : *[CHECKSUM_UINT32_COUNT]u32 = xx memory.data;
+    for 0..CHECKSUM_UINT32_COUNT-1 {
         if have.*[it] != calculated[it] then return false;
     }
     return true;
@@ -304,17 +302,18 @@ imprint_checksum :: (using buffer: *Serializer($alloc_m, $align_m)) {
     calculate_checksum(buffer, xx memory.data);
 }
 
-calculate_checksum :: (using buffer: *Serializer($alloc_m, $align_m), out: *[4]u32) {
+calculate_checksum :: (using buffer: *Serializer($alloc_m, $align_m), out: *u32) {
     assert(pad_for_checksum);
     assert(memory.count > SERIALIZER_CHECKSUM_SIZE);
     assert(head >= SERIALIZER_CHECKSUM_SIZE);
-    bufstr := string.{head - SERIALIZER_CHECKSUM_SIZE, memory.data + SERIALIZER_CHECKSUM_SIZE};
+    bufstr := string.{memory.count - SERIALIZER_CHECKSUM_SIZE, memory.data + SERIALIZER_CHECKSUM_SIZE};
     {
         scope_set_allocator(temp);
         auto_release_temp();
         str := md5(bufstr);
         array := as_array(str, u32);
-        memcpy(out.data, array.data, size_of(u32) * 4);
+        assert(array.count == CHECKSUM_UINT32_COUNT);
+        memcpy(out, array.data, size_of(u32) * CHECKSUM_UINT32_COUNT);
     }
 }
 

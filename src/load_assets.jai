@@ -3,6 +3,279 @@
 // - multithreading: have a table at the top that tells each thread where to begin reading and how much to read. essentially, encode jobs into a header.
 // - save_mgo_file :: ()
 
+GOM_FILE_SIZE_MAX :: 100 * 1024 * 1024;
+
+Gom_Package_Type :: enum u8 {
+    MESH :: 1;
+    SKINNED_MESH;
+}
+
+// $todo: no concept of mesh sections or so many things...
+Gom_Package :: struct {
+    type: Gom_Package_Type;
+    vertices: []Mesh_Vertex;
+    indices: Index_Buffer;
+    skeleton: *Skeleton;
+}
+
+// save :: #bake_arguments save_or_load_mgosm_file(rw_mode=.WRITE);
+// load :: #bake_arguments save_or_load_mgosm_file(rw_mode=.READ);
+load_skinned_mesh :: (asset_path: string, package: *Gom_Package, load_allocator := context.allocator) -> bool {
+    // ---
+
+    HeaderInfo :: struct {
+        record: *Serializer(.STATIC);
+        joint_count: u32;
+        vertex_count: u32;
+        triangle_count: u32;
+        joint_names_begin: u32;
+        joint_transforms_begin: u32;
+        joint_parents_begin: u32;
+        vertices_begin: u32;
+        triangles_begin: u32;
+        data_position: u32;
+        line_count: u32;
+        format_version: u32;
+        read_success := true;
+    }
+
+    // ---
+
+    parse_header_line :: (line: *string, line_index: s64, header_info_voidptr: *void) -> bool {
+        using header_info := header_info_voidptr.(*HeaderInfo);
+
+        return_failure_if :: (value: bool) #expand {
+            if value {
+                `read_success = false;
+                `return false;
+            }
+        }
+
+        tokens := split(line.*, ":");
+        for *token : tokens {
+            token.* = trim(token.*);
+        }
+        line_count = xx (line_index + 1);
+
+        if line_index == {
+        case 0;
+            return_failure_if(tokens.count != 3);
+            return_failure_if(tokens[0] != "mgo");
+            return_failure_if(tokens[1] != "skinned mesh");
+            version_tokens := split(tokens[2], " ");
+            return_failure_if(version_tokens.count != 2);
+            return_failure_if(version_tokens[0] != "version");
+            format_version=, success := parse_int(*version_tokens[1], u32);
+            return_failure_if(!success);
+        case 1;
+            return_failure_if(tokens.count != 2);
+
+            return_failure_if(tokens[0] != "joints");
+            joint_count=, success := parse_int(*tokens[1], u32);
+            return_failure_if(!success);
+        case 2;
+            return_failure_if(tokens.count != 2);
+            return_failure_if(tokens[0] != "vertices");
+            vertex_count=, success := parse_int(*tokens[1], u32);
+            return_failure_if(!success);
+        case 3;
+            return_failure_if(tokens.count != 2);
+            return_failure_if(tokens[0] != "triangles");
+            triangle_count=, success := parse_int(*tokens[1], u32);
+            return_failure_if(!success);
+        case 4;
+            align_4_remainder := 4 - (data_position & 0x3);
+            number_string := string.{line.count-align_4_remainder, line.data + align_4_remainder};
+            // should be left with a 4 byte number - the offset to joint transforms
+            return_failure_if(number_string.count != 4);
+            // joint transforms begin after the names, at a point in the file marked here
+            // will be useful to use multithreading to read lots of these files in quickly
+            joint_transforms_begin = (number_string[3].(u32) << 24) | (number_string[2].(u32) << 16) | (number_string[1].(u32) << 8) | (number_string[0].(u32));
+            // joint names begin immediately after the header. 4 byte alignment, 4 bytes space (always there). 1 byte newline.
+            joint_names_begin = data_position + align_4_remainder + 4 + 1;
+            // the rest of the data positions can be inferred from here
+            JOINT_TRANSFORM_SIZE :: size_of(Matrix4);
+            JOINT_PARENT_SIZE    :: size_of(s16);
+            POSITION_SIZE        :: size_of(Vector3);
+            NORMAL_SIZE          :: size_of(Vector3);
+            WEIGHTS_SIZE         :: size_of(Vector3);
+            JOINT_IDS_SIZE       :: size_of(s16) * 4;
+            VERTEX_SIZE          :: POSITION_SIZE + NORMAL_SIZE + WEIGHTS_SIZE + JOINT_IDS_SIZE;
+            TRIANGLE_SIZE        :: size_of(u32) * 3;
+
+            joint_transforms_size := JOINT_TRANSFORM_SIZE * joint_count;
+            joint_parents_begin = joint_transforms_begin + joint_transforms_size;
+
+            joint_parents_size := JOINT_PARENT_SIZE * joint_count;
+            joint_parents_end := joint_parents_begin + joint_parents_size;
+            align_4_remainder = 4 - (joint_parents_end & 0x3);
+            vertices_begin = joint_parents_end + align_4_remainder;
+
+            vertices_size := VERTEX_SIZE * vertex_count;
+            triangles_begin = vertices_begin + vertices_size; 
+
+            triangles_size := TRIANGLE_SIZE * triangle_count;
+            eof_location := triangles_begin + triangles_size;
+
+            file_size := record.memory.count;
+            read_success = eof_location == file_size;
+
+            // done reading the header
+            return false;
+        }
+
+        data_position += xx (line.count + 1); // +1 for newline that was omitted
+        return true;
+    }
+
+    parse_joint_name :: (line: *string, line_index: s64, joint_names_voidptr: *void) -> bool {
+        assert(line.count < 128, "probably incorrectly parsed (length = %) joint name line: %", line.count, line.*);
+        joint_names := joint_names_voidptr.(*[]string);
+        joint_names.*[line_index] = copy_string(line.*);
+        if line_index == joint_names.count-1 {
+            // done reading names
+            return false;
+        }
+        return true;
+    }
+
+    // ---
+
+    scope_timer();
+
+    record: Serializer(.STATIC);
+    set_rw_mode(*record, .READ);
+    record.memory = read_entire_file(asset_path);
+
+    // $todo: mannequin.mgosm seems to take ~66% of its time just reading the file in, but 33% of 1ms isn't nothing, and it should
+    // be easy to roughly calculate how much of the rest of the time is taken up by allocations, and how much faster that
+    // might be if using a flat allocator.
+    scope_timer("after reading file");
+
+    assert(record.memory.count <= GOM_FILE_SIZE_MAX);
+    record.read_array_allocator = load_allocator;
+
+    header_info := HeaderInfo.{record=*record};
+    {
+        scope_set_allocator(temp);
+        auto_release_temp();
+        process_per_line(record.memory, parse_header_line, *header_info);
+    }
+
+    if !header_info.read_success {
+        return false;
+    }
+
+    scope_set_allocator(load_allocator);
+
+    // note: this file format was made so that after reading the header, multiple threads could immediately begin to work across different parts of the file. but, i'm just going to read it in serially for now because it's easier. 
+
+    if header_info.format_version == {
+    case 1;
+        if header_info.joint_count > 0 {
+            // joint names
+            record.head = xx header_info.joint_names_begin;
+            package.skeleton.joint_names = alloc_array(string, header_info.joint_count, load_allocator);
+            file_data_beginning_at_joint_names := string.{record.memory.count - record.head, record.memory.data + record.head};
+            process_per_line(file_data_beginning_at_joint_names, parse_joint_name, *package.skeleton.joint_names);
+            // joint transforms
+            record.head = xx header_info.joint_transforms_begin;
+            serialize(*record, *package.skeleton.joint_transforms, header_info.joint_count.(s32));
+            // joint parents
+            record.head = xx header_info.joint_parents_begin;
+            serialize(*record, *package.skeleton.joint_parents, header_info.joint_count.(s32));
+        }
+        // vertices
+        record.head = xx header_info.vertices_begin;
+        serialize(*record, *package.vertices, header_info.vertex_count.(s32));
+        // triangles
+        package.indices.type = .U32;
+        record.head = xx header_info.triangles_begin;
+        serialize(*record, *package.indices._u32, (header_info.triangle_count * 3).(s32));
+    case;
+        assert(false, "invalid mgosm format version %", header_info.format_version);
+    }
+
+    return true;
+}
+
+save :: #bake_arguments save_or_load_gom_file(rw_mode=.WRITE);
+load :: #bake_arguments save_or_load_gom_file(rw_mode=.READ);
+save_or_load_gom_file :: (asset_path: string, package: *Gom_Package, rw_mode: Rw_Mode, load_allocator := context.allocator) {
+    __mark := get_temporary_storage_mark();
+    defer if rw_mode == .WRITE then set_temporary_storage_mark(__mark);
+
+    begin_time := seconds_since_init();
+
+    record: Serializer(.STATIC);
+    set_rw_mode(*record, rw_mode);
+
+    if rw_mode == .READ {
+        record.memory = read_entire_file(asset_path);
+        assert(record.memory.count <= GOM_FILE_SIZE_MAX);
+        record.read_array_allocator = load_allocator;
+    } else {
+        mesh_vertex_size := size_of(Vector3);
+        size := mesh_vertex_size * package.vertices.count;
+        if package.indices.type == .U16 {
+            size += size_of(u16) * package.indices._u16.count;
+        } else { // U32
+            size += size_of(u32) * package.indices._u32.count;
+        }
+        size += size_of(s64) * 3; // accounting for array counts and the index type
+        size += record.head; // serializer should have made space for a checksum
+        assert(size <= GOM_FILE_SIZE_MAX);
+        record.memory = .{size, alloc(size,,temp)};
+    }
+
+    serialize(*record, (*package.type).(*u8), size_of(Gom_Package_Type));
+
+    if package.type == .SKINNED_MESH {
+        serialize(*record, *package.vertices);
+    } else if package.type == .MESH {
+        serialize(*record, *package.vertices.count);
+        if package.vertices.count > 0 {
+            align_head_up_for_type(*record, float);
+            vector_record := (record.memory.data + record.head).(*Vector3);
+            if rw_mode == .READ {
+                package.vertices = alloc_array(Mesh_Vertex, package.vertices.count, load_allocator);
+                for 0..package.vertices.count-1 {
+                    package.vertices[it].position = (vector_record + it).*;
+                }
+            } else for 0..package.vertices.count-1 {
+                (vector_record + it).* = package.vertices[it].position;
+            }
+            record.head += xx (12 * package.vertices.count);
+        }
+    } else {
+        assert(false, "encountered invalid mesh type % during %", package.type, rw_mode);
+    }
+
+    serialize(*record, (*package.indices.type).(*u8), size_of(Mesh_Index_Type));
+    if package.indices.type == .U16 {
+        serialize(*record, *package.indices._u16);
+    } else {
+        serialize(*record, *package.indices._u32);
+    }
+
+    if package.type == .SKINNED_MESH {
+        //
+        // serialize(*record, package.skeleton.skeleton_asset_ref.name_hash);
+        if rw_mode == .READ {
+            // load skeleton asset
+        }
+    }
+
+    if rw_mode == .WRITE {
+        write_entire_file(asset_path, *record);
+    }
+
+    end_time := seconds_since_init();
+    time_spent_loading := end_time - begin_time;
+    operative_word := ifx rw_mode == .READ then "loaded" else "saved";
+    rm_log("% mgo at %, file size: % KB. vertex count: %, tri count: %. time taken: % ms", operative_word, asset_path, record.memory.count / 1024, package.vertices.count, package.indices._u16.count / 3, time_spent_loading * 1000.0);
+}
+
 // OBJ doesn't guarantee or communicate a winding order. just have to know.
 load_obj_file :: (asset_path: string, flip_winding: bool, reorientation := QUATERNION_IDENTITY, norm_translation_offsets := Vector3.{}, allocator := context.allocator) -> []Mesh_Vertex, Index_Buffer {
     // ---

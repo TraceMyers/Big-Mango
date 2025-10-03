@@ -989,7 +989,15 @@ create_buffers :: () {
 }
 
 create_primitives :: () {
-    
+    mesh_package := Gom_Package.{type=.SKINNED_MESH};
+    dummy_skeleton: Skeleton;
+    mesh_package.skeleton = *dummy_skeleton;
+    path := "../assets/meshes/Mannequin.mgosm";
+    load_skinned_mesh(path, *mesh_package);   
+
+    hash := fnv1a_hash(path.data, xx path.count);
+    _devonly_skeletal_mesh_body = create_mesh("devonly skeletal mesh body", hash, mesh_package.vertices, mesh_package.indices._u32);
+    log("skeletal mesh body: %", _devonly_skeletal_mesh_body.*);
 }
 
 create_rect_pipeline :: () {
@@ -1330,7 +1338,7 @@ create_transparency_pipeline :: () {
 create_graphics_pipeline :: () {
     auto_release_temp();
 
-    test_frag := ifx UNLIT then load_shader("unlit_color_mesh_frag") else load_shader("color_mesh_frag");
+    test_frag := ifx UNLIT then load_shader("unlit_color_mesh_frag") else load_shader("normal_color_mesh_frag");
     test_vert := load_shader("color_mesh_vert");
 
     shader_stages := VkPipelineShaderStageCreateInfo.[
@@ -2051,7 +2059,7 @@ update_draw_image_descriptor_set :: () {
 // runtime
 
 load_shader :: (filename: string, add_to_deletion_queue := true) -> VkShaderModule {
-    hash := native_XXH64(filename.data, xx filename.count, 0);
+    hash := fnv1a_hash(filename.data, xx filename.count);
     for shader_hash_table {
         if it.hash == hash {
             return it.shader;
@@ -2113,7 +2121,7 @@ get_or_create_capsule_mesh :: (height: float, radius: float, triangulize_distanc
         }
     }
     name := generate_capsule_mesh_name(height, radius, triangulize_distance);
-    hash := native_XXH64(name.data, xx name.count, 0xDEADBEEF);
+    hash := fnv1a_hash(name.data, xx name.count);
     return create_capsule_mesh(name, hash, height, radius, triangulize_distance);
 }
 
@@ -2145,7 +2153,7 @@ create_capsule_mesh :: (name: string, hash: u64, height: float, radius: float, t
     return mesh;
 }
 
-create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []u16, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
+create_mesh :: (name: string, hash: u64, vertices: []Mesh_Vertex, indices: []$T, primitive_type: Collision_Shape_Type = .NONE) -> *Mesh {
     for meshes {
         if it.asset_ref != null {
             assert(it.asset_ref.name_hash != hash);
@@ -3653,7 +3661,6 @@ Deletion_Queue_Item :: struct {
         proc_1arg: (*void) = ---;
         proc_2arg: (*void, *void) = ---;
     }
-// #place proc_1arg;
 };
 
 
@@ -3709,6 +3716,12 @@ Mesh_Asset :: struct {
     loader: Mesh_Loader;
 }
 
+Skinned_Mesh_Asset :: struct {
+    using #as skinned_mesh: Skinned_Mesh;
+    asset_ref: *Asset_Reference;
+    loader: Mesh_Loader;
+}
+
 Lights :: struct {
     using #as rb: Render_Buffer;
     using data: struct {
@@ -3732,7 +3745,6 @@ Sphere_Poly_Count :: enum u8 {
     MEDIUM;
     HIGH;
 }
-
 
 Sphere_Draw_Data :: struct {
     position: Vector3;
@@ -3882,12 +3894,13 @@ vk_format :: (info: *Type_Info_Struct_Member, depth := 0) -> VkFormat {
         case .INTEGER;
             // $todo: rest of this
             int_element_type := array_type_info.element_type.(*Type_Info_Integer);
+            assert(int_element_type.runtime_size == 2 && int_element_type.signed);
             if array_type_info.array_count == {
-            case 1;
             case 2;
+                return .R16G16_SINT;
             case 3;
+                return .R16G16B16_SINT;
             case 4;
-                assert(int_element_type.runtime_size == 2 && int_element_type.signed);
                 return .R16G16B16A16_SINT;
             }
         case .FLOAT;
@@ -4156,8 +4169,11 @@ test_color_1 := Vector4.{0.35, 0.05, 0.12, 1.0};
 test_color_2 := Vector4.{0.89, 0.85, 0.93, 1.0};
 
 meshes: [..]Mesh_Asset;
+skeletons: [..]Skeleton_Asset;
 
 sphere_draws: [..]Sphere_Draw_Data;
+
+_devonly_skeletal_mesh_body: *Mesh;
 
 cube_vertices := Mesh_Vertex.[
     .{.{-0.5,  -0.5,  -0.5}, /*.{0,0},*/ .{0,0,-1}, .{}, .[-1,-1,-1,-1]}, // ul 0
@@ -4391,8 +4407,8 @@ create_mesh_loader_asset :: (mesh: *Mesh, filename := "") -> ref_hash: u64 {
         assert(file_asset_ref != null);
         if use_filename == "" {
             asset_filename := path_strip_extension(path_filename(file_asset_ref.path));
-            reorient_hash := native_XXH64(*reorient, xx size_of(Quaternion), 0xdeadbeef);
-            translation_hash := native_XXH64(*norm_translation_offsets, xx size_of(Vector3), 0xdeadbeef);
+            reorient_hash := fnv1a_hash(*reorient, xx size_of(Quaternion));
+            translation_hash := fnv1a_hash(*norm_translation_offsets, xx size_of(Vector3));
             use_filename = tprint("%_%_%_%", asset_filename, reorient_hash, translation_hash, flip_winding.(u8));
         }
         generate_mesh_loader_file(use_filename, *mesh_asset.loader, "../assets/mesh_loaders");

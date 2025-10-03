@@ -1,12 +1,12 @@
-// $todo: debug the occasional scope timer crash on program exit
-
-// 3.3 x 10^-3  = 0.003 (ms)
-// 3.3 x 10^-6  = 0.000003 (us)
-// 3.3 x 10^-9  = 0.000000003 (ns)
-// 3.3 x 10^-10 = 0.0000000003 (1/10 ns)
-// -> 3ghz ~= 1 cycle per 1/10 nanosecond
+// 3.3 x 10^-3  = 0.0033 (ms)
+// 3.3 x 10^-6  = 0.0000033 (us)
+// 3.3 x 10^-9  = 0.0000000033 (ns)
+// 3.3 x 10^-10 = 0.00000000033 (1/10 ns)
+// -> 3.3ghz ~= 1 cycle per 1/3 nanosecond or 3 cycles per nanosecond
 
 // .41 us = 410 ns ~= 4100 cycles
+
+// todo: nesting allocator is a good allocator, but a bad interface. think about how to make it an Allocator type
 
 main :: () {
     rm_log("starting...", header="STARTUP");
@@ -25,11 +25,7 @@ main :: () {
 
     pre_boot();
 
-    start_profiling_before_first_frame();
-
-    // raddebugger_attached := raddbg_is_attached();
-    // log("attached: %", raddebugger_attached);
-    // add_breakpoint();
+    // start_profiling_before_first_frame();
 
     startup_success := true;
     scope_system_init(_context,             *startup_success);
@@ -145,6 +141,13 @@ end_program_frame :: () {
         quit = true;
     }
 
+    if queued_world_save != -1 {
+        if world_contexts[queued_world_save].world != null {
+            save(world_contexts[queued_world_save].world);
+        }
+        queued_world_save = -1;
+    }
+
     if queued_world_load != "" {
         if world_contexts[context_index].world != null {
             load(world_contexts[context_index].world, queued_world_load);
@@ -157,8 +160,8 @@ end_program_frame :: () {
         scope_timer("make scope timer allocations");
         scope_timer_stack_diffs_this_frame := scope_timer_stack_diffs.count - previous_scope_timer_stack_diffs_count;
         scope_timer_stack_diffs_remaining := scope_timer_stack_diffs.allocated - scope_timer_stack_diffs.count;
-        estimated_frames_before_allocation := scope_timer_stack_diffs_this_frame.(float64) / scope_timer_stack_diffs_remaining.(float64);
         if scope_timer_stack_diffs_this_frame > 0 {
+            estimated_frames_before_allocation := scope_timer_stack_diffs_remaining.(float64) / scope_timer_stack_diffs_this_frame.(float64);
             if estimated_frames_before_allocation <= 10 {
                 array_reserve(*scope_timer_stack_diffs, 2 * scope_timer_stack_diffs.allocated);
             }
@@ -203,6 +206,7 @@ start_profiling_before_first_frame :: () {
     start_profiling = true;
     respond_to_scope_timer_commands();
 }
+
 
 scope_timer :: ($name := "", is_program_frame_timer := false) #expand {
     #if BUILDVAR_PROFILERS_ACTIVE {
@@ -344,9 +348,9 @@ HERE,
 }
 
 add_breakpoint :: () {
-    a := 0;
-    raddbg_add_breakpoint(*a, size_of(type_of(a)), 0, 1, 0);
-    a += 1;
+    // a := 0;
+    // raddbg_add_breakpoint(*a, size_of(type_of(a)), 0, 1, 0);
+    // a += 1;
 }
 
 Boot_Stage :: enum {
@@ -410,8 +414,11 @@ switch_break :: (val := -1) {
 #import "Sort";
 #import "File_Utilities";
 #import "jai-raddebugger";
+#import "Hash";
+#import "Atomics";
 ImGui :: #import "ImGui_VulkanWin32";
 Input :: #import "Input";
+#import "Check";
 
 #if OS == .WINDOWS {
     Win32 :: #import "Windows";

@@ -117,6 +117,14 @@ _scratch :: (stage: Boot_Stage) -> bool {
         elephant.collision_channels = 0;
         elephant.center.z += 50.0;
     }
+    // test thing
+    {
+        // mannequin := spawn_entity("mannequin", .[]);
+        // mannequin_mesh := _devonly_skeletal_mesh_body;
+        // set_meshes(mannequin, .[.{data=mannequin_mesh}]);
+        // mannequin.collision_channels = 0;
+        // mannequin.center.z += 20;
+    }
     // ai guy
     {
         // context.ai_guy = spawn_human("derek");

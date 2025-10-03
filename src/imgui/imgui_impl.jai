@@ -260,6 +260,7 @@ draw_dev_ui :: () {
     ImplVulkan_NewFrame();
     ImplWin32_NewFrame();
     NewFrame();
+    defer Render();
 
     {
         scope_set_allocator(temp);
@@ -273,13 +274,13 @@ draw_dev_ui :: () {
         app_window_dims := get_window_dimensions();
         fixed_window_size := Vector2.{600, xx app_window_dims.y};
         add_perf_graph(menu_bar_height, fixed_window_size.x);
-        player := get_entity(context.world.player_entity_ref);
+        player := try_get_entity(*context.world.player_entity_ref);
+        if !player then return;
         left_sidebar_width := add_left_sidebar(menu_bar_height);
         right_sidebar_width := add_right_sidebar(menu_bar_height);
         command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
     }
 
-    Render();
 }
 
 imgui_process_event :: (event: Input.Event) {

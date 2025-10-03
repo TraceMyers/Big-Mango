@@ -1,12 +1,12 @@
 
 // build vars
-PROFILERS_ACTIVE :: false;
+PROFILERS_ACTIVE :: true;
 COLLISION_DEBUG :: false;
 GRAPHICS_DEBUG :: true;
 GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 
 // code gen
-COMPILE_SHADERS :: true;
+COMPILE_SHADERS :: false;
 REGENERATE_ASSET_REFERENCES :: false;
 GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
@@ -128,13 +128,14 @@ HERE,
     scope_timer_id_counter = 0;
     add_build_file("src/prebuild/scope_timer.jai", w);
     // add the definition of get_scope_timer_id() to compilation. its id counter is declared in this file, so it is only usable during compilation.
-    add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);
+    // add_build_string(tprint(GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING, *scope_timer_id_counter), w);
 
     add_build_file("src/game.jai", w);
 
     procs_to_capture_as_structs: [..]*Code_Procedure_Header;
     gen_float_command_line_var_procs: [..]string;
     gen_bool_command_line_var_procs: [..]string;
+    gen_int_command_line_var_procs: [..]string;
     command_line_proc_names: [..]string;
     generated_code: bool;
 
@@ -152,6 +153,7 @@ HERE,
             m_typechecked := cast(*Message_Typechecked)m;
             for m_typechecked.declarations {
                 if it.expression.kind != .DECLARATION then continue;
+                // $todo: consolidate command line var stuff
                 if it.expression.type.type == .FLOAT {
                     for note : it.expression.notes {
                         if note.text == "command_line" {
@@ -170,6 +172,15 @@ HERE,
                             toggle_command_line_proc_name := tprint("vtoggle_%", it.expression.name);
                             array_add(*command_line_proc_names, set_command_line_proc_name);
                             array_add(*command_line_proc_names, toggle_command_line_proc_name);
+                        }
+                    }
+                } else if it.expression.type.type == .INTEGER {
+                    for note : it.expression.notes {
+                        if note.text == "command_line" {
+                            log("found command line var: %", it.expression.name);
+                            array_add(*gen_int_command_line_var_procs, it.expression.name);
+                            set_command_line_proc_name := tprint("vset_%", it.expression.name);
+                            array_add(*command_line_proc_names, set_command_line_proc_name);
                         }
                     }
                 } else if it.expression.type.type == .PROCEDURE {
@@ -201,7 +212,7 @@ HERE,
                     create_assets_file();
                 }
                 generate_captured_procedures(procs_to_capture_as_structs, w);
-                generate_command_line_code(gen_float_command_line_var_procs, gen_bool_command_line_var_procs, command_line_proc_names, w);
+                generate_command_line_code(gen_float_command_line_var_procs, gen_bool_command_line_var_procs, gen_int_command_line_var_procs, command_line_proc_names, w);
                 log("\nend code generation\n");
                 generated_code = true;
             }
@@ -278,7 +289,7 @@ process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64
     return line_count;
 }
 
-generate_command_line_code :: (gen_float_command_line_var_procs: [..]string, gen_bool_command_line_var_procs: [..]string, command_line_proc_names: [..]string, w: Workspace) {
+generate_command_line_code :: (gen_float_command_line_var_procs: [..]string, gen_bool_command_line_var_procs: [..]string, gen_int_command_line_var_procs: [..]string, command_line_proc_names: [..]string, w: Workspace) {
     if gen_float_command_line_var_procs.count == 0 && gen_bool_command_line_var_procs.count == 0 {
         return;
     }
@@ -295,6 +306,22 @@ vset_% :: (args: []Command_Line_Argument) {
         % = xx x;
     } else {
         rm_error("failed parsing input as float: %%", args[0]._string);
+    }
+}
+HERE,
+            varname, varname
+        );
+    }
+    for varname : gen_int_command_line_var_procs {
+        print_to_builder(*builder, 
+#string HERE
+vset_% :: (args: []Command_Line_Argument) {
+    init_command_line_proc_or_return(args, 1);
+    x, success := try_parse_command_line_arg(*args[0], s64);
+    if success {
+        % = xx x;
+    } else {
+        rm_error("failed parsing input as int: %%", args[0]._string);
     }
 }
 HERE,
@@ -513,7 +540,6 @@ recursively_gather_declarations_from_block :: (block: *Code_Block, builder: *Str
 scope_timer_id_counter: u32;
 
 GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING :: #string HERE
-#import "Atomics";
 get_scope_timer_id :: () -> u32 {
     comptime_id_counter : *u32 = xx %;
     out_id := atomic_add(comptime_id_counter, 1);

@@ -183,6 +183,7 @@ string_data_overlaps :: inline (s1: string, s2: string) -> bool {
     return ordered_ranges_overlap(s1_min_address, s1_max_address, s2_min_address, s2_max_address);
 }
 
+// per_line_proc is called for every line in the string. if per_line_proc returns false, the loop exits
 process_per_line :: (str: string, per_line_proc: (line: *string, line_index: s64, in_data: *void) -> bool, in_data: *void) -> line_count: s64 {
     line_count: s64;
     left, right: string;
