@@ -38,9 +38,9 @@ Entity :: struct {
     holding_entity: Entity_Ref;
     attached_camera: Entity_Ref;
 
-    name: Nested_Array(string, NAME_ALLOCATOR_MIN_BLOCK_SIZE);
-    meshes: Nested_Array(Mesh_Instance, MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
-    linear_impulses: Nested_Array(Linear_Physics_Impulse, LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
+    name: string;
+    meshes: [..]Mesh_Instance;
+    linear_impulses: [..]Linear_Physics_Impulse;
 
     frame_counter: s32;
 }
@@ -158,79 +158,80 @@ try_get_entity :: inline (ref: *Entity_Ref) -> *Entity {
 
 set_name :: inline (e: *Entity, name: string) {
     using context.world;
-    array_set(*e.name, *name_allocator, name);
+    scope_set_allocator(name_allocator);
+    e.name = copy_string(name);
 }
 
 set_meshes :: inline (e: *Entity, meshes: []Mesh_Instance) {
     using context.world;
-    array_set(*e.meshes, *meshes_allocator, meshes);
+    array_copy(*e.meshes, meshes);
 }
 
 add_linear_impulse :: inline (e: *Entity, impulse: Linear_Physics_Impulse) {
     using context.world;
-    array_add(*e.linear_impulses, *linear_impulses_allocator, impulse);
+    array_add(*e.linear_impulses, impulse);
 }
 
 remove_linear_impulse_at :: inline (e: *Entity, i: s64) {
     using context.world;
-    array_unordered_remove_by_index(*e.linear_impulses, *linear_impulses_allocator, xx i);
+    array_unordered_remove_by_index(*e.linear_impulses, xx i);
 }
 
 add_event_volume_overlap :: (e: *Entity, overlap: Entity_Ref) {
     using context.world;
     assert(e.ref != overlap);
     assert(is_set(*e.flags, .USES_EVENT_VOLUME));
-    array_add(*e.event_volume.overlaps, *event_overlap_allocator, .{overlap, collision_frame, collision_frame});
+    array_add(*e.event_volume.overlaps, .{overlap, collision_frame, collision_frame});
 }
 
 remove_event_volume_overlap_at :: inline (e: *Entity, i: s64) {
     using context.world;
     assert(is_set(*e.flags, .USES_EVENT_VOLUME));
-    array_unordered_remove_by_index(*e.event_volume.overlaps, *event_overlap_allocator, xx i);
+    array_unordered_remove_by_index(*e.event_volume.overlaps, xx i);
 }
 
 add_gadget_interaction :: (e: *Entity, interaction: Gadget_Interaction) {
     using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
-    if e.gadget_interactions.field.count >= max_interactions(e.gadget_type) {
+    if e.gadget_interactions.count >= max_interactions(e.gadget_type) {
         return;
     }
-    array_add(*e.gadget_interactions, *gadget_interaction_allocator, interaction);
+    array_add(*e.gadget_interactions, interaction);
 }
 
 remove_gadget_interaction_at :: inline (e: *Entity, i: s64) {
     using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
-    array_ordered_remove_by_index(*e.gadget_interactions, *gadget_interaction_allocator, xx i);
+    array_ordered_remove_by_index(*e.gadget_interactions, xx i);
 }
 
 remove_all_gadget_interactions :: (e: *Entity) {
     using context.world;
-    if e.gadget_interactions.allocation.count > 0 {
-        array_resize(*e.gadget_interactions, *gadget_interaction_allocator, 0);
+    if e.gadget_interactions.allocated > 0 {
+        array_reset(*e.gadget_interactions);
     }
 }
 
 remove_all_linear_impulses :: inline (e: *Entity) {
     using context.world;
-    if e.linear_impulses.allocation.count > 0 {
-        array_resize(*e.linear_impulses, *linear_impulses_allocator, 0);
+    if e.linear_impulses.allocated > 0 {
+        array_reset(*e.linear_impulses);
     }
 }
 
 add_gadget_child :: (e: *Entity, child: Gadget_Child) {
     using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
-    if e.gadget_children.field.count >= MAX_GADGET_CHILDREN_COUNT {
+    if e.gadget_children.count >= MAX_GADGET_CHILDREN_COUNT {
         return;
     } 
-    array_add(*e.gadget_children, *gadget_children_allocator, child);
+    array_add(*e.gadget_children, child);
 }
 
 remove_gadget_child_at :: (e: *Entity, i: s64) {
     using context.world;
     assert(is_set(*e.flags, .USES_GADGET));
-    array_unordered_remove_by_index(*e.gadget_children, *gadget_children_allocator, xx i);
+    array_unordered_remove_by_index(*e.gadget_children, xx i);
 }
 
 set_orientation :: (e: *Entity, new_orientation: Quaternion) {
@@ -370,7 +371,7 @@ Gadget_Type :: enum {
 }
 
 is_gadget_active :: inline (gadget: *Entity) -> bool {
-    return are_any_set(*gadget.flags, .[.GADGET_EVENT_VOLUME_IS_OVERLAPPED, .GADGET_WORKING, .GADGET_ALWAYS_ACTIVE]) || gadget.gadget_interactions.field.count > 0;
+    return are_any_set(*gadget.flags, .[.GADGET_EVENT_VOLUME_IS_OVERLAPPED, .GADGET_WORKING, .GADGET_ALWAYS_ACTIVE]) || gadget.gadget_interactions.count > 0;
 }
 
 gadget_can_take_interaction :: (using e: *Entity, interactionist: *Entity, is_parent_to_child_interaction := false) -> bool {
@@ -383,13 +384,13 @@ gadget_can_take_interaction :: (using e: *Entity, interactionist: *Entity, is_pa
     if !is_gadget_active(e) {
         return false;
     }
-    if gadget_interactions.field.count >= max_interactions(gadget_type) {
+    if gadget_interactions.count >= max_interactions(gadget_type) {
         return false;
     }
 
     interaction_volume := get_entity(*gadget_interaction_volume);
     assert(is_set(*interaction_volume.flags, .USES_EVENT_VOLUME));
-    for interaction_volume.event_volume.overlaps.field {
+    for interaction_volume.event_volume.overlaps {
         if it.entity == interactionist.ref {
             return true;
         }
@@ -464,8 +465,8 @@ Gadget :: struct {
         button: Button;
     }
     gadget_interaction_volume: Entity_Ref;
-    gadget_interactions: Nested_Array(Gadget_Interaction, GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
-    gadget_children: Nested_Array(Gadget_Child, GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);    
+    gadget_interactions: [..]Gadget_Interaction;
+    gadget_children: [..]Gadget_Child;
     delay_interacting_with_gadgets: Gadget_Interaction_Delay;
 }
 
@@ -512,7 +513,7 @@ Event_Volume :: struct {
     on_end_overlap: Proc_Handle;
     attached_to: Entity_Ref;
     offset_from_attachment: Vector3;
-    overlaps: Nested_Array(Event_Overlap, EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
+    overlaps: [..]Event_Overlap;
 }
 
 set_event_volume_center :: inline (volume: *Entity, relative_to: *Entity, offset: Vector3) {
@@ -539,16 +540,16 @@ update_event_volumes :: () {
         }
         // attached to an entity, so move with it.
         set_event_volume_center(e, attached_to_entity, offset_from_attachment);
-        if overlaps.field.count == 0 {
+        if overlaps.count == 0 {
             continue;
         }
 
         any_overlaps_can_interact: bool;
 
-        i := overlaps.field.count-1;
-        prev_count := overlaps.field.count;
+        i := overlaps.count-1;
+        prev_count := overlaps.count;
         while i >= 0 {
-            overlap := *overlaps.field[i];
+            overlap := *overlaps[i];
             if overlap.begin_overlap_frame == collision_frame {
                 if on_begin_overlap != 0 {
                     other_entity := try_get_entity(*overlap.entity);
@@ -556,7 +557,7 @@ update_event_volumes :: () {
                 }
             } else if overlap.last_seen_on_frame != collision_frame {
                 other_entity := try_get_entity(*overlap.entity);
-                prev_count = overlaps.field.count;
+                prev_count = overlaps.count;
                 remove_event_volume_overlap_at(e, i);
                 if on_end_overlap != 0 {
                     // may pass null in. that indicates that the entity left the volume on the same frame they were destroyed.
@@ -609,6 +610,6 @@ collect_entity_flags :: (e: *Entity) -> []Entity_Flags {
 // }
 
 mesh_at_index_is_asset :: (entity: *Entity, mesh_index: s64, asset_ref: Asset_Reference) -> bool {
-    mesh_asset := entity.meshes.field[mesh_index].data.(*Mesh_Asset);
+    mesh_asset := entity.meshes[mesh_index].data.(*Mesh_Asset);
     return mesh_asset.asset_ref.name_hash == asset_ref.name_hash;
 }

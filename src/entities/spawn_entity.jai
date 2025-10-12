@@ -34,6 +34,12 @@ spawn_entity :: (name: string, flags: []Entity_Flags, center := Vector3.{}, orie
         }
     };
 
+    entity.meshes.allocator = meshes_allocator;
+    entity.linear_impulses.allocator = linear_impulses_allocator;
+    entity.event_volume.overlaps.allocator = event_overlap_allocator;
+    entity.gadget_interactions.allocator = gadget_interaction_allocator;
+    entity.gadget_children.allocator = gadget_children_allocator;
+
     if flags.count > 0 {
         for flags {
             set(*entity.flags, it);
@@ -66,12 +72,12 @@ delete_entity :: (ref: Entity_Ref) {
     ref_layer_index := ref.index;
     return_item(*entity_ref_layer, ref_layer_index);
 
-    array_resize(*deleting_entity.name, *name_allocator, 0);
-    array_resize(*deleting_entity.meshes, *meshes_allocator, 0);
-    array_resize(*deleting_entity.linear_impulses, *linear_impulses_allocator, 0);
-    array_resize(*deleting_entity.event_volume.overlaps, *event_overlap_allocator, 0);
-    array_resize(*deleting_entity.gadget_interactions, *gadget_interaction_allocator, 0);
-    array_resize(*deleting_entity.gadget_children, *gadget_children_allocator, 0);
+    reset(*deleting_entity.name);
+    array_reset(*deleting_entity.meshes);
+    array_reset(*deleting_entity.linear_impulses);
+    array_reset(*deleting_entity.event_volume.overlaps);
+    array_reset(*deleting_entity.gadget_interactions);
+    array_reset(*deleting_entity.gadget_children);
 
     data_index := deleting_entity - entities.data;
     assert(data_index >= 0 && data_index < entities.count);
@@ -86,7 +92,7 @@ delete_entity :: (ref: Entity_Ref) {
 }
 
 duplicate_entity :: (e: *Entity) -> *Entity {
-    name_without_prefix := entity_name_strip_prefix(e.name.field);
+    name_without_prefix := entity_name_strip_prefix(e.name);
     duplicate_entity := spawn_entity(name_without_prefix, .[]);
     save_ref := duplicate_entity.ref;
     save_name := duplicate_entity.name;
@@ -101,13 +107,8 @@ duplicate_entity :: (e: *Entity) -> *Entity {
     duplicate_entity.attached_camera = .{};
     // then go back and fix the array datas
 
-    duplicate_entity.meshes = .{};
-    array_copy(*duplicate_entity.meshes, *e.meshes, *context.world.meshes_allocator);
-    duplicate_entity.linear_impulses = .{};
-    duplicate_entity.event_volume.overlaps = .{};
-    duplicate_entity.gadget_interactions = .{};
-    duplicate_entity.gadget_children = .{};
-    array_copy(*duplicate_entity.gadget_children, *e.gadget_children, *context.world.gadget_children_allocator);
+    array_copy(*duplicate_entity.meshes, e.meshes);
+    array_copy(*duplicate_entity.gadget_children, e.gadget_children);
 
     return duplicate_entity;
 }

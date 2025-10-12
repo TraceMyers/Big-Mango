@@ -107,7 +107,7 @@ Collision_Grid_Cell_Flags :: enum_flags u8 {
 Collision_Grid_Item :: Entity_Ref;
 
 Collision_Grid_Allocation :: union {
-    dynamic_array: Nested_Array(Collision_Grid_Item, COLLISION_GRID_ALLOCATOR_MIN_SIZE) = ---;
+    dynamic_array: [..]Collision_Grid_Item = ---;
     inline_allocation: struct {
         array: [5]Collision_Grid_Item;
         count: s32;

@@ -253,16 +253,19 @@ rm_log_callback :: (text: string) {
         }
 
         if string_count > 0 {
-            na_free(*rm_log_message_allocator, *allocation_ref);
+            scope_set_allocator(*rm_log_message_allocator);
+            free(data);
+            data = null;
         } else {
-            assert(allocation_ref.data == null);
+            assert(data == null);
         }
 
         string_count = xx text.count;
         if text.count > 0 {
+            scope_set_allocator(*rm_log_message_allocator);
             repeat_count = 1;
-            allocation_ref = na_alloc(*rm_log_message_allocator, string_count);
-            memcpy(allocation_ref.data, text.data, string_count);
+            data = alloc(string_count);
+            memcpy(data, text.data, string_count);
 
         }
         rm_log_message_top = increment_wrap(rm_log_message_top, 0, xx (rm_log_messages.count-1));
@@ -272,12 +275,12 @@ rm_log_callback :: (text: string) {
 RM_Log_Message :: struct {
     repeat_count: s32;
     string_count: s32;
-    allocation_ref: Nested_Allocation_Ref;
+    data: *u8;
 }
 
 get_rm_log_message :: inline (i: s64) -> string, s32 {
     using rm_log_messages[i];
-    return string.{string_count, allocation_ref.data}, repeat_count;
+    return string.{string_count, data}, repeat_count;
 }
 
 get_input_button_pressed_time :: (key_code: Input.Key_Code) -> float {
@@ -286,7 +289,7 @@ get_input_button_pressed_time :: (key_code: Input.Key_Code) -> float {
 
 rm_log_messages: []RM_Log_Message;
 rm_log_message_top: s32;
-rm_log_message_allocator: Nesting_Allocator;
+rm_log_message_allocator: Super_Allocator;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // command line procs

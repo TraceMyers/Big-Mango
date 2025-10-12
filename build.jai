@@ -1,3 +1,4 @@
+// $todo: @nocheckin + script for doing git stuff (so nocheckin can block commits)
 
 // build vars
 PROFILERS_ACTIVE :: true;

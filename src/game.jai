@@ -6,11 +6,12 @@
 
 // .41 us = 410 ns ~= 4100 cycles
 
-// todo: nesting allocator is a good allocator, but a bad interface. think about how to make it an Allocator type
+// todo: collision grid square zero_if_inline no work
+// todo: if you set an allocator within a scope, and use a string builder, setting the string builder's allocator explicitly, it looks like it still uses the context allocator....?
 
 main :: () {
-    rm_log("starting...", header="STARTUP");
-    defer rm_log("good exit", header="SHUTDOWN");
+    log("starting...");
+    defer log("good exit");
     set_working_directory(path_strip_filename(get_path_of_running_executable()));
 
     #if BUILDVAR_PROFILERS_ACTIVE {
@@ -24,8 +25,6 @@ main :: () {
     }
 
     pre_boot();
-
-    // start_profiling_before_first_frame();
 
     startup_success := true;
     scope_system_init(_context,             *startup_success);
@@ -89,7 +88,7 @@ pre_boot :: () {
     LOG_MESSAGE_COUNT :: 256;
     rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
     
-    initialize_nesting_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
+    initialize_super_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
 
     // the array of procedures corresponding to command line commands. set at runtime so that it doesn't need to be referred to at compile time (the constant array is generated at compile time). 
     command_line_procedures = COMMAND_LINE_PROCEDURES;
@@ -388,6 +387,8 @@ breakpoint_switch_9: bool;
 breakpoint_switch_8: bool;
 breakpoint_switch_7: bool;
 
+allocators: [..]Allocator;
+
 switch_break :: (val := -1) {
     if (val == -1 || val == 9) && breakpoint_switch_9 {
         debug_break();
@@ -456,6 +457,7 @@ Zlib :: #import "zlib";
 #load "file.jai";
 #load "assets.jai";
 #load "skeletal_animation.jai";
+#load "super_allocator_test.jai";
 
 kernel32 :: #system_library "kernel32";
 GetConsoleWindow :: () -> Win32.HWND #foreign kernel32;

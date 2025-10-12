@@ -15,12 +15,12 @@ Bump_Allocator_Heap :: struct {
 bump_allocator_initialize :: (using bump: *Bump_Allocator, in_parent_allocator := context.default_allocator, heaps_tracking_array_ct := 32, in_heap_size := BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE) {
     parent_allocator = in_parent_allocator;
     scope_set_allocator(parent_allocator);
-    assert(in_default_heap_size > 0);
-    in_default_heap_size = ceil_to_pow2_multiple(in_default_heap_size, 8);
+    assert(in_heap_size > 0);
+    in_heap_size = ceil_to_pow2_multiple(in_heap_size, 8);
     proc = bump_allocator_proc;
     data = bump;
     heap = .{};
-    heap.bytes = alloc_array(u8, in_default_heap_size, parent_allocator);
+    heap.bytes = alloc_array(u8, in_heap_size, parent_allocator);
 }
 
 bump_allocator_proc :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void {

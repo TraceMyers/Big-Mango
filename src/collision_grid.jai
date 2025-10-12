@@ -3,8 +3,6 @@ COLLISION_GRID_DIMENSIONS :: Int_Vector2.{600, 600};
 COLLISION_GRID_CELL_DIMENSIONS :: Vector2.{60, 60};
 COLLISION_GRID_ORIGIN :: #run Vector2.{0,0} - ((to_vector2(COLLISION_GRID_DIMENSIONS) * COLLISION_GRID_CELL_DIMENSIONS) / 2);
 
-// todo: figure out & test rectifying the cell allocations
-
 world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
     INV_COLLISION_GRID_CELL_DIMENSIONS :: #run (1 / COLLISION_GRID_CELL_DIMENSIONS);
     diff := world_pos - COLLISION_GRID_ORIGIN;
@@ -25,26 +23,28 @@ collision_grid_index_to_grid_position :: inline (i: s32) -> Int_Vector2 {
     return .{x_part, y_part};
 }
 
-rectify_collision_cell_allocation :: (grid_index: s32) {
+try_inline_collision_cell_allocation :: (grid_index: s32) {
     using context.world;
     alloc := *collision_grid[grid_index];
     if alloc.inline_allocation.zero_if_inline == 0 then return;
 
-    ref := *alloc.dynamic_array.allocation.ref;
-    collision_assert(basic_validity_check(ref.*));
+    dynamic_ptr := *alloc.dynamic_array.data;
+    collision_assert(dynamic_ptr != null);
 
-    dynamic_array := alloc.dynamic_array.field;
-    collision_assert(dynamic_array.count <= alloc.dynamic_array.allocation.count);
+    dynamic_array := alloc.dynamic_array;
+    collision_assert(dynamic_array.count <= alloc.dynamic_array.allocated);
 
     // if we could copy the data to the inline array and have room for n adds, then we should
     half_inline_count := alloc.inline_allocation.array.count >> 1;
 
     if dynamic_array.count <= half_inline_count {
-        alloc_ref_copy := alloc.dynamic_array.allocation.ref;
         memset(alloc, 0, size_of(Collision_Grid_Allocation));
         memcpy(alloc.inline_allocation.array.data, dynamic_array.data, dynamic_array.count);   
         alloc.inline_allocation.count = xx dynamic_array.count;
-        na_free(*collision_grid_allocator, *alloc_ref_copy);
+        {
+            scope_set_allocator(collision_grid_allocator);
+            array_reset(*dynamic_array);
+        }
         alloc.inline_allocation.zero_if_inline = 0;
     }
 }
@@ -59,8 +59,8 @@ get_collision_cell :: inline (grid_index: s32) -> []Entity_Ref {
         collision_assert(out_array.count <= alloc.inline_allocation.array.count);
         return out_array;
     } else {
-        collision_assert(basic_validity_check(alloc.dynamic_array.allocation.ref));
-        return alloc.dynamic_array.field;
+        collision_assert(alloc.dynamic_array.allocated > 0);
+        return alloc.dynamic_array;
     }
 }
 
@@ -80,9 +80,9 @@ remove_from_collision_cell :: (entity_ref: Entity_Ref, x: s64, y: s64, grid_inde
         collision_assert(count.* <= alloc.inline_allocation.array.count);
         remove_from_collision_cell_do_remove(alloc.inline_allocation.array, entity_ref, count);
     } else {
-        count := *alloc.dynamic_array.field.count;
-        collision_assert(basic_validity_check(alloc.dynamic_array.allocation.ref));
-        remove_from_collision_cell_do_remove(alloc.dynamic_array.field, entity_ref, *alloc.dynamic_array.field.count);
+        count := *alloc.dynamic_array.count;
+        collision_assert(alloc.dynamic_array.allocated > 0);
+        remove_from_collision_cell_do_remove(alloc.dynamic_array, entity_ref, *alloc.dynamic_array.count);
     }
 }
 
@@ -102,12 +102,13 @@ add_to_collision_cell :: (ref: Entity_Ref, x: s64, y: s64, grid_index: s32, swep
     if alloc.inline_allocation.zero_if_inline == 0 {
         count := *alloc.inline_allocation.count;
         if count.* == alloc.inline_allocation.array.count {
+            scope_set_allocator(collision_grid_allocator);
             // the inline allocation is too small to hold this add, so grab a heap alloc, copy into it, and make sure the new value is added to the end
             new_dynamic_array: type_of(alloc.dynamic_array);
-            array_resize(*new_dynamic_array, *collision_grid_allocator, ceil_to_pow2(alloc.inline_allocation.count*2));
-            new_dynamic_array.field.count = alloc.inline_allocation.count;
-            collision_assert(basic_validity_check(new_dynamic_array.allocation.ref));
-            memcpy(new_dynamic_array.field.data, alloc.inline_allocation.array.data, alloc.inline_allocation.count * size_of(Entity_Ref));
+            array_resize(*new_dynamic_array, ceil_to_pow2(alloc.inline_allocation.count*2));
+            new_dynamic_array.count = alloc.inline_allocation.count;
+            collision_assert(new_dynamic_array.allocated > 0);
+            memcpy(new_dynamic_array.data, alloc.inline_allocation.array.data, alloc.inline_allocation.count * size_of(Entity_Ref));
             alloc.dynamic_array = new_dynamic_array;
             alloc.inline_allocation.zero_if_inline = 0xff;
             add_to_heap_alloc = true;
@@ -119,8 +120,9 @@ add_to_collision_cell :: (ref: Entity_Ref, x: s64, y: s64, grid_index: s32, swep
     } else add_to_heap_alloc = true;
 
     if add_to_heap_alloc {
-        collision_assert(basic_validity_check(alloc.dynamic_array.allocation.ref));
-        array_add(*alloc.dynamic_array, *collision_grid_allocator, ref);
+        scope_set_allocator(collision_grid_allocator);
+        collision_assert(alloc.dynamic_array.allocated != 0);
+        array_add(*alloc.dynamic_array, ref);
     }
 }
 

@@ -17,9 +17,9 @@ program_runtime_reserve :: (array: *[..]$T, count: s64) {
     array.allocator = no_allocator;
 }
 
-program_runtime_initialize :: (allocator: *Nesting_Allocator($C), chunk_list_size: s64, all_data_size: s64) {
+program_runtime_initialize :: (allocator: *Super_Allocator($C), chunk_list_size: s64, all_data_size: s64) {
     chunk_list_count := div_ceil(all_data_size, chunk_list_size);
-    initialize_nesting_allocator(allocator, program_runtime_allocator, chunk_list_size, chunk_list_count);
+    initialize_super_allocator(allocator, program_runtime_allocator, chunk_list_size, chunk_list_count);
     allocator.parent_allocator = no_allocator;
 }
 
@@ -40,9 +40,9 @@ world_runtime_reserve :: (world: *World, array: *[..]$T, count: s64) {
     array.allocator = no_allocator;
 }
 
-world_runtime_initialize :: (world: *World, allocator: *Nesting_Allocator($C), chunk_list_size: s64, all_data_size: s64) {
+world_runtime_initialize :: (world: *World, allocator: *Super_Allocator($C), chunk_list_size: s64, all_data_size: s64) {
     chunk_list_count := div_ceil(all_data_size, chunk_list_size);
-    initialize_nesting_allocator(allocator, world.world_runtime_allocator, chunk_list_size, chunk_list_count);
+    initialize_super_allocator(allocator, world.world_runtime_allocator, chunk_list_size, chunk_list_count);
     allocator.parent_allocator = no_allocator;
 }
 

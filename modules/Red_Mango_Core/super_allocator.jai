@@ -1,35 +1,94 @@
-// This allocator can't be an Allocator type because it is meant to free data, but it doesn't have the proper context
-// to free without extra info... which you can't get with a 'free' proc.
+// ---------------------------------------------------------------------------------------------------------------------
+// Super Allocator
+// it's super
 
-// TODO: make it so initialize only allocates books once
-
-// NOTE: never use a variable named 'data' in a scope that is 'using' an allocator..
-
-VALIDATION_PATTERN : u8 : 0xa0;
-
-Nested_Allocation_Ref :: struct {
-    data: *void;
-    info: Nested_Allocation_Info;
+super_allocator_proc ::(mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void {
+    dummy_super_allocator := allocator_data.(*Super_Allocator);
+    if dummy_super_allocator.min_alloc_size == {
+    case 8;
+        super_allocator := allocator_data.(*Super_Allocator(8));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 16;
+        super_allocator := allocator_data.(*Super_Allocator(16));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 32;
+        super_allocator := allocator_data.(*Super_Allocator(32));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 64;
+        super_allocator := allocator_data.(*Super_Allocator(64));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 128;
+        super_allocator := allocator_data.(*Super_Allocator(128));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 256;
+        super_allocator := allocator_data.(*Super_Allocator(256));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 512;
+        super_allocator := allocator_data.(*Super_Allocator(512));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 1024;
+        super_allocator := allocator_data.(*Super_Allocator(1024));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 2048;
+        super_allocator := allocator_data.(*Super_Allocator(2048));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 4096;
+        super_allocator := allocator_data.(*Super_Allocator(4096));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 8192;
+        super_allocator := allocator_data.(*Super_Allocator(8192));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case 16384;
+        super_allocator := allocator_data.(*Super_Allocator(16384));
+        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+    case;
+        assert(false, "invalid super allocator min alloc size: %", dummy_super_allocator.min_alloc_size);
+    }
+    return null;
 }
 
-Nested_Allocation :: struct {
-    ref: Nested_Allocation_Ref;
-    count: s32;
+super_allocator_proc_impl :: inline (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, super_allocator: *Super_Allocator($MIN_ALLOC_SIZE)) -> *void {
+    if mode == {
+    case .ALLOCATE;
+        return super_alloc(super_allocator, size);
+    case .RESIZE;
+        if old_memory != null {
+            super_free(super_allocator, old_memory);
+        }
+        return super_alloc(super_allocator, size);
+    case .FREE;
+        super_free(super_allocator, old_memory);
+    case .STARTUP;
+    case .SHUTDOWN;
+    case .THREAD_START;
+    case .THREAD_STOP;
+    case .CREATE_HEAP;
+    case .DESTROY_HEAP;
+    case .IS_THIS_YOURS;
+    case .CAPS;
+    }
+    return null;
 }
 
-Nested_Dynamic_Allocation :: struct {
-    ref: Nested_Allocation_Ref;
-    count: s32;
-    allocated: s32;
+Super_Allocator :: struct ($MIN_ALLOCATION_SIZE := 16) {
+    using #as super_base: Allocator;
+    min_alloc_size := xx MIN_ALLOCATION_SIZE;
+    parent_allocator: Allocator;
+    chunk_lists: [..][]Super_Allocator_Outer_Chunk(MIN_ALLOCATION_SIZE);
+    books: Super_Allocator_Books;
+    books_allocated_size: s64;
+    default_outer_chunk_count_per_list: s32 = 32;
+    shrink_to_min_lists: s32 = 1;
+    default_reserve_size: s32;
+    old_list_count: s32;
+
+    CHUNKS_PER_HEAP :: 64;
+    CHUNK_SIZE :: size_of(Super_Allocator_Outer_Chunk(MIN_ALLOCATION_SIZE));
+    #run assert(is_power_of_two(MIN_ALLOCATION_SIZE));
+    #run assert(MIN_ALLOCATION_SIZE >= size_of(Super_Allocation_Header));
 }
 
-Nesting_Allocator_Collection :: struct {
-    small_allocator: Nesting_Allocator(16);
-    medium_allocator: Nesting_Allocator(1024);
-    large_allocator: Nesting_Allocator(1024*256);
-}
-
-Nested_Allocation_Info :: struct {
+Super_Allocation_Header :: struct {
     using metadata: union {
         bin: enum u8 {
             STANDALONE;
@@ -47,195 +106,21 @@ Nested_Allocation_Info :: struct {
     list: s16;
 }
 
-Nested_Array :: struct($T: Type, $NESTING_ALLOCATOR_BLOCK_SIZE: s64) {
-    FIELD_TYPE :: #run -> Type { if T == string then return string; else return []T; };
-    field: FIELD_TYPE;
-    allocation: Nested_Allocation;
-}
-
-array_copy :: (dest: *Nested_Array($T, $N), source: *Nested_Array(T, N), allocator: *Nesting_Allocator(N)) {
-    array_resize(dest, allocator, source.field.count.(s32));
-    if source.field.count > 0 {
-        memcpy(dest.field.data, source.field.data, source.field.count * size_of(T));
-    }
-}
-
-maybe_shrink :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B)) {
-    if array.field.count == 0 {
-        if array.allocation.count > 0 {
-            na_free(allocator, *array.allocation.ref);
-            array.allocation = .{};
-            array.field.data = null;
-        }
-        return;
-    }
-
-    assert(basic_validity_check(array.allocation.ref));
-    if array.allocation.count >= 8 && array.allocation.count >= (array.field.count << 2) {
-        new_allocated_count := (array.field.count << 1);
-        new_ref := na_alloc(allocator, new_allocated_count * size_of(T));
-        memcpy(new_ref.data, array.allocation.ref.data, array.field.count * size_of(T));
-        na_free(allocator, *array.allocation.ref);
-        array.allocation.ref = new_ref;
-        array.allocation.count = xx new_allocated_count;
-        array.field.data = new_ref.data;
-    }
-}
-
-array_unordered_remove_by_index :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), i: s32, allow_shrink := true) {
-    new_count := array.field.count - 1;
-    assert(new_count >= 0);
-
-    if i != array.field.count - 1 {
-        array.field[i] = array.field[array.field.count-1];
-    }
-    array.field.count = new_count;
-
-    if allow_shrink {
-        maybe_shrink(array, allocator);
-    }
-}
-
-array_ordered_remove_by_index :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), i: s32, allow_shrink := true) {
-    new_count := array.field.count - 1;
-    assert(new_count >= 0);
-
-    if i < array.field.count - 1 {
-        for i..array.field.count-2 {
-            array.field[it] = array.field[it+1];
-        }
-    }
-    array.field.count = new_count;
-
-    if allow_shrink {
-        maybe_shrink(array, allocator);
-    }
-}
-
-array_add :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), item: T) 
-#modify {
-    return T != string;
-} {
-    new_count := array.field.count + 1;
-    if array.allocation.count < new_count {
-        new_allocated_count := ceil_to_pow2(new_count);
-        array_resize(array, allocator, xx new_allocated_count);
-    }
-    array.field.count = new_count;
-    array.field[array.field.count-1] = item;
-}
-
-array_append :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), items: array.FIELD_TYPE) {
-    new_count := array.field.count + field.count;
-    if array.allocation.count < new_count {
-        new_allocated_count := ceil_to_pow2(new_count);
-        array_resize(array, allocator, xx new_allocated_count);
-    }
-    old_count := array.field.count;
-    array.field.count = new_count;
-    for 0..items.count-1 {
-        array.field[it+old_count] = items[it];
-    }
-}
-
-array_set :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), items: array.FIELD_TYPE) {
-    array_resize(array, allocator, xx items.count);
-    array.field.count = items.count;
-    for 0..items.count-1 {
-        array.field[it] = items[it];
-    }
-}
-
-// $todo: optimize
-array_resize :: (array: *Nested_Array($T, $B), allocator: *Nesting_Allocator(B), new_count: s32) {
-    assert(new_count >= 0);
-    new_ref := ifx new_count > 0 then na_alloc(allocator, new_count * size_of(T)) else .{};
-    if basic_validity_check(array.allocation.ref) {
-        copy_count := min(array.field.count, new_count);
-        if copy_count > 0 {
-            memcpy(new_ref.data, array.allocation.ref.data, copy_count * size_of(T));
-        }
-        na_free(allocator, *array.allocation.ref);
-    }
-    array.allocation.ref = new_ref;
-    array.allocation.count = xx new_count;
-    array.field.data = array.allocation.ref.data;
-    array.field.count = new_count;
-}
-
-nack_initialize :: (using allocator: *Nesting_Allocator_Collection, parent_allocator: Allocator, small_list_count := 16, medium_list_count := 4, large_list_count := 0) {
-    initialize_nesting_allocator(*small_allocator, parent_allocator, 4096 * small_allocator.MIN_ALLOCATION_SIZE, small_list_count);
-    initialize_nesting_allocator(*medium_allocator, parent_allocator, 4096 * medium_allocator.MIN_ALLOCATION_SIZE, medium_list_count);
-    initialize_nesting_allocator(*large_allocator, parent_allocator, 1024 * large_allocator.MIN_ALLOCATION_SIZE, large_list_count);
-}
-
-nack_alloc :: (using allocator: *Nesting_Allocator_Collection, size: s64) -> Nested_Allocation_Ref {
-    ref: Nested_Allocation_Ref = ---;
-    Bin_Type :: type_of(ref.info.bin);
-    if size < medium_allocator.MIN_ALLOCATION_SIZE {
-        ref = na_alloc(*small_allocator, size);
-        ref.info.bin = .SMALL;
-    } else if size < large_allocator.MIN_ALLOCATION_SIZE {
-        ref = na_alloc(*medium_allocator, size);
-        ref.info.bin = .MEDIUM;
-    } else {
-        ref = na_alloc(*large_allocator, size);
-        ref.info.bin = .LARGE;
-    }
-    // needs to be re-set because it's unioned with 'bin'. (setting 'bin' clears the validation pattern.)
-    ref.info.bit_pattern |= VALIDATION_PATTERN;
-    return ref;
-}
-
-nack_free :: (using allocator: *Nesting_Allocator_Collection, ref: *Nested_Allocation_Ref) {
-    assert((ref.info.bit_pattern & 0xf0) == VALIDATION_PATTERN);
-    // clearing the bit pattern allows for a clean read of the bin
-    ref.info.bit_pattern &= 0x0f;
-    if #complete ref.info.bin == {
-    case .SMALL;
-        na_free(*small_allocator, ref);
-    case .MEDIUM;
-        na_free(*medium_allocator, ref);
-    case .LARGE;
-        na_free(*large_allocator, ref);
-    case .STANDALONE;
-        assert(false, "standalone ref either came from a standalone Nesting_Allocator, or the ref was corrupted");
-    }
-}
-
-basic_validity_check :: inline (using ref: Nested_Allocation_Ref) -> bool {
-    return data != null && info.list >= 0 && (info.bit_pattern & 0xf0) == VALIDATION_PATTERN;
-}
-
-
-Nesting_Allocator_Outer_Chunk :: struct ($MIN_ALLOCATION_SIZE: s64) {
+Super_Allocator_Outer_Chunk :: struct ($MIN_ALLOCATION_SIZE: s64) {
     inner_chunks: [64][MIN_ALLOCATION_SIZE]u8;
 }
 
-Nesting_Allocator :: struct ($MIN_ALLOCATION_SIZE := 16) {
-    parent_allocator: Allocator;
-    chunk_lists: [..][]Nesting_Allocator_Outer_Chunk(MIN_ALLOCATION_SIZE);
-    books: Nesting_Allocator_Books;
-    books_allocated_size: s64;
-    default_outer_chunk_count_per_list: s32 = 32;
-    shrink_to_min_lists: s32 = 1;
-    default_reserve_size: s32;
-    old_list_count: s32;
-
-    CHUNKS_PER_HEAP :: 64;
-    CHUNK_SIZE :: size_of(Nesting_Allocator_Outer_Chunk(MIN_ALLOCATION_SIZE));
-    #run assert(is_power_of_two(MIN_ALLOCATION_SIZE));
-}
-
-Nesting_Allocator_Books :: struct {
+Super_Allocator_Books :: struct {
     largest_gap_per_list: *u8;
     gap_list_of_lists: []*u8;
     flag_list_of_lists: []*u64;
 }
 
-initialize_nesting_allocator :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), in_parent_allocator: Allocator, in_default_chunk_list_size := 0, add_chunk_lists := 1) {
+initialize_super_allocator :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), in_parent_allocator: Allocator, in_default_chunk_list_size := 0, add_chunk_lists := 1) {
     assert(chunk_lists.count == 0 && chunk_lists.data == null);
     allocator.* = .{};
+    allocator.super_base.data = allocator;
+    allocator.super_base.proc = super_allocator_proc;
     parent_allocator = in_parent_allocator;
     if in_default_chunk_list_size > 0 {
         default_reserve_size = xx in_default_chunk_list_size;
@@ -245,42 +130,57 @@ initialize_nesting_allocator :: (using allocator: *Nesting_Allocator($MIN_ALLOC_
     if add_chunk_lists > 0 then for 0..add_chunk_lists - 1 {
         add_chunk_list(allocator, default_reserve_size, false);
     }
-    // grow_nesting_allocator_books(allocator);
 }
 
-// remake_books is optional so initialize_nesting_allocator can call it only after adding all of the chunk lists.
-add_chunk_list :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), min_bytes: s64, remake_books := true) {
+shutdown_super_allocator :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE)) {
+    for list : *chunk_lists {
+        array_reset(list);
+    }
+    array_reset(*chunk_lists);
+    free(books.largest_gap_per_list);
+    allocator.* = .{};
+}
+
+add_chunk_list :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), min_bytes: s64, remake_books := true) {
     scope_set_allocator(parent_allocator);
     chunk_list := array_add(*chunk_lists);
     alloc_chunk_count := max(div_ceil(min_bytes, CHUNK_SIZE), 2);
-    // Nested_Allocation_Info requirements
+    // Super_Allocation_Header requirements
     assert(chunk_lists.count <= S16_MAX);
     assert(alloc_chunk_count <= U16_MAX);
     if alloc_chunk_count < 8 && !did_small_chunk_count_warning {
-        rm_warning("min bytes % leads to only % chunks being allocated per nesting allocator heap. the number of chunks per heap should probably be somewhere between 8 and 128", min_bytes, alloc_chunk_count);
+        rm_warning("min bytes % leads to only % chunks being allocated per super allocator heap. the number of chunks per heap should probably be somewhere between 8 and 128", min_bytes, alloc_chunk_count);
         did_small_chunk_count_warning = true;
     }
-    chunk_list.* = alloc_array(Nesting_Allocator_Outer_Chunk(MIN_ALLOC_SIZE), alloc_chunk_count);
-    // if remake_books {
-        grow_nesting_allocator_books(allocator);    
-    // }
+    chunk_list.* = alloc_array(Super_Allocator_Outer_Chunk(MIN_ALLOC_SIZE), alloc_chunk_count);
+    grow_super_allocator_books(allocator);    
 }
 
-na_alloc :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), size: s64) -> Nested_Allocation_Ref {
-    success, ref := na_try_alloc(allocator, size);
-    if success then return ref;
+basic_validity_check :: inline (using header: Super_Allocation_Header) -> bool {
+    return list >= 0 && (bit_pattern & 0xf0) == VALIDATION_PATTERN;
+}
+
+super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64) -> *void {
+    allocation_size_with_header := size + MIN_ALLOCATION_SIZE;
+    ptr := try_super_alloc(allocator, allocation_size_with_header);
     // didn't find existing space, need to grow
-    add_chunk_list(allocator, max(size, default_reserve_size));
-    success, ref = na_try_alloc(allocator, size);
-    assert(success);
-    return ref;
+    if ptr == null {
+        add_chunk_list(allocator, max(allocation_size_with_header, default_reserve_size));
+        ptr = try_super_alloc(allocator, allocation_size_with_header);
+        assert(ptr != null);
+    }
+    return ptr.(*u8) + MIN_ALLOCATION_SIZE;
 }
 
-na_free :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), ref: *Nested_Allocation_Ref) {
-    list := ref.info.list;
-    outer_chunk := ref.info.outer_chunk;
-    inner_chunk := ref.info.inner_chunk;
-    inner_chunk_count := ref.info.inner_chunk_count;
+super_free :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), ptr: *void) {
+    byte_ptr := ptr.(*u8);
+    header := (byte_ptr - MIN_ALLOCATION_SIZE).(*Super_Allocation_Header);
+    assert(basic_validity_check(header.*));
+
+    list := header.list;
+    outer_chunk := header.outer_chunk;
+    inner_chunk := header.inner_chunk;
+    inner_chunk_count := header.inner_chunk_count;
 
     if inner_chunk_count > 64 {
         outer_chunk_count := div_ceil(inner_chunk_count, 64);
@@ -328,29 +228,34 @@ na_free :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), ref: *Nested_A
         largest_gap.* = max_gap;
     }
 
-    ref.* = .{};
+    header.* = .{};
 }
 
-// will not reallocate
-na_try_alloc :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), size: s64) -> bool, Nested_Allocation_Ref {
-    success: bool = ---;
-    ref: Nested_Allocation_Ref = ---;
+try_super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64) -> *void {
+    header: *Super_Allocation_Header;
     alloc_inner_chunk_count := div_ceil(size, MIN_ALLOC_SIZE);
     if alloc_inner_chunk_count > 64 {
-        success, ref = na_try_alloc_large(allocator, alloc_inner_chunk_count);
+        header = try_super_alloc_large(allocator, alloc_inner_chunk_count);
     } else {
-        success, ref = na_try_alloc_small(allocator, alloc_inner_chunk_count);
+        header = try_super_alloc_small(allocator, alloc_inner_chunk_count);
     }
-    // (these two fields are unioned)
-    ref.info.bin = .STANDALONE;
-    ref.info.bit_pattern |= VALIDATION_PATTERN;
-    return success, ref;
+    if header != null {
+        // (these two fields are unioned)
+        header.bin = .STANDALONE;
+        header.bit_pattern |= VALIDATION_PATTERN;
+    }
+    return header;
 }
 
-na_try_alloc_small :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), alloc_inner_chunk_count: s64) -> bool, Nested_Allocation_Ref {
-    alloc_mask: u64 = ((1).(u64) << alloc_inner_chunk_count) - (1).(u64);
+try_super_alloc_small :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), alloc_inner_chunk_count: s64) -> *Super_Allocation_Header {
+    alloc_mask: u64 = ---;
+    if alloc_inner_chunk_count == 64 {
+        alloc_mask = U64_MAX;
+    } else {
+        alloc_mask = ((1).(u64) << alloc_inner_chunk_count) - (1).(u64);
+    }
 
-    out_ref: Nested_Allocation_Ref;
+    out_header: *Super_Allocation_Header;
     allocated_gap_is_max := false;
 
     if chunk_lists.count > 0 then for list : 0..chunk_lists.count-1 {
@@ -360,17 +265,17 @@ na_try_alloc_small :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), all
             for chunk : 0..chunk_lists[list].count-1 {
                 gap := *books.gap_list_of_lists[list][chunk];
                 // only need to go in here if we haven't found the allocation that must be in this list yet...
-                if out_ref.data == null && gap.* >= alloc_inner_chunk_count {
+                if out_header == null && gap.* >= alloc_inner_chunk_count {
                     allocated_gap_is_max = gap.* == largest_gap.*;
                     flag_set := *books.flag_list_of_lists[list][chunk];
                     alloc_index := find_index_of_missing_bit_sequence_lsb(flag_set.*, alloc_mask, alloc_inner_chunk_count);
                     flag_set.* |= alloc_mask << alloc_index;
                     gap.* = xx largest_gap_in_bit_sequence_lsb(flag_set.*);
-                    out_ref.data = *chunk_lists[list][chunk].inner_chunks[alloc_index];
-                    out_ref.info.list = xx list;
-                    out_ref.info.outer_chunk = xx chunk;
-                    out_ref.info.inner_chunk = xx alloc_index;
-                    out_ref.info.inner_chunk_count = xx alloc_inner_chunk_count;
+                    out_header = (*chunk_lists[list][chunk].inner_chunks[alloc_index]).(*Super_Allocation_Header);
+                    out_header.list = xx list;
+                    out_header.outer_chunk = xx chunk;
+                    out_header.inner_chunk = xx alloc_index;
+                    out_header.inner_chunk_count = xx alloc_inner_chunk_count;
                     if !allocated_gap_is_max {
                         max_gap = largest_gap.*;
                         break;
@@ -382,21 +287,21 @@ na_try_alloc_small :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), all
                     break;
                 }
             }
-            assert(out_ref.data != null);
+            assert(out_header != null);
             largest_gap.* = max_gap;
             break;
         }
     }
 
-    return out_ref.data != null, out_ref;
+    return out_header;
 }
 
-na_try_alloc_large :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), alloc_inner_chunk_count: s64) -> bool, Nested_Allocation_Ref {
+try_super_alloc_large :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), alloc_inner_chunk_count: s64) -> *Super_Allocation_Header {
     assert(alloc_inner_chunk_count > 64);
     alloc_outer_chunk_count := div_ceil(alloc_inner_chunk_count, 64);
     assert(alloc_outer_chunk_count <= U16_MAX);
 
-    out_ref: Nested_Allocation_Ref;
+    out_header: *Super_Allocation_Header;
 
     if chunk_lists.count > 0 then for list_index : 0..chunk_lists.count-1 {
         largest_gap := books.largest_gap_per_list[list_index];
@@ -424,11 +329,11 @@ na_try_alloc_large :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), all
                         }
                         remain_inner_chunks -= 64;
                     }
-                    out_ref.data = *list.*[first_chunk_index].inner_chunks[0];
-                    out_ref.info.list = xx list_index;
-                    out_ref.info.outer_chunk = xx first_chunk_index;
-                    out_ref.info.inner_chunk = 0;
-                    out_ref.info.inner_chunk_count = xx alloc_inner_chunk_count;
+                    out_header = (*list.*[first_chunk_index].inner_chunks[0]).(*Super_Allocation_Header);
+                    out_header.list = xx list_index;
+                    out_header.outer_chunk = xx first_chunk_index;
+                    out_header.inner_chunk = 0;
+                    out_header.inner_chunk_count = xx alloc_inner_chunk_count;
                     break;
                 }
             } else {
@@ -436,22 +341,13 @@ na_try_alloc_large :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE), all
             }
             chunk_index += 1;
         }
-        if out_ref.data != null then break;
+        if out_header != null then break;
     }
 
-    return out_ref.data != null, out_ref;
+    return out_header;
 }
 
-nesting_allocator_shutdown :: (using allocator: *Nesting_Allocator($MIN_ALLOC_SIZE)) {
-    for list : *chunk_lists {
-        array_reset(list);
-    }
-    array_reset(*chunk_lists);
-    free(books.largest_gap_per_list);
-    allocator.* = .{};
-}
-
-grow_nesting_allocator_books :: (using allocator: *Nesting_Allocator($MIN_ALLOCATION_SIZE)) {
+grow_super_allocator_books :: (using allocator: *Super_Allocator($MIN_ALLOCATION_SIZE)) {
     scope_set_allocator(parent_allocator);
     auto_release_temp();
     assert(chunk_lists.count > 0);
@@ -465,8 +361,8 @@ grow_nesting_allocator_books :: (using allocator: *Nesting_Allocator($MIN_ALLOCA
     writer.memory = talloc_string(max(reader.memory.count * 2, 1024));
     writer.allocator = temp;
 
-    set_rw_mode(*reader, .READ);
-    set_rw_mode(*writer, .WRITE);
+    set_rw_mode(*reader, .READ, false);
+    set_rw_mode(*writer, .WRITE, false);
 
     do_copy := old_list_count > 0;
     if do_copy {
@@ -484,7 +380,6 @@ grow_nesting_allocator_books :: (using allocator: *Nesting_Allocator($MIN_ALLOCA
 
     // ----- gap super list -----
 
-    super_list_offst := 0;
     if do_copy {
         // copy the old super list
         writer.head += capture_head_delta(read_bytes(*reader, writer.memory.data, xx old_list_count));
@@ -596,7 +491,7 @@ grow_nesting_allocator_books :: (using allocator: *Nesting_Allocator($MIN_ALLOCA
     old_list_count = xx chunk_lists.count;
 }
 
-repr :: (using allocator: *Nesting_Allocator($MIN_ALLOCATION_SIZE)) -> string {
+repr :: (using allocator: *Super_Allocator($MIN_ALLOCATION_SIZE)) -> string {
     builder: String_Builder;
     builder.allocator = temp;
     for list : 0..chunk_lists.count-1 {
@@ -622,7 +517,7 @@ repr :: (using allocator: *Nesting_Allocator($MIN_ALLOCATION_SIZE)) -> string {
 // books "array data offset" offsets to [4]
 
 /*
-Nesting_Allocator {
+Super_Allocator {
     books pointers:
 
     ----------- largest_gap_array_ptr    
@@ -645,3 +540,11 @@ Nesting_Allocator {
 // ---------------------------------------------------------------------------------------------------------------------
 
 did_small_chunk_count_warning := false;
+
+calc_allocator_data_offset :: () -> s64 {
+    dummy_allocator: *Super_Allocator;
+    return (*dummy_allocator.data).(s64); // poitner field given null pointer = offset from head of struct to the field
+}
+
+ALLOCATOR_DATA_OFFSET :: #run calc_allocator_data_offset();
+VALIDATION_PATTERN : u8 : 0x50;

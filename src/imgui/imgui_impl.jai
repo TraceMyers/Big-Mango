@@ -5,6 +5,10 @@
 
 using ImGui;
 
+// $todo: probably want to wrap imgui windows to generalize more desirable resize behavior
+left_sidebar_width := 600.0;
+resizing_left_sidebar_with_mouse_cursor: bool;
+
 // ---------------------------------------------------------------------------------------------------------------------
 #scope_export // ------------------------------------------------------------------------------------------ SCOPE_EXPORT
 // ---------------------------------------------------------------------------------------------------------------------
@@ -59,6 +63,9 @@ set_dev_ui_opacity :: (args: []Command_Line_Argument) {
 _imgui :: (stage: Boot_Stage) -> bool {
     if stage == .STARTUP {
         // ----------------------------------------------------------------------------------------------------- startup
+        initialize_super_allocator(*test_super_allocator, context.default_allocator);
+        random_seed(*test_super_allocator_random_state, 1_200_000_000);
+
         set_multiple(*dev_ui_enabled, .[.LEFT_SIDEBAR, .CMD]);
 
         pool_sizes := VkDescriptorPoolSize.[
@@ -122,6 +129,34 @@ _imgui :: (stage: Boot_Stage) -> bool {
         DestroyContext(imgui_context);
     }
     return true;
+}
+
+draw_dev_ui :: () {
+    scope_timer();
+    if quit then return;
+    ImplVulkan_NewFrame();
+    ImplWin32_NewFrame();
+    NewFrame();
+    defer Render();
+
+    {
+        scope_set_allocator(temp);
+        PushStyleVar(.WindowBorderSize, 0.0);
+        defer PopStyleVar();
+        // menu_bar_height := add_main_menu_bar();
+        if ui_options_open {
+            add_ui_options_menu();
+        }
+        menu_bar_height := 0.0;
+        app_window_dims := get_window_dimensions();
+        fixed_window_size := Vector2.{600, xx app_window_dims.y};
+        add_perf_graph(menu_bar_height, fixed_window_size.x);
+        player := try_get_entity(*context.world.player_entity_ref);
+        if !player then return;
+        left_sidebar_width := add_left_sidebar(menu_bar_height);
+        right_sidebar_width := add_right_sidebar(menu_bar_height);
+        command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
+    }
 }
 
 imgui_rgba :: (r: u8, g: u8, b: u8, a : u8 = 255) -> ImColor {
@@ -254,34 +289,6 @@ imgui_set_theme_graphite_glass :: () {
     io.Fonts.Build(io.Fonts);   
 }
 
-draw_dev_ui :: () {
-    scope_timer();
-    if quit then return;
-    ImplVulkan_NewFrame();
-    ImplWin32_NewFrame();
-    NewFrame();
-    defer Render();
-
-    {
-        scope_set_allocator(temp);
-        PushStyleVar(.WindowBorderSize, 0.0);
-        defer PopStyleVar();
-        // menu_bar_height := add_main_menu_bar();
-        if ui_options_open {
-            add_ui_options_menu();
-        }
-        menu_bar_height := 0.0;
-        app_window_dims := get_window_dimensions();
-        fixed_window_size := Vector2.{600, xx app_window_dims.y};
-        add_perf_graph(menu_bar_height, fixed_window_size.x);
-        player := try_get_entity(*context.world.player_entity_ref);
-        if !player then return;
-        left_sidebar_width := add_left_sidebar(menu_bar_height);
-        right_sidebar_width := add_right_sidebar(menu_bar_height);
-        command_line_text_x, command_line_input_height := add_command_line(menu_bar_height, left_sidebar_width, right_sidebar_width);
-    }
-
-}
 
 imgui_process_event :: (event: Input.Event) {
     using io := GetIO();
@@ -556,7 +563,7 @@ add_left_sidebar :: (main_menu_height: float) -> float {
     }
 
     app_window_dims := get_window_dimensions();
-    fixed_window_size := Vector2.{600, xx app_window_dims.y};
+    fixed_window_size := Vector2.{left_sidebar_width, xx app_window_dims.y};
     SetWindowSize(*fixed_window_size);
     window_width := GetWindowSize().x;
 
@@ -564,9 +571,33 @@ add_left_sidebar :: (main_menu_height: float) -> float {
         add_entity_controls();
         add_entity_pocket();
         add_dev_ui_scratch_space();
+        add_super_allocator_test_ui_thing();
     }
 
-    SetWindowSize(.{600, GetCursorPos().y});
+    SetWindowSize(.{left_sidebar_width, GetCursorPos().y});
+
+    mouse_position := GetMousePos();
+    window_relative_mouse_position := mouse_position - GetWindowPos();
+    window_size := GetWindowSize();
+    mouse_position_right_x_dist := abs(window_size.x - window_relative_mouse_position.x);
+
+    mouse_position_middle_y_dist := abs(window_size.y / 2 - window_relative_mouse_position.y);
+    if mouse_position_right_x_dist < 8 && mouse_position_middle_y_dist < window_size.y / 2 {
+        // $todo: show resize cursor
+        if !resizing_left_sidebar_with_mouse_cursor {
+            if (Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_LEFT] & .DOWN) != 0 {
+                resizing_left_sidebar_with_mouse_cursor = true;
+            }
+        }
+    }
+    if resizing_left_sidebar_with_mouse_cursor {
+        // $todo: draw_line() for highlight
+        if (Input.input_button_states[Input.Key_Code.MOUSE_BUTTON_LEFT] & .DOWN) == 0 {
+            resizing_left_sidebar_with_mouse_cursor = false;
+        } else {
+            left_sidebar_width = mouse_position.x;
+        }
+    }
 
     return window_width;
 }
@@ -859,10 +890,10 @@ add_entity_controls :: () {
     if selected_entity != null {
         center = *selected_entity.center;
         orientation = *selected_entity.orientation;
-        if selected_entity.meshes.field.count > 0 {
-            meshes = selected_entity.meshes.field;
+        if selected_entity.meshes.count > 0 {
+            meshes = selected_entity.meshes;
         }
-        name = selected_entity.name.field;
+        name = selected_entity.name;
     }
     
     Text_align_right(GetWindowPos().x, GetWindowWidth(), name);
@@ -909,7 +940,7 @@ add_entity_controls :: () {
                 assert(using_lowpoly || using_midpoly || using_highpoly);
                 using selected_entity.shape.sphere;
                 add_empty_lines_after_widget("SliderFloat(\"sphere radius\", *`radius, `radius * 0.99, 1.01 * `radius);", 1);
-                selected_entity.meshes.field[0].scale = .{radius, radius, radius};
+                selected_entity.meshes[0].scale = .{radius, radius, radius};
             case .CAPSULE;
                 assert(mesh_at_index_is_asset(selected_entity, 0, MESH_CAPSULE_1_6_0_5_0_5));
                 using selected_entity.shape.capsule;
@@ -932,13 +963,13 @@ HERE,
                     2
                 );
                 if mesh_at_index_is_asset(selected_entity, 0, MESH_PLANE) || mesh_at_index_is_asset(selected_entity, 0, MESH_CUBE) {
-                    selected_entity.meshes.field[0].scale = .{
+                    selected_entity.meshes[0].scale = .{
                         half_width * 2.0,
                         1.0,
                         half_height * 2.0
                     };                   
                 } else {
-                    assert(false, "entity % has is primitive with rect collider, but invalid mesh at index 0", selected_entity.name.field);
+                    assert(false, "entity % has is primitive with rect collider, but invalid mesh at index 0", selected_entity.name);
                 }
             case .BOX; #through;
             case .AABB;
@@ -947,7 +978,7 @@ HERE,
                 SliderFloat("box half height", *half_height, 0, 4 * half_height);
                 SliderFloat("box half width", *half_width, 0, 4 * half_width);
                 SliderFloat("box half length", *half_length, 0, 4 * half_length);
-                selected_entity.meshes.field[0].scale = .{
+                selected_entity.meshes[0].scale = .{
                     half_width * 2.0,
                     half_length * 2.0,
                     half_height * 2.0
@@ -1060,6 +1091,141 @@ add_dev_ui_scratch_space :: () {
         
     }
 }
+// ---------------------------------------------------------------------------------------------------------------------
+// super allocator test 
+// ---------------------------------------------------------------------------------------------------------------------
+#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
+// ---------------------------------------------------------------------------------------------------------------------
+
+MIN_CHUNK_SZ :: 32;
+test_super_allocator: Super_Allocator(MIN_CHUNK_SZ);
+
+Test_Super_Allocator_Data :: struct {
+    request_size: s32;
+    bin_count: s32;
+    ptr_valid: bool;
+    largest_gap_per_list: string;
+    gap_list_of_lists: []string;
+    flag_list_of_lists: []string;
+}
+
+Test_Super_Allocator_Allocation :: struct {
+    data: *u8;
+    request_size: s64;
+    bin_count: s64;
+}
+
+test_super_allocator_data_history: [3]Test_Super_Allocator_Data;
+test_super_allocator_index: s64;
+test_super_allocator_random_state: Random_State;
+test_super_allocator_allocations: [..]Test_Super_Allocator_Allocation;
+
+add_super_allocator_test_ui_thing :: () {
+    scope_set_allocator(context.default_allocator);
+    if CollapsingHeader("super allocator test ui thing") {
+        scope_push_indent();
+
+        did_allocator_action: bool;
+        some_number: s32;
+        another_number: float32;
+        some_vec: Vector3;
+
+        request_size: s64;
+        bin_count: s64;
+        ptr_valid: bool;
+
+        if Button("allocate") {
+            bin_ct := random_get_within_range(*test_super_allocator_random_state, 1, 72).(s64);
+            alloc_sz := bin_ct * test_super_allocator.MIN_ALLOCATION_SIZE;
+            ptr: *u8;
+            {
+                scope_set_allocator(test_super_allocator);
+                ptr = alloc(alloc_sz);
+            }
+            array_add(*test_super_allocator_allocations, .{ptr, alloc_sz, bin_ct});
+            did_allocator_action = true;
+            request_size = alloc_sz;
+            bin_count = bin_ct;
+            ptr_valid = ptr != null;
+        } 
+        if Button("free last") {
+            if test_super_allocator_allocations.count > 0 {
+                remove_index := test_super_allocator_allocations.count - 1;
+                request_size = test_super_allocator_allocations[remove_index].request_size;
+                bin_count = test_super_allocator_allocations[remove_index].bin_count;
+                ptr_valid = true;
+                {
+                    scope_set_allocator(test_super_allocator);
+                    free(test_super_allocator_allocations[remove_index].data);
+                }
+                array_ordered_remove_by_index(*test_super_allocator_allocations, remove_index);
+            }
+            did_allocator_action = true;
+        }
+        if Button("free random") {
+            if test_super_allocator_allocations.count > 0 {
+                rand_val := random_get_zero_to_one();
+                remove_index := round(rand_val * (test_super_allocator_allocations.count-1));
+                request_size = test_super_allocator_allocations[remove_index].request_size;
+                bin_count = test_super_allocator_allocations[remove_index].bin_count;
+                ptr_valid = true;
+                {
+                    scope_set_allocator(test_super_allocator);
+                    free(test_super_allocator_allocations[remove_index].data);
+                }
+                array_ordered_remove_by_index(*test_super_allocator_allocations, remove_index);
+            }
+            did_allocator_action = true;
+        }
+
+        if did_allocator_action {
+            list_count := test_super_allocator.chunk_lists.count;
+            {
+                using *test_super_allocator_data_history[test_super_allocator_index];
+                builder: String_Builder;
+                for 0..list_count-1 {
+                    print(*builder, "% ", FormatInt.{value=test_super_allocator.books.largest_gap_per_list[it], base=10, minimum_digits=2});
+                }
+                largest_gap_per_list = builder_to_string(*builder);
+
+                gap_list_of_lists = alloc_array(string, list_count, context.default_allocator);
+                for 0..list_count-1 {
+                    list_length := test_super_allocator.chunk_lists[it].count;
+                    for gap_list : test_super_allocator.books.gap_list_of_lists {
+                        for 0..list_length-1 {
+                            print(*builder, "% ", FormatInt.{value=gap_list[it], base=10, minimum_digits=2});
+                        }
+                    }
+                    gap_list_of_lists[it] = builder_to_string(*builder);
+                }
+
+                flag_list_of_lists = alloc_array(string, list_count, context.default_allocator);
+                for 0..list_count-1 {
+                    list_length := test_super_allocator.chunk_lists[it].count;
+                    for flag_list : test_super_allocator.books.flag_list_of_lists {
+                        for 0..list_length-1 {
+                            print(*builder, "%     ", FormatInt.{value=flag_list[it], base=2, minimum_digits=64, digits_per_comma=8, comma_string="-"});
+                        }
+                    }
+                    flag_list_of_lists[it] = builder_to_string(*builder);
+                }
+            }
+            test_super_allocator_index = increment_wrap(test_super_allocator_index, 0, test_super_allocator_data_history.count-1);
+        }
+
+        i := test_super_allocator_index;
+        for 0..test_super_allocator_data_history.count-1 {
+            i = decrement_wrap(i, 0, test_super_allocator_data_history.count-1);
+            history_item := *test_super_allocator_data_history[i];
+            Text("%", FormatStruct.{
+                value=history_item, 
+                use_long_form_if_more_than_this_many_members=1,
+                use_newlines_if_long_form=true
+            });
+        }
+    }
+}
+// ---------------------------------------------------------------------------------------------------------------------
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // command line procs

@@ -54,7 +54,7 @@ solve_contacts :: () {
     // for any cells that were altered, shrink occupation allocations to be inline if it fits
     for altered_cells {
         collision_grid_cell_flags[it] &= ~.JUST_ALTERED;
-        rectify_collision_cell_allocation(it);
+        try_inline_collision_cell_allocation(it);
     }
 
     warm_start_contacts();
@@ -144,7 +144,7 @@ solve_contacts_broad_phase :: (time_step_count: s32) {
         if is_set(*e.flags, .USES_EVENT_VOLUME) {
             for pair : iteration_overlaps {
                 found_existing_overlap: bool;
-                for *overlap : e.event_volume.overlaps.field {
+                for *overlap : e.event_volume.overlaps {
                     if pair.b == overlap.entity {
                         found_existing_overlap = true;
                         overlap.last_seen_on_frame = collision_frame;
@@ -181,9 +181,9 @@ apply_impulses :: () {
         if is_set(*e.flags, .APPLY_GRAVITY) {
             e.velocity.z -= e.physics_properties.gravity_accel * PHYSICS_FIXED_TIME_STEP;
         }
-        if is_set(*e.flags, .MOVED_BY_PHYSICS) && e.linear_impulses.field.count > 0 {
+        if is_set(*e.flags, .MOVED_BY_PHYSICS) && e.linear_impulses.count > 0 {
             inv_mass := 1.0 / e.physics_properties.mass;
-            for #v2 < *e.linear_impulses.field {
+            for #v2 < *e.linear_impulses {
                 impulse_time_step := min(it.time_remaining, PHYSICS_FIXED_TIME_STEP);
                 // a = f/m
                 prev_velocity := e.velocity;

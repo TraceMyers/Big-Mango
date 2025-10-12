@@ -144,7 +144,7 @@ load_skinned_mesh :: (asset_path: string, package: *Gom_Package, load_allocator 
     scope_timer();
 
     record: Serializer(.STATIC);
-    set_rw_mode(*record, .READ);
+    set_rw_mode(*record, .READ, true);
     record.memory = read_entire_file(asset_path);
 
     // $todo: mannequin.mgosm seems to take ~66% of its time just reading the file in, but 33% of 1ms isn't nothing, and it should
@@ -208,7 +208,7 @@ save_or_load_gom_file :: (asset_path: string, package: *Gom_Package, rw_mode: Rw
     begin_time := seconds_since_init();
 
     record: Serializer(.STATIC);
-    set_rw_mode(*record, rw_mode);
+    set_rw_mode(*record, rw_mode, true);
 
     if rw_mode == .READ {
         record.memory = read_entire_file(asset_path);
@@ -513,7 +513,7 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
     reader.memory = read_entire_file(file_path);
     defer reset(*reader.memory);
     reader.read_array_allocator = temp;
-    set_rw_mode(*reader, .READ);
+    set_rw_mode(*reader, .READ, true);
 
     if reader.memory.count < 26 {
         rm_warning("file length too short.");

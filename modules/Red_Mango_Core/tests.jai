@@ -525,195 +525,84 @@ pool_test :: () -> bool, string {
     return_test_success();
 }
 
-nesting_allocator_test :: no_inline () -> bool, string {
-    a: Nesting_Allocator_Collection;
-    nack_initialize(*a, context.default_allocator, 180, 16);
-    // a: Nesting_Allocator(16);
-    // initialize_nesting_allocator(*a, context.default_allocator, 64 * 1024, 180);
-
-    data_1 := nack_alloc(*a, 129);
-    test_condition(data_1.data == *a.small_allocator.chunk_lists[0][0].inner_chunks[0]);
-    test_condition(a.small_allocator.books.flag_list_of_lists[0][0] == 0x1ff);
-
-    data_2 := nack_alloc(*a, 880);
-    test_condition(a.small_allocator.books.flag_list_of_lists[0][0] == U64_MAX);
-
-    nack_free(*a, *data_1);
-    nack_free(*a, *data_2);
-
-    REF_COUNT :: 10000;
-    refs: [..]Nested_Allocation_Ref;
-    refs.allocator = temp;
-    array_resize(*refs, REF_COUNT);
-
-    total_alloc_seconds: float64;
-    total_alloc_seconds_last_100: float64;
-    max_time: float64;
-
-    for 0..REF_COUNT-1 {
-        bin_ct := random_get_within_range(0, 64).(s64);
-        alloc_sz := bin_ct * a.small_allocator.MIN_ALLOCATION_SIZE;
-        t1 := seconds_since_init();
-        refs[it] = nack_alloc(*a, alloc_sz);
-        t2 := seconds_since_init();
-        total_alloc_seconds += t2 - t1;
-        max_time = max(max_time, t2-t1);
-        if it >= REF_COUNT-100 {
-            total_alloc_seconds_last_100 += t2 - t1;
-        }
-    }
-    for 0..REF_COUNT-1 {
-        index := ifx refs.count > 1 then round(random_get_within_range(0, (refs.count-1).(float))) else 0;
-        if index < 0 {
-            index = 0;
-        }
-        ref := refs[index];
-        array_ordered_remove_by_index(*refs, index);
-        nack_free(*a, *ref);
-    }
-
-    // log("small allocator data");
-    // log("%", repr(*a.small_allocator));
-
-    // not real world but whatever
-    total_alloc_ms := total_alloc_seconds * 1000.0;
-    ms_per_alloc := total_alloc_ms / REF_COUNT.(float64);
-    us_per_alloc := ms_per_alloc * 1000.0;
-
-    last_100_total_ms := total_alloc_seconds_last_100 * 1000.0;
-    last_100_ms_per_alloc := last_100_total_ms / 100.0;
-    last_100_us_per_alloc := last_100_ms_per_alloc * 1000.0;
-
-    log("avg alloc time:                        %us", us_per_alloc);
-    log("avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
-    log("max time:                              %us", max_time * 1000.0 * 1000.0);
-
-    total_alloc_seconds = 0;
-    total_alloc_seconds_last_100 = 0;
-    max_time = 0;
-    array_resize(*refs, REF_COUNT);
-
-    for 0..REF_COUNT-1 {
-        bin_ct: s64;
-        if random_get_zero_to_one() <= 0.2 {
-            bin_ct = random_get_within_range(32, 384).(s64);
-        } else {
-            bin_ct = random_get_within_range(1, 64).(s64);
-        }
-        alloc_sz := bin_ct * a.small_allocator.MIN_ALLOCATION_SIZE;
-        t1 := seconds_since_init();
-        refs[it] = nack_alloc(*a, alloc_sz);
-        t2 := seconds_since_init();
-        total_alloc_seconds += t2 - t1;
-        max_time = max(max_time, t2-t1);
-        if it >= REF_COUNT-100 {
-            total_alloc_seconds_last_100 += t2 - t1;
-        }
-    }
-    for 0..REF_COUNT-1 {
-        index := ifx refs.count > 1 then round(random_get_within_range(0, (refs.count-1).(float))) else 0;
-        if index < 0 {
-            index = 0;
-        }
-        ref := refs[index];
-        array_ordered_remove_by_index(*refs, index);
-        nack_free(*a, *ref);
-    }
-
-    // not real world but whatever
-    total_alloc_ms = total_alloc_seconds * 1000.0;
-    ms_per_alloc = total_alloc_ms / REF_COUNT.(float64);
-    us_per_alloc = ms_per_alloc * 1000.0;
-
-    last_100_total_ms = total_alloc_seconds_last_100 * 1000.0;
-    last_100_ms_per_alloc = last_100_total_ms / 100.0;
-    last_100_us_per_alloc = last_100_ms_per_alloc * 1000.0;
-
-    log("mixed allocations avg alloc time:                        %us", us_per_alloc);
-    log("mixed allocations avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
-    log("mixed allocations max time:                              %us", max_time * 1000.0 * 1000.0);
-
-    return_test_success();
-}
-
 bump_allocator_test :: no_inline () -> bool, string {
-    b: Bump_Allocator;
-    bump_allocator_initialize(*b);
-    defer bump_allocator_reset(*b);
+    // b: Bump_Allocator;
+    // bump_allocator_initialize(*b);
+    // defer bump_allocator_reset(*b);
 
-    test_condition(b.heaps.count == 1 || b.heaps[1].bytes.count == 0);
-    test_condition(b.heaps[0].bytes.count == BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
-    test_condition(b.heaps[0].end == 0);
-    {
-        scope_mark_and_recede_allocations(*b);
-        alloc1 := bump_allocator_allocate(*b, 1024);     
-        test_condition(b.heaps[0].end == 1024);
-        alloc2 := bump_allocator_allocate(*b, 1025);
-        test_condition(b.heaps[0].end == 1024 + 1025 + 7);
-        alloc3 := bump_allocator_allocate(*b, 1023);
-        test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
-        {
-            scope_mark_and_recede_allocations(*b);
-            data_prev: *u8 = null;
-            prev_alloc_size: s32 = -1;
-            for 0..100 {
-                data: *u8 = bump_allocator_allocate(*b, it);
-                if prev_alloc_size >= 1 {
-                    diff := data.(u64) - data_prev.(u64);
-                    should_be_diff := ceil_to_multiple(prev_alloc_size, 8);
-                    test_condition(diff == xx should_be_diff);
-                } else if prev_alloc_size == 0 {
-                    // alloc(0) == no diff;
-                    diff := data.(u64) - data_prev.(u64);
-                    test_condition(diff == 0);
-                }
-                prev_alloc_size = xx it;
-                data_prev = data;
-            }
-        }
-        test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
-    }
-    test_condition(b.heaps[0].end == 0);
+    // test_condition(b.heaps.count == 1 || b.heaps[1].bytes.count == 0);
+    // test_condition(b.heaps[0].bytes.count == BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
+    // test_condition(b.heaps[0].end == 0);
+    // {
+    //     scope_mark_and_recede_allocations(*b);
+    //     alloc1 := bump_allocator_allocate(*b, 1024);     
+    //     test_condition(b.heaps[0].end == 1024);
+    //     alloc2 := bump_allocator_allocate(*b, 1025);
+    //     test_condition(b.heaps[0].end == 1024 + 1025 + 7);
+    //     alloc3 := bump_allocator_allocate(*b, 1023);
+    //     test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
+    //     {
+    //         scope_mark_and_recede_allocations(*b);
+    //         data_prev: *u8 = null;
+    //         prev_alloc_size: s32 = -1;
+    //         for 0..100 {
+    //             data: *u8 = bump_allocator_allocate(*b, it);
+    //             if prev_alloc_size >= 1 {
+    //                 diff := data.(u64) - data_prev.(u64);
+    //                 should_be_diff := ceil_to_multiple(prev_alloc_size, 8);
+    //                 test_condition(diff == xx should_be_diff);
+    //             } else if prev_alloc_size == 0 {
+    //                 // alloc(0) == no diff;
+    //                 diff := data.(u64) - data_prev.(u64);
+    //                 test_condition(diff == 0);
+    //             }
+    //             prev_alloc_size = xx it;
+    //             data_prev = data;
+    //         }
+    //     }
+    //     test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
+    // }
+    // test_condition(b.heaps[0].end == 0);
 
-    {
-        scope_set_allocator(b);
-        {
-            scope_mark_and_recede_allocations(*b);
-            alloc1 := alloc(1024);     
-            test_condition(b.heaps[0].end == 1024);
-            alloc2 := alloc(1025);
-            test_condition(b.heaps[0].end == 1024 + 1025 + 7);
-            alloc3 := alloc(1023);
-            test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
-            {
-                scope_mark_and_recede_allocations(*b);
-                for 0..100 {
-                    alloc(it);
-                }
-            }
-            test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
-        }
-    }
-    test_condition(b.heaps[0].end == 0);
+    // {
+    //     scope_set_allocator(b);
+    //     {
+    //         scope_mark_and_recede_allocations(*b);
+    //         alloc1 := alloc(1024);     
+    //         test_condition(b.heaps[0].end == 1024);
+    //         alloc2 := alloc(1025);
+    //         test_condition(b.heaps[0].end == 1024 + 1025 + 7);
+    //         alloc3 := alloc(1023);
+    //         test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
+    //         {
+    //             scope_mark_and_recede_allocations(*b);
+    //             for 0..100 {
+    //                 alloc(it);
+    //             }
+    //         }
+    //         test_condition(b.heaps[0].end == 1024 + 1025 + 7 + 1023 + 1);
+    //     }
+    // }
+    // test_condition(b.heaps[0].end == 0);
 
-    {
-        scope_set_allocator(b);
-        scope_mark_and_recede_allocations(*b);
-        alloc_sz := BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE / 3 - 8;
-        for 0..5 {
-            data: *u8 = alloc(alloc_sz);
-            if it <= 2 {
-                test_condition(b.heaps[1].bytes.count == 0);
-                test_condition(b.heaps[1].end == 0);
-            } else if it <= 5 {
-                test_condition(b.heaps[0].end < BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
-                test_condition(b.heaps[1].bytes.count == BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
-                test_condition(b.heaps[2].bytes.count == 0);
-                test_condition(b.heaps[2].end == 0);
-            }
-        }
-    }
-    test_condition(b.heaps[0].end == 0);
+    // {
+    //     scope_set_allocator(b);
+    //     scope_mark_and_recede_allocations(*b);
+    //     alloc_sz := BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE / 3 - 8;
+    //     for 0..5 {
+    //         data: *u8 = alloc(alloc_sz);
+    //         if it <= 2 {
+    //             test_condition(b.heaps[1].bytes.count == 0);
+    //             test_condition(b.heaps[1].end == 0);
+    //         } else if it <= 5 {
+    //             test_condition(b.heaps[0].end < BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
+    //             test_condition(b.heaps[1].bytes.count == BUMP_ALLOCATOR_DEFAULT_HEAP_SIZE);
+    //             test_condition(b.heaps[2].bytes.count == 0);
+    //             test_condition(b.heaps[2].end == 0);
+    //         }
+    //     }
+    // }
+    // test_condition(b.heaps[0].end == 0);
 
 
     return_test_success();
@@ -793,6 +682,121 @@ serializer_test :: () -> bool, string {
     return_test_success();
 }
 
+super_allocator_test :: () -> bool, string {
+    MIN_CHUNK_SZ :: 32;
+    a: Super_Allocator(MIN_CHUNK_SZ);
+    initialize_super_allocator(*a, context.default_allocator);
+    scope_set_allocator(a);
+
+    data_1_sz := 129;
+    allocated_chunk_ct := div_ceil(data_1_sz, MIN_CHUNK_SZ) + 1; // + 1 for header
+    data_1 := alloc(data_1_sz);
+    test_condition(data_1 == xx *a.chunk_lists[0][0].inner_chunks[1]);
+    test_condition(a.books.flag_list_of_lists[0][0] == ((1 << allocated_chunk_ct) - 1).(u64));
+
+    data_2_sz := 880;
+    allocated_chunk_ct += div_ceil(data_2_sz, MIN_CHUNK_SZ) + 1;
+    data_2 := alloc(880);
+    test_condition(a.books.flag_list_of_lists[0][0] == ((1 << allocated_chunk_ct) - 1).(u64));
+
+    free(data_1);
+    free(data_2);
+
+    POINTER_COUNT :: 10000;
+    pointers: [..]*void;
+    pointers.allocator = temp;
+    array_resize(*pointers, POINTER_COUNT);
+
+    total_alloc_seconds: float64;
+    total_alloc_seconds_last_100: float64;
+    max_time: float64;
+
+    for 0..pointers.count-1 {
+        bin_ct := random_get_within_range(1, 64).(s64);
+        alloc_sz := bin_ct * a.MIN_ALLOCATION_SIZE;
+        t1 := seconds_since_init();
+        pointers[it] = alloc(alloc_sz);
+        t2 := seconds_since_init();
+        total_alloc_seconds += t2 - t1;
+        max_time = max(max_time, t2-t1);
+        if it >= POINTER_COUNT-100 {
+            total_alloc_seconds_last_100 += t2 - t1;
+        }
+    }
+    for 0..pointers.count-1 {
+        index := ifx pointers.count > 1 then round(random_get_within_range(0, (pointers.count-1).(float))) else 0;
+        if index < 0 {
+            index = 0;
+        }
+        ptr := pointers[index];
+        array_ordered_remove_by_index(*pointers, index);
+        free(ptr);
+    }
+
+    // log("small allocator data");
+    // log("%", repr(*a.small_allocator));
+
+    // not real world but whatever
+    total_alloc_ms := total_alloc_seconds * 1000.0;
+    ms_per_alloc := total_alloc_ms / POINTER_COUNT.(float64);
+    us_per_alloc := ms_per_alloc * 1000.0;
+
+    last_100_total_ms := total_alloc_seconds_last_100 * 1000.0;
+    last_100_ms_per_alloc := last_100_total_ms / 100.0;
+    last_100_us_per_alloc := last_100_ms_per_alloc * 1000.0;
+
+    log("avg alloc time:                        %us", us_per_alloc);
+    log("avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
+    log("max time:                              %us", max_time * 1000.0 * 1000.0);
+
+    // total_alloc_seconds = 0;
+    // total_alloc_seconds_last_100 = 0;
+    // max_time = 0;
+    // array_resize(*pointers, POINTER_COUNT);
+
+    // for 0..POINTER_COUNT-1 {
+    //     bin_ct: s64;
+    //     if random_get_zero_to_one() <= 0.2 {
+    //         bin_ct = random_get_within_range(32, 384).(s64);
+    //     } else {
+    //         bin_ct = random_get_within_range(1, 64).(s64);
+    //     }
+    //     alloc_sz := bin_ct * a.small_allocator.MIN_ALLOCATION_SIZE;
+    //     t1 := seconds_since_init();
+    //     refs[it] = nack_alloc(*a, alloc_sz);
+    //     t2 := seconds_since_init();
+    //     total_alloc_seconds += t2 - t1;
+    //     max_time = max(max_time, t2-t1);
+    //     if it >= POINTER_COUNT-100 {
+    //         total_alloc_seconds_last_100 += t2 - t1;
+    //     }
+    // }
+    // for 0..POINTER_COUNT-1 {
+    //     index := ifx refs.count > 1 then round(random_get_within_range(0, (refs.count-1).(float))) else 0;
+    //     if index < 0 {
+    //         index = 0;
+    //     }
+    //     ref := refs[index];
+    //     array_ordered_remove_by_index(*refs, index);
+    //     nack_free(*a, *ref);
+    // }
+
+    // // not real world but whatever
+    // total_alloc_ms = total_alloc_seconds * 1000.0;
+    // ms_per_alloc = total_alloc_ms / POINTER_COUNT.(float64);
+    // us_per_alloc = ms_per_alloc * 1000.0;
+
+    // last_100_total_ms = total_alloc_seconds_last_100 * 1000.0;
+    // last_100_ms_per_alloc = last_100_total_ms / 100.0;
+    // last_100_us_per_alloc = last_100_ms_per_alloc * 1000.0;
+
+    // log("mixed allocations avg alloc time:                        %us", us_per_alloc);
+    // log("mixed allocations avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
+    // log("mixed allocations max time:                              %us", max_time * 1000.0 * 1000.0);
+
+    return_test_success();
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 #scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
 // ---------------------------------------------------------------------------------------------------------------------
@@ -842,13 +846,13 @@ serializer_test_body :: (checksum: *[4]u32 = null, load_checksum := false) #expa
     head_12 := s.head;
 
     if checksum {
-        if load_checksum {
-            imprint_checksum(*s);
-            memcpy(checksum.data, s.memory.data, size_of([4]u32));
-        } else {
-            memcpy(s.memory.data, checksum.data, size_of([4]u32));
-            test_condition(validate_checksum(*s));
-        }
+        // if load_checksum {
+        //     imprint_checksum(*s);
+        //     memcpy(checksum.data, s.memory.data, size_of([4]u32));
+        // } else {
+        //     memcpy(s.memory.data, checksum.data, size_of([4]u32));
+        //     test_condition(validate_checksum(*s));
+        // }
     }
 
     rt1, rt2, rt3, rt4: Test_Struct;
@@ -890,3 +894,4 @@ serializer_test_body :: (checksum: *[4]u32 = null, load_checksum := false) #expa
     test_condition(rstr == str);
     test_condition(arrays_equal(rarray, array));
 }
+

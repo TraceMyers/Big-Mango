@@ -188,6 +188,19 @@ array_shrink_if_small_enough :: (array: *[..]$T, realloc_if_using_leq_proportion
     }
 }
 
+// reset a dynamic array without freeing the allocation. unlike array_reset_keeping_memory in that the allocation is not kept
+reset_without_free :: (arr: *[..]$T) {
+    arr.data = null;
+    arr.count = 0;
+    arr.allocated = 0;
+    arr.allocator = context.default_allocator;
+}
+
+reset_without_free :: (str: *string) {
+    str.data = null;
+    str.count = 0;
+}
+
 // dst: |-----|
 // src:    |-----|
 

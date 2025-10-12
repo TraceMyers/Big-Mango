@@ -77,7 +77,7 @@ gadget_think :: (e: *Entity) {
     take_interaction: *Gadget_Interaction;
 
     if gadget_can_respond_to_interaction(e) {
-        for *e.gadget_interactions.field {
+        for *e.gadget_interactions {
             if per_frame_time >= it.end_time {
                 take_interaction = it;
                 break;
@@ -105,7 +105,7 @@ gadget_think :: (e: *Entity) {
     }
 
     if take_interaction != null {
-        index := take_interaction - e.gadget_interactions.field.data;
+        index := take_interaction - e.gadget_interactions.data;
         remove_gadget_interaction_at(e, index);
     }
 
@@ -116,8 +116,8 @@ gadget_think :: (e: *Entity) {
     }
 
     if emit_interact_to_children {
-        for #v2 < 0..e.gadget_children.field.count-1 {
-            child_ref := *e.gadget_children.field[it].entity;
+        for #v2 < 0..e.gadget_children.count-1 {
+            child_ref := *e.gadget_children[it].entity;
             child := try_get_entity(child_ref);
             if !child {
                 remove_gadget_child_at(e, it);
@@ -261,7 +261,7 @@ gadget_button_think :: (using e: *Entity, interaction: *Gadget_Interaction) -> w
         button.cycle_time_cur = norm2_cycle_time_cur * 0.5 * button.cycle_time_max;
         offset := -WORLD_UP * (norm_dist * button.press_distance);
 
-        for *e.meshes.field {
+        for *e.meshes {
             if it.data.(*Mesh_Asset).loader.primitive_type == .CAPSULE {
                 it.offset = offset;
                 break;

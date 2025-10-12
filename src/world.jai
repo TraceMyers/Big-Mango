@@ -40,17 +40,17 @@ World :: struct {
     // allocation
     world_heap_index: s32;
     world_runtime_allocator: Bump_Allocator;
-    name_allocator: Nesting_Allocator(NAME_ALLOCATOR_MIN_BLOCK_SIZE);
-    meshes_allocator: Nesting_Allocator(MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
-    linear_impulses_allocator: Nesting_Allocator(LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
-    event_overlap_allocator: Nesting_Allocator(EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
-    gadget_interaction_allocator: Nesting_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
-    gadget_children_allocator: Nesting_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
+    name_allocator: Super_Allocator(NAME_ALLOCATOR_MIN_BLOCK_SIZE);
+    meshes_allocator: Super_Allocator(MESHES_ALLOCATOR_MIN_BLOCK_SIZE);
+    linear_impulses_allocator: Super_Allocator(LINEAR_IMPULSES_ALLOCATOR_MIN_BLOCK_SIZE);
+    event_overlap_allocator: Super_Allocator(EVENT_OVERLAP_ALLOCATOR_MIN_BLOCK_SIZE);
+    gadget_interaction_allocator: Super_Allocator(GADGET_INTERACTION_ALLOCATOR_MIN_BLOCK_SIZE);
+    gadget_children_allocator: Super_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
     
     // collision
     collision_grid: []Collision_Grid_Allocation;
     collision_grid_cell_flags: []Collision_Grid_Cell_Flags;
-    collision_grid_allocator: Nesting_Allocator(COLLISION_GRID_ALLOCATOR_MIN_SIZE);
+    collision_grid_allocator: Super_Allocator(COLLISION_GRID_ALLOCATOR_MIN_SIZE);
     time_step_accumulator := 0.0;
     contact_pairs: [..]Contact_Pair;
     seen_entity_in_group: Bit_Array(1);
@@ -215,18 +215,17 @@ reset :: (world: *World) {
 serialize :: (using world: *World, record: *Serializer(.STATIC), operation: World_Serialization_Operation = 0, running_serialization_program := false) -> World_Serialization_Operation {
     assert(!serialization_eof_written);
 
-
     if running_serialization_program {
         // when running a serialization program, operationss are being fed in from an array, so they aren't and shouldn't be serialized.
-        assert(operation != .BEGIN_PROGRAM);
-        assert(operation != .RUN_PROGRAM);
+        assert(operation != .BEGIN_SUBROUTINE);
+        assert(operation != .RUN_SUBROUTINE);
     } else {
         serialize(record, *operation);
         // if record.rw_mode == .READ {
         //     array_add(*read_operation_history, operation);
         // }
         if recording_serialization_program {
-            if operation == .RUN_PROGRAM {
+            if operation == .RUN_SUBROUTINE {
                 recording_serialization_program = false;
             } else {
                 array_add(*serialization_program, operation);
@@ -280,21 +279,33 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
         #run assert(INVALID_ENTITY_SERIALIZATION_TARGET == -1);
         entity_serialization_target = increment_wrap(entity_serialization_target, INVALID_ENTITY_SERIALIZATION_TARGET, (entities.count-1).(s32));
     case ._READONLY_SET_ENTITY_NESTED_ALLOCATIONS_TO_DEFAULT;
+        // $todo: any field that points to an allocation should be automatically defaulted.
+        // this isn't currently the case because load-serialization depends on inline data being copied directly
+        // into the entity array, which takes care of the saving and loading of most fields.
         if record.rw_mode == .READ {
-            serializing_entity.name = .{};
-            serializing_entity.meshes = .{};
-            serializing_entity.linear_impulses = .{};
-            serializing_entity.gadget_interactions = .{};
-            serializing_entity.gadget_children = .{};
-            serializing_entity.event_volume.overlaps = .{};
+            reset_without_free(*serializing_entity.name);
+            reset_without_free(*serializing_entity.meshes);
+            reset_without_free(*serializing_entity.linear_impulses);
+            reset_without_free(*serializing_entity.gadget_interactions);
+            reset_without_free(*serializing_entity.gadget_children);
+            reset_without_free(*serializing_entity.event_volume.overlaps);
+            // $todo: should be able to automate this as well
+            serializing_entity.meshes.allocator = meshes_allocator;
+            serializing_entity.linear_impulses.allocator = linear_impulses_allocator;
+            serializing_entity.gadget_interactions.allocator = gadget_interaction_allocator;
+            serializing_entity.gadget_children.allocator = gadget_children_allocator;
+            serializing_entity.event_volume.overlaps.allocator = event_overlap_allocator;
         }
     case .ENTITY_NAME;
-        serialize(record, *serializing_entity.name, *name_allocator);
+        {
+            scope_set_allocator(name_allocator);
+            serialize(record, *serializing_entity.name);
+        }
     case .ENTITY_MESHES;
-        serialize(record, *serializing_entity.meshes, *meshes_allocator);
+        serialize(record, *serializing_entity.meshes);
     case .ENTITY_MESH_DATAS;
         if record.rw_mode == .WRITE {
-            for mesh : serializing_entity.meshes.field {
+            for mesh : serializing_entity.meshes {
                 asset_ref := find_mesh_loader_asset_reference(mesh.data);
                 if asset_ref == null {
                     hash := create_mesh_loader_asset(mesh.data);
@@ -304,36 +315,37 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
                 }
             }
         } else {
-            for *mesh : serializing_entity.meshes.field {
+            for *mesh : serializing_entity.meshes {
                 hash: u64;
                 serialize(record, *hash);
                 asset_ref := find_mesh_loader_asset_reference(hash);
+                // $todo: probably just set it to a default mesh with a default 'bad load' tex instead
                 assert(asset_ref != null);
                 mesh.data = get_or_load_mesh(asset_ref);
             }
         }
     case .ENTITY_LINEAR_IMPULSES;
-        serialize(record, *serializing_entity.linear_impulses, *linear_impulses_allocator);
+        serialize(record, *serializing_entity.linear_impulses);
     case .ENTITY_GADGET_INTERACTIONS;
         if is_set(*serializing_entity.flags, .USES_GADGET) {
-            serialize(record, *serializing_entity.gadget_interactions, *gadget_interaction_allocator);
+            serialize(record, *serializing_entity.gadget_interactions);
         }
     case .ENTITY_GADGET_CHILDREN;
         if is_set(*serializing_entity.flags, .USES_GADGET) {
-            serialize(record, *serializing_entity.gadget_children, *gadget_children_allocator);
+            serialize(record, *serializing_entity.gadget_children);
         }
     case .ENTITY_EVENT_VOLUME_OVERLAPS;
-        serialize(record, *serializing_entity.event_volume.overlaps, *event_overlap_allocator);
+        serialize(record, *serializing_entity.event_volume.overlaps);
     case ._READONLY_ENTITY_COLLISION_CELL_HASH;
         if record.rw_mode == .READ {
             serializing_entity.collision_cell_hash = INVALID_COLLISION_CELL_HASH;
         }
-    case .BEGIN_PROGRAM;
+    case .BEGIN_SUBROUTINE;
         assert(!recording_serialization_program);
         // keeping memory should be fine even though the allocator is temp because temp isn't reset until the end of saving or loading.
         array_reset_keeping_memory(*serialization_program);
         recording_serialization_program = true;
-    case .RUN_PROGRAM;
+    case .RUN_SUBROUTINE;
         assert(serialization_program.count > 0);
         for serialization_program {
             serialize(world, record, it, true);
@@ -355,7 +367,7 @@ save :: (using world: *World) {
     reset_serialization_program();
 
     record: Serializer(.STATIC);
-    set_rw_mode(*record, .WRITE);
+    set_rw_mode(*record, .WRITE, true);
 
     file_path: string;
 
@@ -397,7 +409,7 @@ save :: (using world: *World) {
     serialize(world, *record, .SET_FIRST_ENTITY_AS_SERIALIZATION_TARGET);
 
     // making a program out of the serialization of an individual entity
-    serialize(world, *record, .BEGIN_PROGRAM);
+    serialize(world, *record, .BEGIN_SUBROUTINE);
     serialize(world, *record, ._READONLY_SET_ENTITY_NESTED_ALLOCATIONS_TO_DEFAULT);
     serialize(world, *record, .ENTITY_NAME);
     serialize(world, *record, .ENTITY_MESHES);
@@ -412,14 +424,14 @@ save :: (using world: *World) {
 
     for entities {
         // run the array of operations (in other words, a program), serializing one entity's data
-        serialize(world, *record, .RUN_PROGRAM);
+        serialize(world, *record, .RUN_SUBROUTINE);
     }
 }
 
 load :: (using world: *World, load_file_path := "") {
     auto_release_temp();
     record: Serializer(.STATIC);
-    set_rw_mode(*record, .READ);
+    set_rw_mode(*record, .READ, true);
 
     reset_serialization_program();
 
@@ -436,7 +448,10 @@ load :: (using world: *World, load_file_path := "") {
         rm_error("tried to read file % for world loading, but failed.", file_path);
         return;
     }
-    assert(validate_checksum(*record));
+    if !validate_checksum(*record) {
+        rm_error("checksum compare failure on %", file_path);
+        return;
+    }
     rm_log("loading world %", file_path);
 
     reset(world);
@@ -446,6 +461,8 @@ load :: (using world: *World, load_file_path := "") {
     ran_operation: World_Serialization_Operation = 0;
     record.read_array_allocator = world.world_runtime_allocator;
 
+    // $todo: should probably look ahead and make sure we're not actually reaching eof too soon (or not at all).
+    // catch it, print an error and return early instead of crashing
     while ran_operation != .END_OF_FILE {
         ran_operation = serialize(world, *record); 
         // make sure progress is being made through the file
@@ -507,7 +524,7 @@ add_world_draw_commands :: (cmd: VkCommandBuffer, using world: *World, vp_mat: M
         if player_entity && e.id == player_entity.id && control_mode & FIRST_PERSON_PLAYER_CONTROL_MODE {
             continue;
         }
-        meshes := e.meshes.field;
+        meshes := e.meshes;
         if meshes.count == 0 then continue;
         for *emesh : meshes {
             draw_mesh(cmd, e, emesh, *vp_mat);
@@ -579,7 +596,7 @@ World_Serialization_Operation :: enum s32 {
     ENTITY_EVENT_VOLUME_OVERLAPS;
     _READONLY_ENTITY_COLLISION_CELL_HASH;
     ENTITY_REF_LAYER_V2;
-    BEGIN_PROGRAM;
-    RUN_PROGRAM;
+    BEGIN_SUBROUTINE;
+    RUN_SUBROUTINE;
     WORLD_IS_NEW_VERSION;
 };

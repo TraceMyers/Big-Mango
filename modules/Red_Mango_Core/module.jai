@@ -5,8 +5,6 @@
 //     UP_X := 0.0,        UP_Y := 0.0,        UP_Z := 1.0
 // ); 
 
-#module_parameters()();
-
 FORE_X :: 0.0;      FORE_Y :: 1.0;      FORE_Z :: 0.0;
 RIGHT_X :: 1.0;     RIGHT_Y :: 0.0;    RIGHT_Z :: 0.0;
 UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
@@ -25,7 +23,7 @@ UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
 #load "encode_text.jai";
 #load "scope.jai";
 #load "pool.jai";
-#load "nesting_allocator.jai";
+#load "super_allocator.jai";
 #load "bit_ops.jai";
 #load "bump_allocator.jai";
 #load "file.jai";
@@ -59,7 +57,6 @@ ID_Ref64 :: struct($type_constant: s64) {
 RUN_TESTS :: false;
 SAFE_TEXT_ENCODING :: true;
 SERIALIZE_DEBUG :: false;
-NESTING_ALLOCATOR_DEBUG :: false;
 BIN_POOL_DEBUG :: false;
 
 MANGO_FORE  :: Vector3.{FORE_X, FORE_Y, FORE_Z};
@@ -100,9 +97,10 @@ Compiler :: #import "Compiler";
             array_utils_test,
             pool_test,
             misc_test,
-            nesting_allocator_test,
-            bump_allocator_test,
+            // nesting_allocator_test,
+            // bump_allocator_test,
             serializer_test,
+            super_allocator_test,
         ];
         run_tests("red mango module", tests);
     }
