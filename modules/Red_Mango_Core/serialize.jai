@@ -127,9 +127,9 @@ serialize :: (using buffer: *Serializer($alloc_m, $align_m), array: *[..]$T)
     return is_serial_primitive(T);
 } {
     if rw_mode == .WRITE {
-        serialize_array(buffer, array, .WRITE);
+        serialize_dynamic_array(buffer, array, .WRITE);
     } else {
-        serialize_array(buffer, array, .READ);
+        serialize_dynamic_array(buffer, array, .READ);
     }
 }
 
@@ -138,9 +138,9 @@ serialize :: (using buffer: *Serializer($alloc_m, $align_m), array: *[..]$T, arr
     return is_serial_primitive(T);
 } {
     if rw_mode == .WRITE {
-        serialize_array_data(buffer, array, array_count, .WRITE);
+        serialize_dynamic_array_data(buffer, array, array_count, .WRITE);
     } else {
-        serialize_array_data(buffer, array, array_count, .READ);
+        serialize_dynamic_array_data(buffer, array, array_count, .READ);
     }
 }
 
@@ -150,7 +150,7 @@ serialize_dynamic_array :: (using buffer: *Serializer($alloc_m, $align_m), array
 } {
     array_count: s32 = xx array.count;
     serialize_primitive(buffer, *array_count, mode);
-    serialize_array_data(buffer, array, array_count, mode);
+    serialize_dynamic_array_data(buffer, array, array_count, mode);
 }
 
 serialize_dynamic_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *[..]$T, array_count: s32, $mode: Rw_Mode)

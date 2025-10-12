@@ -221,9 +221,9 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
         assert(operation != .RUN_SUBROUTINE);
     } else {
         serialize(record, *operation);
-        // if record.rw_mode == .READ {
-        //     array_add(*read_operation_history, operation);
-        // }
+        if record.rw_mode == .READ {
+            array_add(*read_operation_history, operation);
+        }
         if recording_serialization_program {
             if operation == .RUN_SUBROUTINE {
                 recording_serialization_program = false;
@@ -237,7 +237,11 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
     serializing_entity: *Entity;
     if entity_serialization_target != INVALID_ENTITY_SERIALIZATION_TARGET {
         serializing_entity = *entities[entity_serialization_target];
+        if serializing_entity.id == 132 && operation == .ENTITY_EVENT_VOLUME_OVERLAPS {
+            a := 0;
+        }
     }
+
 
     if operation == {
     case .END_OF_FILE;
@@ -568,35 +572,37 @@ serialization_program: [..]World_Serialization_Operation;
 recording_serialization_program: bool;
 read_operation_history: [..] World_Serialization_Operation;
 
+dbg_loading_entity_id: u32; // 132
+
 World_Serialization_Operation :: enum s32 {
     END_OF_FILE :: 1;
-    WORLD_ID;
-    WORLD_FRAME;
-    WORLD_NAME;
-    ENTITY_ID_COUNTER;
-    TIME_STEP_ACCUMULATOR;
-    COLOR_GROUP_RANDOM_STATE;
-    COLLISION_FRAME;
-    PHYSICS_FRAME;
-    CAMERA_1_REF;
-    CAMERA_2_REF;
-    PLAYER_ENTITY_REF;
-    ENTITIES;
-    ENTITY_DELETION_QUEUE;
-    ENTITY_REF_LAYER;
-    _READONLY_SET_ENTITY_NESTED_ALLOCATIONS_TO_DEFAULT;
-    SET_FIRST_ENTITY_AS_SERIALIZATION_TARGET;
-    INCREMENT_ENTITY_SERIALIZATION_TARGET;
-    ENTITY_NAME;
-    ENTITY_MESHES;
-    ENTITY_MESH_DATAS;
-    ENTITY_LINEAR_IMPULSES;
-    ENTITY_GADGET_INTERACTIONS;
-    ENTITY_GADGET_CHILDREN;
-    ENTITY_EVENT_VOLUME_OVERLAPS;
-    _READONLY_ENTITY_COLLISION_CELL_HASH;
-    ENTITY_REF_LAYER_V2;
-    BEGIN_SUBROUTINE;
-    RUN_SUBROUTINE;
-    WORLD_IS_NEW_VERSION;
+    WORLD_ID; // 2
+    WORLD_FRAME; // 3
+    WORLD_NAME; // 4
+    ENTITY_ID_COUNTER; // 5
+    TIME_STEP_ACCUMULATOR; // 6
+    COLOR_GROUP_RANDOM_STATE; // 7
+    COLLISION_FRAME; // 8
+    PHYSICS_FRAME; // 9
+    CAMERA_1_REF; // 10
+    CAMERA_2_REF; // 11
+    PLAYER_ENTITY_REF; // 12
+    ENTITIES; // 13
+    ENTITY_DELETION_QUEUE; // 14
+    ENTITY_REF_LAYER; // 15
+    _READONLY_SET_ENTITY_NESTED_ALLOCATIONS_TO_DEFAULT; // 16
+    SET_FIRST_ENTITY_AS_SERIALIZATION_TARGET; // 17
+    INCREMENT_ENTITY_SERIALIZATION_TARGET; // 18
+    ENTITY_NAME; // 19
+    ENTITY_MESHES; // 20
+    ENTITY_MESH_DATAS; // 21
+    ENTITY_LINEAR_IMPULSES; // 22
+    ENTITY_GADGET_INTERACTIONS; // 23
+    ENTITY_GADGET_CHILDREN; // 24
+    ENTITY_EVENT_VOLUME_OVERLAPS; // 25
+    _READONLY_ENTITY_COLLISION_CELL_HASH; // 26
+    ENTITY_REF_LAYER_V2; // 27
+    BEGIN_SUBROUTINE; // 28
+    RUN_SUBROUTINE; // 29
+    WORLD_IS_NEW_VERSION; // 30
 };
