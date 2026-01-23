@@ -236,7 +236,7 @@ tokenize_and_trim :: (s: string, separator: u8, allocator:=context.allocator) ->
     for *strings {
         it.* = trim(it.*);
     }
-    for #v2 < 0..strings.count-1 {
+    for < 0..strings.count-1 {
         if strings[it].count == 0 {
             if it < strings.count - 1 {
                 for i : it..strings.count-2 {
@@ -254,7 +254,7 @@ tokenize_and_trim :: (s: string, separator: u8, allocator:=context.allocator) ->
 //     for *strings {
 //         it.* = trim(it.*);
 //     }
-//     for #v2 < 0..strings.count-1 {
+//     for < 0..strings.count-1 {
 //         if strings[it].count == 0 {
 //             if it < strings.count - 1 {
 //                 for i : it..strings.count-2 {

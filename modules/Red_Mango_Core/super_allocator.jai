@@ -52,10 +52,7 @@ super_allocator_proc_impl :: inline (mode: Allocator_Mode, size: s64, old_size: 
     case .ALLOCATE;
         return super_alloc(super_allocator, size);
     case .RESIZE;
-        if old_memory != null {
-            super_free(super_allocator, old_memory);
-        }
-        return super_alloc(super_allocator, size);
+        return super_realloc(super_allocator, size, old_memory, old_size);
     case .FREE;
         super_free(super_allocator, old_memory);
     case .STARTUP;
@@ -170,6 +167,23 @@ super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64) -
         assert(ptr != null);
     }
     return ptr.(*u8) + MIN_ALLOCATION_SIZE;
+}
+
+super_realloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64, old_memory: *void, old_size: s64) -> *void {
+    if size == old_size {
+        return old_memory;
+    }
+    new_memory: *void;
+    if size > 0 {
+        new_memory = super_alloc(super_allocator, size);
+    }
+    if old_memory != null {
+        if new_memory != null {
+            memcpy(new_memory, old_memory, min(size, old_size));
+        }
+        super_free(super_allocator, old_memory);
+    }
+    return new_memory;
 }
 
 super_free :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), ptr: *void) {

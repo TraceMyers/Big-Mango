@@ -1,6 +1,6 @@
 
 do_debug_draws :: () {
-    for #v2 < 0..line_draws.count-1 {
+    for < 0..line_draws.count-1 {
         // $todo: copying the line draws into another line draws array is silly.
         line := *line_draws[it];
         array_add(*lines, .{

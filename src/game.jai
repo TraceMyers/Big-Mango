@@ -6,7 +6,6 @@
 
 // .41 us = 410 ns ~= 4100 cycles
 
-// todo: collision grid square zero_if_inline no work
 // todo: if you set an allocator within a scope, and use a string builder, setting the string builder's allocator explicitly, it looks like it still uses the context allocator....?
 
 main :: () {

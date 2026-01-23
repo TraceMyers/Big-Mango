@@ -11,19 +11,19 @@ world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
     return clamp(ivec, .{}, COLLISION_GRID_DIMENSIONS-1);
 }
 
-collision_grid_index :: inline (pos: Int_Vector2) -> s32 {
+collision_grid_position_to_index :: inline (pos: Int_Vector2) -> s32 {
     y_part := pos.y * COLLISION_GRID_DIMENSIONS.x;
     x_part := pos.x;
     return x_part + y_part;
 }
 
-collision_grid_index_to_grid_position :: inline (i: s32) -> Int_Vector2 {
+collision_grid_index_to_position :: inline (i: s32) -> Int_Vector2 {
     y_part := i / COLLISION_GRID_DIMENSIONS.x;
     x_part := i - y_part * COLLISION_GRID_DIMENSIONS.x;
     return .{x_part, y_part};
 }
 
-try_inline_collision_cell_allocation :: (grid_index: s32) {
+try_make_collision_cell_allocation_inline :: (grid_index: s32) {
     using context.world;
     alloc := *collision_grid[grid_index];
     if alloc.inline_allocation.zero_if_inline == 0 then return;
@@ -38,7 +38,7 @@ try_inline_collision_cell_allocation :: (grid_index: s32) {
     half_inline_count := alloc.inline_allocation.array.count >> 1;
 
     if dynamic_array.count <= half_inline_count {
-        memset(alloc, 0, size_of(Collision_Grid_Allocation));
+        memset(alloc, 0, size_of(Collision_Grid_Cell));
         memcpy(alloc.inline_allocation.array.data, dynamic_array.data, dynamic_array.count);   
         alloc.inline_allocation.count = xx dynamic_array.count;
         {
@@ -210,7 +210,7 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void
     grid_pos_max := world_to_collision_grid_position(self_swept_aabb.center.xy + self_swept_aabb.extent.xy);
     for x : grid_pos_min.x..grid_pos_max.x {
         for y : grid_pos_min.y..grid_pos_max.y {
-            grid_index := collision_grid_index(.{x.(s32), y.(s32)});
+            grid_index := collision_grid_position_to_index(.{x.(s32), y.(s32)});
             inner_loop_proc(entity_ref, x, y, grid_index, self_swept_aabb, data);
         }
     }
@@ -221,7 +221,7 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: In
     using context.world;
     for x : grid_pos_min.x..grid_pos_max.x {
         for y : grid_pos_min.y..grid_pos_max.y {
-            grid_index := collision_grid_index(.{x.(s32), y.(s32)});
+            grid_index := collision_grid_position_to_index(.{x.(s32), y.(s32)});
             inner_loop_proc(entity_ref, x, y, grid_index, swept_aabb, data);
         }
     }

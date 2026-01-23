@@ -60,9 +60,9 @@ are_any_set :: inline (array: *Long_Flag_Array($T), enum_vals: []T) -> bool {
 }
 
 unset_all :: inline (arr: *Long_Flag_Array($T)) {
-    memset(arr.flag_sets.data, 0x00, size_of(u8) * arr.flag_sets.count);
+    memset(arr.flag_sets.data, 0x00, arr.flag_sets.count);
 }
 
 set_all :: inline (arr: *Long_Flag_Array($T)) {
-    memset(arr.flag_sets.data, 0xff, size_of(u8) * arr.flag_sets.count);
+    memset(arr.flag_sets.data, 0xff, arr.flag_sets.count);
 }

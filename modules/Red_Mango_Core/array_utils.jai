@@ -109,14 +109,14 @@ array_append :: inline (a: *[..]$T, b: []T) {
 }
 
 concatenate :: (a: []$T, b: []T, allocator:=context.allocator) -> []T {
-    arr := alloc_array(T, a.count + b.count, allocator);
+    arr := array_alloc(T, a.count + b.count, allocator);
     copy_memory(arr.data, a.data, a.count);
     copy_memory(arr.data + a.count, b.data, b.count);
     return arr;
 }
 
 duplicate :: (array: []$T, allocator:=context.allocator) -> []T {
-    duplicate := alloc_array(T, array.count, allocator);
+    duplicate := array_alloc(T, array.count, allocator);
     copy_array(duplicate, array);
     return duplicate;
 }
@@ -137,7 +137,7 @@ zero_memory :: inline (data: *void, byte_count: s64) {
 }
 
 resize_copy :: (array: *[]$T, new_count: s64) {
-    new_array := alloc_array(T, new_count);
+    new_array := array_alloc(T, new_count);
     copy_count := min(new_count, array.count);
     if copy_count > 0 {
         memcpy(new_array.data, array.data, copy_count * size_of(T));
@@ -153,7 +153,7 @@ copy_range_inside_array :: (array: []$T, dst: s64, src: s64, count: s64) {
     if abs_diff < count {
         if diff < 0 then for 0..count-1 {
             array[dst+it] = array[src+it];
-        } else for #v2 < 0..count-1 {
+        } else for < 0..count-1 {
             array[dst+it] = array[src+it];
         }
     } else {

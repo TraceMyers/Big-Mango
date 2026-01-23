@@ -106,10 +106,10 @@ Collision_Grid_Cell_Flags :: enum_flags u8 {
 
 Collision_Grid_Item :: Entity_Ref;
 
-Collision_Grid_Allocation :: union {
-    dynamic_array: [..]Collision_Grid_Item = ---;
+Collision_Grid_Cell :: union { // 48 bytes
+    dynamic_array: [..]Collision_Grid_Item = ---; // 40 bytes
     inline_allocation: struct {
-        array: [5]Collision_Grid_Item;
+        array: [5]Collision_Grid_Item; // 8 * 5 = 40 bytes
         count: s32;
         zero_if_inline: u8;
     };

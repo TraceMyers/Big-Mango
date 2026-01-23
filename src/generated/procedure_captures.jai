@@ -64,7 +64,7 @@ Procedure_Capture_Duplicate :: struct {
 	
 	    return out_result.depth > 0;
 	
-	} @struct_capture_duplicate 
+	} @struct_capture_duplicate @CAPTURE_COLLISION_DATA
 	
 	solve_potential_contact_sphere_sphere :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
 		using procedure_capture_data.solve_potential_contact_sphere_sphere;
@@ -91,6 +91,6 @@ Procedure_Capture_Duplicate :: struct {
 	    out_result.depth = radius_sum - future_dist;
 	
 	    return out_result.depth > 0;
-	} @struct_capture_duplicate
+	} @struct_capture_duplicate @CAPTURE_COLLISION_DATA
 	
 }

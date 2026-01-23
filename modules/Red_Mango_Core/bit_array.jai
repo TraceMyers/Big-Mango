@@ -186,7 +186,7 @@ find_last_group_with_unset_bits :: (using array: *Bit_Array($COUNT), in_group_in
     }
 
     ignore_groups_mask : u64 = 0;
-    if start_group_in_item < (GROUPS_PER_U64 - 1) then for #v2 < start_group_in_item+1..GROUPS_PER_U64-1 {
+    if start_group_in_item < (GROUPS_PER_U64 - 1) then for < start_group_in_item+1..GROUPS_PER_U64-1 {
         ignore_groups_mask |= GROUP_BASE_MASK << (it * GROUP_BIT_COUNT);
     }
 
@@ -204,7 +204,7 @@ find_last_group_with_unset_bits :: (using array: *Bit_Array($COUNT), in_group_in
     iter_ct := start_item + 1;
     if iter_ct > 1 {
         #if GROUPS_PER_U64 == 64 {
-            for #v2 < i: 0..start_item-1 {
+            for < i: 0..start_item-1 {
                 bit_collection := items[i];
                 if bit_collection == 0xffff_ffff_ffff_ffff {
                     continue;
@@ -212,7 +212,7 @@ find_last_group_with_unset_bits :: (using array: *Bit_Array($COUNT), in_group_in
                 return_group_index_1_bit_groups(get_group_count(array), bit_collection, i, false, true);
             }
         } else {
-            for #v2 < i: 0..start_item-1 {
+            for < i: 0..start_item-1 {
                 bit_collection := items[i];
                 if (bit_collection & collection_mask) == collection_mask {
                     continue;
@@ -240,7 +240,7 @@ find_last_group_with_set_bits :: (using array: *Bit_Array($COUNT), in_group_inde
     }
 
     ignore_groups_mask : u64 = 0;
-    if start_group_in_item < (GROUPS_PER_U64 - 1) then for #v2 < start_group_in_item+1..GROUPS_PER_U64-1 {
+    if start_group_in_item < (GROUPS_PER_U64 - 1) then for < start_group_in_item+1..GROUPS_PER_U64-1 {
         ignore_groups_mask |= GROUP_BASE_MASK << (it * GROUP_BIT_COUNT);
     }
     ignore_groups_mask = ~ignore_groups_mask;
@@ -259,7 +259,7 @@ find_last_group_with_set_bits :: (using array: *Bit_Array($COUNT), in_group_inde
     iter_ct := start_item + 1;
     if iter_ct > 1 {
         #if GROUPS_PER_U64 == 64 {
-            for #v2 < i: 0..start_item-1 {
+            for < i: 0..start_item-1 {
                 bit_collection := items[i];
                 if bit_collection == 0 {
                     continue;
@@ -267,7 +267,7 @@ find_last_group_with_set_bits :: (using array: *Bit_Array($COUNT), in_group_inde
                 return_group_index_1_bit_groups(get_group_count(array), bit_collection, i, false, false);
             }
         } else {
-            for #v2 < i: 0..start_item-1 {
+            for < i: 0..start_item-1 {
                 bit_collection := items[i];
                 if (bit_collection & collection_mask) == 0 {
                     continue;
@@ -418,7 +418,7 @@ return_group_index_n_bit_groups :: (groups_per_u64: s64, group_bit_count: s64, i
             mask <<= group_bit_count;
         }
     } else {
-        for #v2 < g: 0..groups_per_u64-1 {
+        for < g: 0..groups_per_u64-1 {
             reverse_search_mask := mask << (group_bit_count * g);
             #if FINDING_GAP {
                 match := (bit_collection & reverse_search_mask) != reverse_search_mask;
@@ -456,7 +456,7 @@ _bit_scan_reverse :: inline (input: $T) -> s32 #expand {  // One plus the index 
         return cast,trunc(s32)(result + 1);
     } else {
         // @Speed: Slow fallback for other CPUs.
-        for #v2 <i: 0..BITS-1 {
+        for <i: 0..BITS-1 {
             if input & cast,no_check(T) (1 << i) return cast(s32) (i + 1);
         }
 

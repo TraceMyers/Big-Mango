@@ -116,7 +116,7 @@ gadget_think :: (e: *Entity) {
     }
 
     if emit_interact_to_children {
-        for #v2 < 0..e.gadget_children.count-1 {
+        for < 0..e.gadget_children.count-1 {
             child_ref := *e.gadget_children[it].entity;
             child := try_get_entity(child_ref);
             if !child {

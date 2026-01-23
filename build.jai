@@ -1,4 +1,6 @@
-// $todo: @nocheckin + script for doing git stuff (so nocheckin can block commits)
+// $todo: to finish the procedure capture duplicate stuff, need to generate the duplicate during the TYPECHECKED stage.
+//          maybe best way to handle it is to generate one file per procedure.
+//      - note: left off at the point where I'm trying to create a Code_Procedure_Call at the top of the proc
 
 // build vars
 PROFILERS_ACTIVE :: true;
@@ -9,7 +11,7 @@ GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 // code gen
 COMPILE_SHADERS :: false;
 REGENERATE_ASSET_REFERENCES :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: false;
+GENERATE_PROCEDURE_BODY_CAPTURES :: true;
 
 #run {
     // make sure environment is set up
@@ -107,7 +109,7 @@ GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
     // build
 
-    // force the compiler to wait for compiler_wait_for_message() calls so that the compilation process can be customized during compilation
+    // force the compiler to wait for compiler_wait_for_message() calls so that the compilation process can be customized 
     compiler_begin_intercept(w);
 
     // buildvars
@@ -184,24 +186,21 @@ HERE,
                             array_add(*command_line_proc_names, set_command_line_proc_name);
                         }
                     }
-                } else if it.expression.type.type == .PROCEDURE {
-                    decl := it.expression.(*Code_Declaration);
-                    if decl.expression != null && decl.expression.kind == .PROCEDURE_HEADER {
-                        proc_header := decl.expression.(*Code_Procedure_Header);
+                } 
+                #if GENERATE_PROCEDURE_BODY_CAPTURES {
+                    for tc : m_typechecked.procedure_bodies {
+                        body := tc.expression;
+                        if body.body_flags & .ALREADY_MODIFIED {
+                            continue;
+                        }
+                        assert(body.block != null);   
+                        proc_header := body.header;
                         for note : proc_header.notes {
-                            if note.text == "command_line" {
-                                log("found command line proc: %", proc_header.name);
-                                array_add(*command_line_proc_names, proc_header.name);
-                            } else {
-                                #if GENERATE_PROCEDURE_BODY_CAPTURES {
-                                    if note.text == "capture_body_as_struct" {
-                                        #if GENERATE_PROCEDURE_BODY_CAPTURES {
-                                            array_add(*procs_to_capture_as_structs, proc_header);
-                                        }
-                                    }
-                                }
+                            if note.text == "capture_body_as_struct" {
+                                generate_captured_procedure(proc_header, w);
                             }
                         }
+
                     }
                 }
             }
@@ -212,7 +211,7 @@ HERE,
                 #if REGENERATE_ASSET_REFERENCES {
                     create_assets_file();
                 }
-                generate_captured_procedures(procs_to_capture_as_structs, w);
+                // generate_captured_procedures(procs_to_capture_as_structs, w);
                 generate_command_line_code(gen_float_command_line_var_procs, gen_bool_command_line_var_procs, gen_int_command_line_var_procs, command_line_proc_names, w);
                 log("\nend code generation\n");
                 generated_code = true;
@@ -306,7 +305,7 @@ vset_% :: (args: []Command_Line_Argument) {
     if success {
         % = xx x;
     } else {
-        rm_error("failed parsing input as float: %%", args[0]._string);
+        // rm_error("failed parsing input as float");
     }
 }
 HERE,
@@ -322,7 +321,7 @@ vset_% :: (args: []Command_Line_Argument) {
     if success {
         % = xx x;
     } else {
-        rm_error("failed parsing input as int: %%", args[0]._string);
+        // rm_error("failed parsing input as int");
     }
 }
 HERE,
@@ -372,7 +371,141 @@ HERE,
     add_build_string(builder_to_string(*builder), w);
 }
 
+generate_captured_procedure :: (proc_header: *Code_Procedure_Header, w: Workspace) {
+    // #if !GENERATE_PROCEDURE_BODY_CAPTURES {
+    //     if file_exists("src/generated/procedure_capture.jai") {
+    //         add_build_file("src/generated/procedure_captures.jai", w);
+    //     }
+    //     return;
+    // }
+
+    procedure_builder: String_Builder;
+    struct_definition_builder: String_Builder;
+    struct_declaration_builder: String_Builder;
+
+    if proc_header.body_or_null == null {
+        log("tried to capture procedure % but the body was null", proc_header.name);
+        return;
+    }
+
+    print_to_builder(*procedure_builder, "Procedure_Capture_Duplicate_% :: struct {\n\n", procedure_capture_duplicate_counter);
+    print_to_builder(*struct_definition_builder, "Procedure_Capture_Type_% :: struct {\n\n", procedure_capture_duplicate_counter);
+    print_to_builder(*struct_declaration_builder, "Procedure_Capture_Data_% :: struct {\n", procedure_capture_duplicate_counter);
+    defer procedure_capture_duplicate_counter += 1;
+
+    // if doing a proc capture, the first note must be the capture note
+    // the second note must be the name of a compile-time constant deciding whether to call the captured version
+    assert(proc_header.notes.count == 2 && proc_header.notes[0].text == "capture_body_as_struct");
+
+    body := proc_header.body_or_null;
+    proc_body_in_filename := body.block.location.enclosing_load.fully_pathed_filename;
+    proc_body_file, success := read_entire_file(proc_body_in_filename);
+    if !success {
+        log("failed to open file % when generating struct for proc %", proc_body_in_filename, proc_header.name);
+        return;
+    }
+    defer free(proc_body_file);
+    
+    Procedure_Lines_Collector :: struct {
+        procedure_lines: [..]string;
+        procedure_block: *Code_Block;
+    }
+
+    collect_procedure_lines :: (line: *string, line_index: s64, in_data: *void) {
+        collector := in_data.(*Procedure_Lines_Collector);
+        proc_body_line_begin := collector.procedure_block.location.l0;
+        proc_body_line_end := collector.procedure_block.location.l1;
+        if line_index >= proc_body_line_begin-1 && line_index <= proc_body_line_end {
+            array_add(*collector.procedure_lines, line.*);
+        }
+    }
+    collector := Procedure_Lines_Collector.{procedure_block=proc_header.body_or_null.block};
+    process_per_line(proc_body_file, collect_procedure_lines, *collector);
+
+    if collector.procedure_lines.count < 2 {
+        log("failed to collect a valid line count when generating a struct for proc %", proc_header.name);
+        return;
+    }
+    proc_header_line := *collector.procedure_lines[0];
+    if !begins_with(proc_header_line.*, proc_header.name) {
+        log("when generating a struct for proc %, noticed that line % does not begin with the procedure's name. failed to generate the alternate proc", proc_header.name, proc_header_line.*);
+        return;
+    }
+
+    for < *collector.procedure_lines {
+        // replace the note with one noting that the procedure was generated by this process
+        line_with_replaced_note, replaced_count := replace(it.*, "@capture_body_as_struct", "@struct_capture_duplicate");
+        if replaced_count > 0 {
+            it.* = line_with_replaced_note;
+        }
+        // delete declaration lines that aren't also assignments. their declarations would be in conflict with the existence of the same-named struct members.
+        if it_index > 0
+        && find_index_from_left(it.*, ":") != -1
+        && (find_index_from_left(it.*, "=") == -1 || find_index_from_left(it.*, "---") != -1) {
+            array_ordered_remove_by_index(*collector.procedure_lines, it_index);
+            continue;
+        }
+        // turn combined declaration-assignment statements into just assignments (assigning to the struct field)
+        line_with_replaced_combination_decl_expr:, replaced_count = replace(it.*, ":=", "=");
+        if replaced_count > 0 {
+            it.* = line_with_replaced_combination_decl_expr;
+        }
+    }
+
+    // add the struct instance's 'using' line into the top of the body
+    using_statement := tprint("\tusing procedure_capture_data.%;", proc_header.name);
+    array_insert_at(*collector.procedure_lines, using_statement, 1);
+
+    // statically declare an instance of the generated struct in the global scope (maybe change later)
+    print_to_builder(*struct_declaration_builder, "\t%: Procedure_Capture_Type_%.%;\n", proc_header.name, procedure_capture_duplicate_counter, proc_header.name);
+
+    // declare the duplicate version of the procedure that, rather than just using local variables, stores all values into the struct instance.
+    for collector.procedure_lines {
+        print_to_builder(*procedure_builder, "\t%\n", it);
+    }
+
+    // declare the struct type
+    print_to_builder(*struct_definition_builder, "\t% :: struct {\n", proc_header.name);
+    recursively_gather_declarations_from_block(body.block, *struct_definition_builder);
+    print_to_builder(*struct_definition_builder, "\t}\n\n");
+
+    // modify the original procedure to call the duplicate procedure if some constant is true
+    argnames_array := get_procedure_argnames(collector.procedure_lines[0]);
+    argnames: string;
+    if argnames.count > 0 {
+        argnames = join(..argnames_array, separator=", ");
+    }
+    activate_captured_call_constant_name := proc_header.notes[1].text;
+    new_statements_array: [..]*Code_Node;
+    for body.block.statements {
+        array_add(*new_statements_array, it);
+    }
+    return_captured_call_line := sprint(
+        "#if % then return Procedure_Capture_Duplicate_%.%(%);", 
+        procedure_capture_duplicate_counter,
+        activate_captured_call_constant_name,
+        proc_header.name,
+        argnames
+    );
+    array_add(*new_statements_array, make_return_statement(make_string_literal(return_captured_call_line)));
+    body.block.statements = new_statements_array;
+    compiler_modify_procedure(w, body);   
+
+    file_bytes := tprint(
+        "procedure_capture_data: Procedure_Capture_Data_%;\n\n%}\n\n%}\n\n%}", 
+        procedure_capture_duplicate_counter,
+        builder_to_string(*struct_definition_builder),
+        builder_to_string(*struct_declaration_builder),
+        builder_to_string(*procedure_builder)
+    );
+
+    filename := tprint("src/generated/procedure_capture_%.jai", procedure_capture_duplicate_counter);
+    write_entire_file(filename, file_bytes);
+    add_build_file(filename, w);
+}
+
 generate_captured_procedures :: (procs_to_capture_as_structs: [..]*Code_Procedure_Header, w: Workspace) {
+    /*
     #if !GENERATE_PROCEDURE_BODY_CAPTURES {
         add_build_file("src/generated/procedure_captures.jai", w);
         return;
@@ -390,6 +523,10 @@ generate_captured_procedures :: (procs_to_capture_as_structs: [..]*Code_Procedur
 
     for proc_header : procs_to_capture_as_structs {
         if proc_header.body_or_null == null then continue;
+
+        // if doing a proc capture, the first note must be the capture note
+        // the second note must be the name of a compile-time constant deciding whether to call the captured version
+        assert(proc_header.notes.count == 2 && proc_header.notes[0].text == "capture_body_as_struct");
 
         body := proc_header.body_or_null;
         proc_body_in_filename := body.block.location.enclosing_load.fully_pathed_filename;
@@ -424,7 +561,7 @@ generate_captured_procedures :: (procs_to_capture_as_structs: [..]*Code_Procedur
             log("when generating a struct for proc %, noticed that line % does not begin with the procedure's name. failed to generate the alternate proc", proc_header.name, proc_header_line.*);
         }
 
-        for #v2 < *collector.procedure_lines {
+        for < *collector.procedure_lines {
             // replace the note with one noting that the procedure was generated by this process
             line_with_replaced_note, replaced_count := replace(it.*, "@capture_body_as_struct", "@struct_capture_duplicate");
             if replaced_count > 0 {
@@ -460,17 +597,41 @@ generate_captured_procedures :: (procs_to_capture_as_structs: [..]*Code_Procedur
         print_to_builder(*struct_definitions_builder, "\t% :: struct {\n", proc_header.name);
         recursively_gather_declarations_from_block(body.block, *struct_definitions_builder);
         print_to_builder(*struct_definitions_builder, "\t}\n\n");
+
+        // modify the original procedure to call the duplicate procedure if some constant is true
+        argnames_array := get_procedure_argnames(collector.procedure_lines[0]);
+        argnames: string;
+        if argnames.count > 0 {
+            argnames = join(..argnames_array, separator=", ");
+        }
+        activate_captured_call_constant_name := proc_header.notes[1].text;
+        new_statements_array: [..]*Code_Node;
+        for body.block.statements {
+            array_add(*new_statements_array, it);
+        }
+        return_captured_call_line := sprint(
+            "#if % then return Procedure_Capture_Duplicate.%(%);", 
+            activate_captured_call_constant_name,
+            proc_header.name,
+            argnames
+        );
+        array_add(*new_statements_array, make_return_statement(make_string_literal(return_captured_call_line)));
+        body.block.statements = new_statements_array;
+        compiler_modify_procedure(w, body);
     }
 
     file_bytes := tprint(
-        "procedure_capture_data: Procedure_Capture_Data;\n\n%}\n\n%}\n\n%}", 
+        "procedure_capture_data: Procedure_Capture_Data_%;\n\n%}\n\n%}\n\n%}", 
+        procedure_capture_duplicate_counter,
         builder_to_string(*struct_definitions_builder),
         builder_to_string(*struct_declarations_builder),
         builder_to_string(*procedures_builder)
     );
 
-    write_entire_file("src/generated/procedure_captures.jai", file_bytes);
-    add_build_file("src/generated/procedure_captures.jai", w);
+    filename := tprint("src/generated/procedure_captures_%.jai", procedure_capture_duplicate_counter);
+    write_entire_file(filename, file_bytes);
+    add_build_file(filename, w);
+    */
 }
 
 recursively_gather_declarations_from_block :: (block: *Code_Block, builder: *String_Builder, max_depth := 10, depth := 0) {
@@ -537,8 +698,58 @@ recursively_gather_declarations_from_block :: (block: *Code_Block, builder: *Str
     }
 }
 
+make_procedure_call :: (call_str: string, proc_header: *Code_Procedure_Header) -> *Code_Node {
+    node := New(Code_Procedure_Call);
+
+
+    return node;
+}
+
+make_return_statement :: (expression: *Code_Node) -> *Code_Return {
+    ret := New(Code_Return);
+    ret.kind = .RETURN;
+
+    arguments_unsorted: [..] Code_Argument;
+
+    arg: Code_Argument;
+    arg.expression = expression;
+    arg.name = null;
+
+    array_add(*arguments_unsorted, arg);
+    ret.arguments_unsorted = arguments_unsorted;
+
+    arguments_sorted: [..] *Code_Node;
+    array_add(*arguments_sorted, expression);
+    ret.arguments_sorted = arguments_sorted;
+
+    return ret;
+}
+
+get_procedure_argnames :: (proc_declaration_first_line: string) -> []string {
+    success_0, _, right := split_from_left(proc_declaration_first_line, #char "(");
+    if !success_0 || right.count < 2 {
+        return .[];
+    }
+    success_1, args, _ := split_from_right(right, #char ")");
+    if !success_1 || args.count < 3 {
+        return .[];
+    }
+    args = trim(args);
+
+    comma_separated_args := split(args, ",");
+    for *arg : comma_separated_args {
+        success, argname, typename := split_from_left(arg.*, #char ":");
+        arg.* = argname;
+        if !success {
+            return .[];
+        }
+    }
+    return comma_separated_args;
+}
+
 // the counter used for scope timer id's
 scope_timer_id_counter: u32;
+procedure_capture_duplicate_counter: s32;
 
 GET_SCOPE_TIMER_ID_PROC_DEF_FMT_STRING :: #string HERE
 get_scope_timer_id :: () -> u32 {

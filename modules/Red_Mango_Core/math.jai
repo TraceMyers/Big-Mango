@@ -33,13 +33,20 @@ VectorTypes :: Type.[Vector2, Vector3, Vector4, Quaternion];  // Used for type r
 Vector2Types :: Type.[Vector2, Int_Vector2];
 VectorAndFloatTypes :: Type.[Vector2, Vector3, Vector4, Quaternion, float32, float64];  // Used for type restriction in normalize().
 
-Direction :: enum {
+Direction :: enum u8 {
     UP;
     DOWN;
     LEFT;
     RIGHT;
     FORE;
     BACK;
+}
+
+Direction_2D :: enum u8 {
+    UP;
+    DOWN;
+    LEFT;
+    RIGHT;
 }
 
 world_direction :: (dir: Direction) -> Vector3 {
@@ -127,6 +134,7 @@ round :: (a: float64, $Int_Type := s32) -> Int_Type
 }
 
 // cast between int and normalized or non-normalized floats with optional rounding on float->int
+// todo: I really only use this for normalizing and denormalizing between floats and ints, so it could just be simplified to only do that, and also be renamed
 alter_cast :: inline (number: $In_Type, $Out_Type: Type, $NORMALIZED_FLOAT := false, $ROUND_TO_INT := true) -> Out_Type
 #modify {
     float_to_int := is_float_type(In_Type) && is_int_type(Out_Type);

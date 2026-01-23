@@ -48,7 +48,7 @@ World :: struct {
     gadget_children_allocator: Super_Allocator(GADGET_CHILD_ALLOCATOR_MIN_BLOCK_SIZE);
     
     // collision
-    collision_grid: []Collision_Grid_Allocation;
+    collision_grid: []Collision_Grid_Cell;
     collision_grid_cell_flags: []Collision_Grid_Cell_Flags;
     collision_grid_allocator: Super_Allocator(COLLISION_GRID_ALLOCATOR_MIN_SIZE);
     time_step_accumulator := 0.0;
@@ -221,9 +221,10 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
         assert(operation != .RUN_SUBROUTINE);
     } else {
         serialize(record, *operation);
-        if record.rw_mode == .READ {
-            array_add(*read_operation_history, operation);
-        }
+        // $todo: this crashes and it's annoying
+        // if record.rw_mode == .READ {
+        //     array_add(*read_operation_history, operation);
+        // }
         if recording_serialization_program {
             if operation == .RUN_SUBROUTINE {
                 recording_serialization_program = false;
@@ -237,11 +238,7 @@ serialize :: (using world: *World, record: *Serializer(.STATIC), operation: Worl
     serializing_entity: *Entity;
     if entity_serialization_target != INVALID_ENTITY_SERIALIZATION_TARGET {
         serializing_entity = *entities[entity_serialization_target];
-        if serializing_entity.id == 132 && operation == .ENTITY_EVENT_VOLUME_OVERLAPS {
-            a := 0;
-        }
     }
-
 
     if operation == {
     case .END_OF_FILE;

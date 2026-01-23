@@ -2,8 +2,6 @@
 // todo: it's convenient to clamp positions to the bounds of the collision grid so that the game doesn't have to crash
 // when things go outside the bounds (and it's convenient for aabb projection), but some handling needs to be done to make sure that doesn't happen often. otherwise,
 // a situation might occur where entities that are pretty far apart are bunched up into the edge cells, overpopulating them.
-// todo: find a way to capture all declaration names and types in a block and export it to a struct, then insert
-// code that copies all of the values of the block into the struct.
 
 // world size: 2000 x 2000
 // cell size: 10 x 10 
@@ -16,6 +14,8 @@
 //      - throwing ball into hoop (normal)
 //      - throwing ball into hoop (using super throw)
 //      - jumping up and dropping ball into hoop (using super jump)
+
+CAPTURE_COLLISION_DATA :: true;
 
 AABB_OVERLAP_BUFFER :: 1.0;
 PHYSICS_FIXED_TIME_STEP :: 1.0 / 240.0;
@@ -54,7 +54,7 @@ solve_contacts :: () {
     // for any cells that were altered, shrink occupation allocations to be inline if it fits
     for altered_cells {
         collision_grid_cell_flags[it] &= ~.JUST_ALTERED;
-        try_inline_collision_cell_allocation(it);
+        try_make_collision_cell_allocation_inline(it);
     }
 
     warm_start_contacts();
@@ -73,9 +73,9 @@ solve_contacts :: () {
 remove_entity_from_collision_grid :: (e: *Entity) {
     using context.world;
     hash_upper := e.collision_cell_hash >> 32;
-    grid_pos_min := collision_grid_index_to_grid_position(xx hash_upper);
+    grid_pos_min := collision_grid_index_to_position(xx hash_upper);
     hash_lower := e.collision_cell_hash & 0xffff_ffff;
-    grid_pos_max := collision_grid_index_to_grid_position(xx hash_lower);
+    grid_pos_max := collision_grid_index_to_position(xx hash_lower);
     collision_grid_iterate(e.ref, *altered_cells, grid_pos_min, grid_pos_max, .{}, remove_from_collision_cell);
     e.collision_cell_hash = INVALID_COLLISION_CELL_HASH;
 }
@@ -93,8 +93,8 @@ update_collision_grid_cell_occupations :: () {
         grid_pos_min := world_to_collision_grid_position(self_aabb.center.xy - self_aabb.extent.xy);
         grid_pos_max := world_to_collision_grid_position(self_aabb.center.xy + self_aabb.extent.xy);
 
-        hash_upper := collision_grid_index(grid_pos_min);
-        hash_lower := collision_grid_index(grid_pos_max);
+        hash_upper := collision_grid_position_to_index(grid_pos_min);
+        hash_lower := collision_grid_position_to_index(grid_pos_max);
         hash : s64 = (hash_upper.(s64) << 32) | hash_lower;
 
         if e.collision_cell_hash != hash {
@@ -183,7 +183,7 @@ apply_impulses :: () {
         }
         if is_set(*e.flags, .MOVED_BY_PHYSICS) && e.linear_impulses.count > 0 {
             inv_mass := 1.0 / e.physics_properties.mass;
-            for #v2 < *e.linear_impulses {
+            for < *e.linear_impulses {
                 impulse_time_step := min(it.time_remaining, PHYSICS_FIXED_TIME_STEP);
                 // a = f/m
                 prev_velocity := e.velocity;
@@ -355,18 +355,10 @@ solve_potential_contact :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_
     case .SPHERE;
         if shape_b.type == {
         case .SPHERE;
-            #if BUILDVAR_COLLISION_DEBUG {
-                return Procedure_Capture_Duplicate.solve_potential_contact_sphere_sphere(body_a, axes_a, body_b, axes_b, time_step, out_result);
-            } else {
-                return solve_potential_contact_sphere_sphere(body_a, axes_a, body_b, axes_b, time_step, out_result);
-            }
+            return solve_potential_contact_sphere_sphere(body_a, axes_a, body_b, axes_b, time_step, out_result);
         case .CAPSULE;
         case .RECT;
-            #if BUILDVAR_COLLISION_DEBUG {
-                return Procedure_Capture_Duplicate.solve_potential_contact_sphere_rect(body_a, axes_a, body_b, axes_b, time_step, out_result);
-            } else {
-                return solve_potential_contact_sphere_rect(body_a, axes_a, body_b, axes_b, time_step, out_result);
-            }
+            return solve_potential_contact_sphere_rect(body_a, axes_a, body_b, axes_b, time_step, out_result);
         case .BOX;
         case .AABB;
         case .HALF_SPACE;
@@ -444,7 +436,7 @@ solve_potential_contact_sphere_sphere :: (body_a: Physics_Body, axes_a: Axes, bo
     out_result.depth = radius_sum - future_dist;
 
     return out_result.depth > 0;
-} @capture_body_as_struct
+} @capture_body_as_struct @CAPTURE_COLLISION_DATA
 
 solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body_b: Physics_Body, axes_b: Axes, time_step: float, out_result: *Contact_Result) -> bool {
     sphere_a    := *body_a.shape.sphere;
@@ -464,6 +456,7 @@ solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body
 
     contact_diff := body_a.center - a_projected_onto_b;
     dist := distance(body_a.center, a_projected_onto_b);
+    // dist := abs(dot(contact_diff, axes_b.fore)); // only if clamps didn't do anything. probably not worth the branch
 
     out_result.normal = contact_diff / dist;
 
@@ -473,7 +466,7 @@ solve_potential_contact_sphere_rect :: (body_a: Physics_Body, axes_a: Axes, body
 
     return out_result.depth > 0;
 
-} @capture_body_as_struct 
+} @capture_body_as_struct @CAPTURE_COLLISION_DATA
 
 get_aabb_extent :: (shape: Collision_Shape, axis_fore: Vector3, axis_up: Vector3, axis_right: Vector3) -> Vector3 {
     if #complete shape.type == {
