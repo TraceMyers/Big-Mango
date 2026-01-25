@@ -6,7 +6,7 @@ _scratch :: (stage: Boot_Stage) -> bool {
 
     {
         // moving window to top monitor only *after* swapchain creation. something in that process creates a very jittery framerate if the swapchain is created when the window is positioned within that monitor's rect.
-        move_window(.{90, -1300});
+        // move_window(.{90, -1300});
     }
     // ground entity
     {
@@ -14,8 +14,8 @@ _scratch :: (stage: Boot_Stage) -> bool {
         TILE_WIDTH :: 200.0;
         for x : 0..RANGE_END {
             for y : 0..RANGE_END {
-                center_indices := Int_Vector2.{RANGE_END / 2, RANGE_END / 2};
-                center_index_diff := Int_Vector2.{x, y} - center_indices;
+                center_indices := Vector2i.{RANGE_END / 2, RANGE_END / 2};
+                center_index_diff := Vector2i.{x, y} - center_indices;
                 center_pos := Vector3.{xy=to_vector2(center_index_diff) * TILE_WIDTH};
                 ground := spawn_floor(center_pos, .{g=0.8,b=0.7}, TILE_WIDTH);
                 ground.physics_properties.elasticity = 0.4;

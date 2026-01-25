@@ -25,9 +25,10 @@ Serializer :: struct($in_alloc_mode: Serializer_Alloc_Mode = .STATIC, $in_align_
     pad_for_checksum := false;
     alloc_mode :: in_alloc_mode;
     align_mode :: in_align_mode;
-#place memory; // for debug
+#overlay(memory) // for debug
     memory_count: s64; 
     memory_data: *u8;
+    reverse_byte_order: bool;
 }
 
 Serializer_Alloc_Mode :: enum u8 {
@@ -42,7 +43,7 @@ Serializer_Align_Mode :: enum u8 {
 }
 
 // should be called after pad_for_checksum is set, if it is being set
-set_rw_mode :: (using buffer: *Serializer($alloc_m, $align_m), m: Rw_Mode, use_checksum := false) {
+set_rw_mode :: (using buffer: *Serializer($alloc_m, $align_m), m: Rw_Mode, use_checksum := false, do_reverse_bytes := false) {
     rw_mode = m;
     pad_for_checksum = use_checksum;
     if pad_for_checksum {
@@ -50,18 +51,24 @@ set_rw_mode :: (using buffer: *Serializer($alloc_m, $align_m), m: Rw_Mode, use_c
     } else {
         head = 0;
     }
+    reverse_byte_order = do_reverse_bytes;
 }
 
 reset :: (using buffer: *Serializer($alloc_m, $align_m), keep_allocation := true) {
     if !keep_allocation {
         reset(*memory);
     }
-    set_rw_mode(buffer, .WRITE, pad_for_checksum);
+    set_rw_mode(buffer, rw_mode, pad_for_checksum, reverse_byte_order);
 }
 
+// warning: this can't reverse bytes, if that function is needed
 write_entire_file :: (name: string, buffer: *Serializer($alloc_m, $align_m)) -> bool {
     str := string.{buffer.head, buffer.memory.data};
     return write_entire_file(name, str);
+}
+
+view_bytes_before_head :: (using buffer: *Serializer($alloc_m, $align_m)) -> string {
+    return string.{head, memory.data};
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -84,6 +91,10 @@ read_out :: inline (using buffer: *Serializer($alloc_m, $align_m), $T: Type) -> 
 } {
     item: T = ---;
     read(buffer, *item);
+    if reverse_byte_order {
+        item_copy := item;
+        reverse_bytes((*item).(*u8), (*item_copy).(*u8), size_of(T));
+    }
     return item;
 }
 
@@ -166,14 +177,14 @@ serialize_dynamic_array_data :: (using buffer: *Serializer($alloc_m, $align_m), 
     new_head := head + array_size;
     check_new_head(buffer, new_head);
     #if mode == .WRITE {
-        memcpy(memory.data + head, array.data, array_size);
+        array_data_write(memory.data + head, array.data, array_size, reverse_byte_order);
     } else {
         if array.data == null {
             array_resize(array, array_count, false);
         } else {
             assert(array.count >= array_count);
         }
-        memcpy(array.data, memory.data + head, array_size);
+        array_data_read(memory.data + head, array.data, array_size, reverse_byte_order);
     }
     head = new_head;
 }
@@ -225,15 +236,14 @@ serialize_array_data :: (using buffer: *Serializer($alloc_m, $align_m), array: *
     new_head := head + array_size;
     check_new_head(buffer, new_head);
     #if mode == .WRITE {
-        memcpy(memory.data + head, array.data, array_size);
+        array_data_write(memory.data + head, array.data, array_size, reverse_byte_order);
     } else {
         if array.data == null {
             use_allocator := ifx read_array_allocator.proc != null then read_array_allocator else allocator;
-            array.* = alloc_array(T, array_count, use_allocator);
-        } else {
-            assert(array.count >= array_count);
+            array.* = array_alloc(T, array_count,, use_allocator);
         }
-        memcpy(array.data, memory.data + head, array_size);
+        assert(array.count >= array_count);
+        array_data_read(memory.data + head, array.data, array_size, reverse_byte_order);
     }
     head = new_head;
 }
@@ -327,7 +337,7 @@ align_head_up :: (using buffer: *Serializer($alloc_m, $align_m), align: u8) {
 check_new_head :: (using buffer: *Serializer($alloc_m, $align_m), new_head: s32) {
     assert(new_head >= 0);
     #if alloc_mode == .STATIC {
-        assert(new_head <= memory.count);
+        assert(new_head <= memory.count, "old head: %, new head: %, memory.count: %", head, new_head, memory.count);
     } else { // DYNAMIC
         desired_capacity := max(ceil_to_pow2_multiple(new_head, 2), 256);
         if memory.count < desired_capacity {
@@ -362,29 +372,136 @@ align_head_up_for_array :: (using buffer: *Serializer($alloc_m, $align_m), $T: T
     }
 }
 
+// iterate over struct members and reverse bytes of each member. NOT recursive. todo: maybe should be recursive
+reverse_bytes :: (in: *$T) 
+#modify {
+    tinfo := T.(*Type_Info);
+    return tinfo.type == .STRUCT;
+} {
+    byte_buffer: [size_of(T)]u8 = ---;
+    memcpy(byte_buffer.data, in, size_of(T));
+
+    for info : T.(*Type_Info_Struct).members {
+        in\_field_ptr := byte_buffer.data + info.offset_in_bytes;
+        out_field_ptr := in.(*u8) + info.offset_in_bytes;
+        for 0..info.type.runtime_size-1 {
+            out_field_ptr[it] = in_field_ptr[(info.type.runtime_size-1) - it];
+        }
+    }
+}
+
+reverse_bytes :: inline (in: $T) -> T
+#modify {
+    tinfo := T.(*Type_Info);
+    if tinfo.type == {
+    case .INTEGER; 
+        #through;
+    case .FLOAT; 
+        #through;
+    case .BOOL; 
+        #through;
+    case .ENUM;
+        return true;
+    }
+    return false;
+} {
+    out: T = ---;
+    TYPE_SIZE :: #run T.(*Type_Info).runtime_size;
+    #if TYPE_SIZE == {
+    case 1;
+        return in;
+    case;
+        reverse_bytes((*out).(*u8), (*in).(*u8), TYPE_SIZE);
+    }
+    return out;
+}
+
+reverse_bytes :: (bytes_out: *u8, bytes_in: *u8, size: s32) {
+    assert(size > 0);
+    if size == {
+    case 1;
+        bytes_out.* = bytes_in.*;
+    case 2;
+        bytes_out[0], 
+        bytes_out[1]  = 
+                        bytes_in[1], 
+                        bytes_in[0];
+    case 4;
+        bytes_out[0],
+        bytes_out[1],
+        bytes_out[2],
+        bytes_out[3]  =
+                        bytes_in[3],
+                        bytes_in[2],
+                        bytes_in[1],
+                        bytes_in[0];
+    case 8;
+        bytes_out[0],
+        bytes_out[1],
+        bytes_out[2],
+        bytes_out[3],
+        bytes_out[4],
+        bytes_out[5],
+        bytes_out[6],
+        bytes_out[7]  =
+                        bytes_in[7],
+                        bytes_in[6],
+                        bytes_in[5],
+                        bytes_in[4],
+                        bytes_in[3],
+                        bytes_in[2],
+                        bytes_in[1],
+                        bytes_in[0];
+    case;
+        assert(bytes_out != bytes_in, "can't do byte swaps in a for loop (not sure why), so pointers should not alias");
+        for 0..size-1 {
+            bytes_out[it] = bytes_in[(size-1)-it];
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 #scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
 // ---------------------------------------------------------------------------------------------------------------------
 
 write_primitive :: inline (using buffer: *Serializer($alloc_m, $align_m), primitive: *$T) {
-    #if #complete align_mode == {
-    case .PRIMITIVE;
-        (memory.data + head).(*T).* = primitive.*;
-    case .PARAMETER;
-        memcpy(memory.data + head, primitive, size_of(T));
-    case .BYTE;
-        memcpy(memory.data + head, primitive, size_of(T));
+    if reverse_byte_order {
+        #if #run T.(*Type_Info).type == .STRUCT {
+            copy := primitive.*;
+            reverse_bytes(*copy);
+            memcpy(memory.data + head, *copy, size_of(T));
+        } else {
+            reverse_bytes(memory.data + head, primitive.(*u8), size_of(T));
+        }
+    } else {
+        #if #complete align_mode == {
+        case .PRIMITIVE;
+            (memory.data + head).(*T).* = primitive.*;
+        case .PARAMETER; 
+            memcpy(memory.data + head, primitive, size_of(T));
+        case .BYTE;
+            memcpy(memory.data + head, primitive, size_of(T));
+        }
     }
 }
 
 read_primitive :: inline (using buffer: *Serializer($alloc_m, $align_m), primitive: *$T) {
-    #if #complete align_mode == {
-    case .PRIMITIVE;
-         primitive.* = (memory.data + head).(*T).*;
-    case .PARAMETER;
-        memcpy(primitive, memory.data + head, size_of(T));
-    case .BYTE;
-        memcpy(primitive, memory.data + head, size_of(T));
+    if reverse_byte_order {
+        #if #run T.(*Type_Info).type == .STRUCT {
+            memcpy(primitive, memory.data + head, size_of(T));
+            reverse_bytes(primitive); 
+        } else {
+            reverse_bytes(primitive.(*u8), memory.data + head, size_of(T));
+        }
+    } else {
+        #if #complete align_mode == {
+        case .PRIMITIVE;
+             primitive.* = (memory.data + head).(*T).*;
+        case .PARAMETER;
+            memcpy(primitive, memory.data + head, size_of(T));
+        case .BYTE;
+            memcpy(primitive, memory.data + head, size_of(T));
+        }
     }
 }
 
@@ -412,14 +529,19 @@ is_serial_primitive :: (T: Type) -> bool {
 }
 
 validate_read_write :: () #expand {
-    assert(`rw_mode == `mode);
+    assert(`rw_mode == `mode, "expected mode %, have mode %", `mode, `rw_mode);
     if `pad_for_checksum {
         assert(`head >= SERIALIZER_CHECKSUM_SIZE);
     }
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-#scope_file // ---------------------------------------------------------------------------------------------- SCOPE_FILE
-// ---------------------------------------------------------------------------------------------------------------------
+array_data_write :: inline (serializer_data: *u8, array_data: *$T, array_size: s64, reverse_byte_order: bool) {
+    memcpy(serializer_data, array_data, array_size);
+}
+
+array_data_read :: (serializer_data: *u8, array_data: *$T, array_size: s64, reverse_byte_order: bool) #expand {
+    memcpy(array_data, serializer_data, array_size);
+}
+
 
 #import "md5";

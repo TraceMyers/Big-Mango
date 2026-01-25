@@ -50,7 +50,7 @@ _input :: (stage: Boot_Stage) -> bool {
     }
 }
 
-move_window :: (new_pos: Int_Vector2) {
+move_window :: (new_pos: Vector2i) {
     rect: Win32.RECT;
     Win32.GetClientRect(window, *rect);
     // Win32.SetWindowPos(window, null, 90, -1300, rect.right-rect.left+16, rect.bottom-rect.top+39, 0);
@@ -223,7 +223,7 @@ toggle_cursor_visible :: () {
     Win32.ShowCursor(cursor_visible.(s32));
 }
 
-get_window_dimensions :: () -> Int_Vector2 {
+get_window_dimensions :: () -> Vector2i {
     return .{window_width, window_height};
 }
 
@@ -253,7 +253,7 @@ rm_log_callback :: (text: string) {
         }
 
         if string_count > 0 {
-            scope_set_allocator(*rm_log_message_allocator);
+            scope_set_allocator(rm_log_message_allocator);
             free(data);
             data = null;
         } else {
@@ -262,7 +262,7 @@ rm_log_callback :: (text: string) {
 
         string_count = xx text.count;
         if text.count > 0 {
-            scope_set_allocator(*rm_log_message_allocator);
+            scope_set_allocator(rm_log_message_allocator);
             repeat_count = 1;
             data = alloc(string_count);
             memcpy(data, text.data, string_count);

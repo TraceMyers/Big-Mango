@@ -175,7 +175,7 @@ load_skinned_mesh :: (asset_path: string, package: *Gom_Package, load_allocator 
         if header_info.joint_count > 0 {
             // joint names
             record.head = xx header_info.joint_names_begin;
-            package.skeleton.joint_names = alloc_array(string, header_info.joint_count, load_allocator);
+            package.skeleton.joint_names = array_alloc(string, header_info.joint_count,, load_allocator);
             file_data_beginning_at_joint_names := string.{record.memory.count - record.head, record.memory.data + record.head};
             process_per_line(file_data_beginning_at_joint_names, parse_joint_name, *package.skeleton.joint_names);
             // joint transforms
@@ -238,7 +238,7 @@ save_or_load_gom_file :: (asset_path: string, package: *Gom_Package, rw_mode: Rw
             align_head_up_for_type(*record, float);
             vector_record := (record.memory.data + record.head).(*Vector3);
             if rw_mode == .READ {
-                package.vertices = alloc_array(Mesh_Vertex, package.vertices.count, load_allocator);
+                package.vertices = array_alloc(Mesh_Vertex, package.vertices.count,, load_allocator);
                 for 0..package.vertices.count-1 {
                     package.vertices[it].position = (vector_record + it).*;
                 }
@@ -710,7 +710,7 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
             // string / raw bytes
             byte_count := read_out(reader, u32);
             assert(byte_count > 0);
-            array := alloc_array(u8, byte_count, temp);
+            array := array_alloc(u8, byte_count,, temp);
             read_array_data(reader, *array, xx array.count);
             set_fbx_property_value(prop, .U8_ARRAY, *array);
         } else if type < #char "Z" {
@@ -795,7 +795,7 @@ load_fbx_file :: (file_path: string, allocator := context.allocator) {
         bytes : u32 = name_length;
 
         if property_count > 0 {
-            node.properties = alloc_array(FBX_Property, xx property_count, temp);
+            node.properties = array_alloc(FBX_Property, xx property_count,, temp);
             for *node.properties {
                 if !read_fbx_property(*reader, it, e) {
                     failure = true;

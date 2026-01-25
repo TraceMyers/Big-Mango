@@ -23,7 +23,7 @@ INVALID_COLLISION_CELL_HASH : s64 : -1;
 Think_Proc :: #type (*Entity);
 
 Entity :: struct {
-    flags: Long_Flag_Array(Entity_Flags);
+    flags: Flag_Array(Entity_Flags);
     using ref: Entity_Ref;
     using camera: Camera;
     using body: Physics_Body;
@@ -388,7 +388,7 @@ gadget_can_take_interaction :: (using e: *Entity, interactionist: *Entity, is_pa
         return false;
     }
 
-    interaction_volume := get_entity(*gadget_interaction_volume);
+    interaction_volume := get_entity(gadget_interaction_volume);
     assert(is_set(*interaction_volume.flags, .USES_EVENT_VOLUME));
     for interaction_volume.event_volume.overlaps {
         if it.entity == interactionist.ref {

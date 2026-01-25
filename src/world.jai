@@ -115,7 +115,7 @@ get_new_world_heap :: () -> s32 {
         old_count := world_heaps.count;
         array_resize(*world_heaps, i + 1);
         for old_count..world_heaps.count-1 {
-            allocation := alloc_array(u8, WORLD_SIZE_MAX, program_runtime_allocator);
+            allocation := array_alloc(u8, WORLD_SIZE_MAX,, program_runtime_allocator);
             assert(allocation.data != null);
             world_heaps[it] = .{bytes=allocation, end=0};
         }

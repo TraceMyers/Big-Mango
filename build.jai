@@ -11,7 +11,7 @@ GENERATE_PRIMITIVE_MESH_LOADER_FILES :: false;
 // code gen
 COMPILE_SHADERS :: false;
 REGENERATE_ASSET_REFERENCES :: false;
-GENERATE_PROCEDURE_BODY_CAPTURES :: true;
+GENERATE_PROCEDURE_BODY_CAPTURES :: false;
 
 #run {
     // make sure environment is set up

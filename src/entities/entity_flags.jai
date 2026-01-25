@@ -1,5 +1,5 @@
 
-// Long_Flag_Array flags.
+// Flag_Array flags.
 Entity_Flags :: enum {
     // ========================================================================== static type description
     USES_CAMERA;

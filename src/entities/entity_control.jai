@@ -229,7 +229,7 @@ handle_camera_relative_movement :: (entity: *Entity, rel_camera: *Entity, move_i
 
     camera_orientation: Quaternion;
     if move_in_3d {
-        camera_orientation = *rel_camera.orientation;
+        camera_orientation = rel_camera.orientation;
     } else {
         camera_fore_axis := fore_direction(*rel_camera.orientation);
         cos_t := abs(dot(camera_fore_axis, WORLD_UP));
@@ -277,7 +277,7 @@ handle_camera_relative_movement :: (entity: *Entity, rel_camera: *Entity, move_i
         entity.linear_input = move_dir;
         if entity != rel_camera {
             target_orientation := make_quat(Vector3.{xy=normalize(move_dir.xy)}, Vector3.{z=1});
-            interp_rotate(entity, *target_orientation, 16.0, delta_time);
+            interp_rotate(entity, target_orientation, 16.0, delta_time);
         }
     }
 }
@@ -480,7 +480,7 @@ handle_world_build_input :: (camera: *Entity) {
         request.ray = get_mouse_cursor_ray(camera, viewport);
         request.hit_back_face = true;
         request.build_mode = true;
-        if raycast(*request, *result) {
+        if raycast(request, *result) {
             selected_entity_ref = result.hit_entity;
         }
         // draw_raycast(request, result, 1);

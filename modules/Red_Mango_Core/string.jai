@@ -6,6 +6,14 @@ Bound_String :: struct {
     max: s64;
 }
 
+bound_string :: (bound_to_array: []u8) -> Bound_String {
+    bound: Bound_String = ---;
+    bound.str.data = bound_to_array.data;
+    bound.str.count = 0;
+    bound.max = bound_to_array.count;
+    return bound;
+}
+
 bound_string :: (bound_to_str: string) -> Bound_String {
     bound: Bound_String = ---;
     bound.str.data = bound_to_str.data;
@@ -65,16 +73,16 @@ as_string :: inline (item: $T) -> string
     return string.{size_of(T), xx *item};
 }
 
-to_lower :: inline (str: string, allocator := context.allocator) -> string {
-    out_str := alloc_string(str.count,,allocator);
+to_lower :: inline (str: string) -> string {
+    out_str := alloc_string(str.count);
     for str {
         out_str[it_index] = to_lower(it);
     }
     return out_str;
 }
 
-to_upper :: inline (str: string, allocator := context.allocator) -> string {
-    out_str := alloc_string(str.count,,allocator);
+to_upper :: inline (str: string) -> string {
+    out_str := alloc_string(str.count);
     for str {
         out_str[it_index] = to_upper(it);
     }
@@ -168,6 +176,24 @@ to_lower :: inline (c: $T, $CHECKED := true) -> T {
     return c + ASCII_TO_LOWER_DIFFERENCE;
 }
 
+capitalized :: inline (str: string) -> string {
+    string_copy := copy(str, temp);
+    last_was_letter := false;
+    for *string_copy {
+        if !last_was_letter {
+            if is_alpha(it.*) {
+                it.* = to_upper(it.*);
+                last_was_letter = true;
+            }
+        } else {
+            if !is_alpha(it.*) {
+                last_was_letter = false;
+            }
+        }
+    }
+    return string_copy;
+}
+
 copy :: (s: string, allocator := context.allocator) -> string {
     if s.count == 0 return "";
     copy := alloc_string(s.count,,allocator);
@@ -254,7 +280,7 @@ tokenize_and_trim :: (s: string, separator: u8, allocator:=context.allocator) ->
 //     for *strings {
 //         it.* = trim(it.*);
 //     }
-//     for < 0..strings.count-1 {
+//     for #v2 < 0..strings.count-1 {
 //         if strings[it].count == 0 {
 //             if it < strings.count - 1 {
 //                 for i : it..strings.count-2 {

@@ -24,13 +24,14 @@ UP_X :: 0.0;        UP_Y :: 0.0;        UP_Z :: 1.0;
 #load "scope.jai";
 #load "pool.jai";
 #load "super_allocator.jai";
+#load "gp_allocator.jai";
 #load "bit_ops.jai";
 #load "bump_allocator.jai";
 #load "file.jai";
 #load "no_allocator.jai";
 #load "color.jai";
 #load "common_types.jai";
-#load "long_flag_array.jai";
+#load "flag_array.jai";
 #load "thread_utils.jai";
 
 // useful token to represent an index to an array, the elements of which are uniquely id'd. so, you use
@@ -54,7 +55,7 @@ ID_Ref64 :: struct($type_constant: s64) {
     TYPE_ID :: type_constant;
 }
 
-RUN_TESTS :: false;
+RUN_TESTS :: true;
 SAFE_TEXT_ENCODING :: true;
 SERIALIZE_DEBUG :: false;
 BIN_POOL_DEBUG :: false;
@@ -64,6 +65,45 @@ MANGO_RIGHT :: Vector3.{RIGHT_X, RIGHT_Y, RIGHT_Z};
 MANGO_UP    :: Vector3.{UP_X, UP_Y, UP_Z};
 
 #scope_module // -------------------------------------------------------------------------------------------- { MODULE }
+
+Allocator_Identifier :: enum u8 {
+    SUPER_ALLOCATOR :: 1;
+    GP_ALLOCATOR_16;
+    GP_ALLOCATOR_32;
+    GP_ALLOCATOR_64;
+    GP_ALLOCATOR_128;
+    GP_ALLOCATOR_256;
+    GP_ALLOCATOR_512;
+    GP_ALLOCATOR_1024;
+    GP_ALLOCATOR_2048;
+    GP_ALLOCATOR_SUPER_MED;   
+    GP_ALLOCATOR_SUPER_LRG;
+}
+
+ALLOCATOR_VALIDATION_PATTERN : u8 : 0x70;
+
+Allocation_Header :: struct {
+    using metadata: union {
+        id: Allocator_Identifier;
+        // when an allocation is valid, the upper 4 bits are stamped with a specific bit pattern.
+        // this is intentionally placed at byte 0 of the struct because the lowest byte of data is the one most likely to change, and so (naively speaking) most likely to change when trashed.
+        bit_pattern: u8 = ---;
+    }
+    using specific: union {
+        super: struct {
+            inner_chunk: u8;
+            inner_chunk_count: u16;
+            outer_chunk: u16;
+            list: s16;
+        };
+        gp: struct {
+            list: s32=---;
+        };
+    };
+
+}
+
+ALLOCATION_HEADER_SPACE :: #run ceil_to_pow2_multiple(size_of(Allocation_Header), 8);
 
 #import "Basic";
 #import "Math";
@@ -101,6 +141,7 @@ Compiler :: #import "Compiler";
             // bump_allocator_test,
             serializer_test,
             super_allocator_test,
+            gp_allocator_test,
         ];
         run_tests("red mango module", tests);
     }

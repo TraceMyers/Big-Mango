@@ -28,12 +28,18 @@ COS_PI_OVER_2    :: 0.0;
 
 VECTOR3_ONES :: Vector3.{1,1,1};
 
-QUATERNION_IDENTITY :: Quaternion.{0,0,0,1};
-VectorTypes :: Type.[Vector2, Vector3, Vector4, Quaternion];  // Used for type restriction in normalize().
-Vector2Types :: Type.[Vector2, Int_Vector2];
-VectorAndFloatTypes :: Type.[Vector2, Vector3, Vector4, Quaternion, float32, float64];  // Used for type restriction in normalize().
+VECTOR2_UP      :: Vector2.{ 0,-1};
+VECTOR2_DOWN    :: Vector2.{ 0, 1};
+VECTOR2_LEFT    :: Vector2.{-1, 0};
+VECTOR2_RIGHT   :: Vector2.{ 1, 0};
 
-Direction :: enum u8 {
+QUATERNION_IDENTITY :: Quaternion.{0,0,0,1};
+FloatTypes :: Type.[float32, float64];
+VectorTypes :: Type.[Vector2, Vector3, Vector4, Vector2d, Quaternion];  // Used for type restriction in normalize().
+Vector2Types :: Type.[Vector2, Vector2i, Vector2d];
+VectorAndFloatTypes :: Type.[Vector2, Vector3, Vector4, Vector2d, Quaternion, float32, float64];  // Used for type restriction in normalize().
+
+Direction :: enum {
     UP;
     DOWN;
     LEFT;
@@ -44,9 +50,75 @@ Direction :: enum u8 {
 
 Direction_2D :: enum u8 {
     UP;
+    RIGHT;
     DOWN;
     LEFT;
-    RIGHT;
+}
+
+is_vertical :: (dir: Direction_2D) -> bool {
+    return (dir & 0x1) == 0;
+}
+
+is_horizontal :: (dir: Direction_2D) -> bool {
+    return (dir & 0x1) == 1;
+}
+
+rotate :: (dir: Direction_2D, clockwise := true) -> Direction_2D {
+    if clockwise {
+        return increment_wrap(dir, Direction_2D.UP, Direction_2D.LEFT);
+    } else {
+        return decrement_wrap(dir, Direction_2D.UP, Direction_2D.LEFT);
+    }
+}
+
+// cos_t will be zero if not successful, because a vector must have at least one positive component toward its cardinal direction. negative cos_t should not be possible.
+cardinal_direction :: (dir: Vector2) -> cardinal: Direction_2D, cos_t: float {
+    use_dir := dir;
+    if !is_normalized(dir) {
+        use_dir = normalize(dir, 0.001);
+        if use_dir == Vector2.{} {
+            return .UP, 0;
+        }
+    }
+
+    max_cos_t := -1.0;
+    direction: Direction_2D;
+
+    cos_right := dot(use_dir, Vector2.{1,0});
+    cos_left := dot(use_dir, Vector2.{-1,0});
+    if cos_right > 0 {
+        direction = .RIGHT;
+        max_cos_t = cos_right;
+    } else {
+        direction = .LEFT;
+        max_cos_t = cos_left;
+    }
+
+    cos_up := dot(use_dir, Vector2.{0,-1});
+    cos_down := dot(use_dir, Vector2.{0,1});
+    if cos_up > max_cos_t {
+        direction = .UP;
+        max_cos_t = cos_up;
+    } else if cos_down > max_cos_t {
+        direction = .DOWN;
+        max_cos_t = cos_down;
+    }
+
+    return direction, max_cos_t;
+}
+
+direction_vector :: (dir: Direction_2D) -> Vector2 {
+    if dir == {
+    case .UP;
+        return .{ 0,-1};
+    case .RIGHT;
+        return .{ 1, 0};
+    case .DOWN;
+        return .{ 0, 1};
+    case .LEFT;
+        return .{-1, 0};
+    }
+    return .{};
 }
 
 world_direction :: (dir: Direction) -> Vector3 {
@@ -64,6 +136,18 @@ world_direction :: (dir: Direction) -> Vector3 {
     case .BACK;
         return -MANGO_FORE;
     }
+}
+
+random_direction_2d :: (random_state: *Random_State = null) -> Direction_2D {
+    flt_value : float = ---;
+    min_value := 0.0;
+    max_value := (#run enum_highest_value(Direction_2D)).(float) + 0.99;
+    if random_state != null {
+        flt_value = random_get_within_range(random_state, min_value, max_value);
+    } else {
+        flt_value = random_get_within_range(min_value, max_value);
+    }
+    return flt_value.(Direction_2D);
 }
 
 relative_direction :: (dir: Direction, orientation: Quaternion) -> Vector3 {
@@ -134,7 +218,6 @@ round :: (a: float64, $Int_Type := s32) -> Int_Type
 }
 
 // cast between int and normalized or non-normalized floats with optional rounding on float->int
-// todo: I really only use this for normalizing and denormalizing between floats and ints, so it could just be simplified to only do that, and also be renamed
 alter_cast :: inline (number: $In_Type, $Out_Type: Type, $NORMALIZED_FLOAT := false, $ROUND_TO_INT := true) -> Out_Type
 #modify {
     float_to_int := is_float_type(In_Type) && is_int_type(Out_Type);
@@ -177,8 +260,8 @@ alter_cast :: inline (number: $In_Type, $Out_Type: Type, $NORMALIZED_FLOAT := fa
     return xx 0;
 }
 
-respace :: (v: float, in_range: Vector2, out_range: Vector2, $do_clamp := true) -> float {
-    norm_val: float = ---;
+respace :: (v: $T/FloatTypes, in_range: $T2/Vector2Types, out_range: T2, $do_clamp := true) -> T {
+    norm_val: T = ---;
     if in_range.y > in_range.x {
         in_range_width := in_range.y - in_range.x;
         #if do_clamp {
@@ -244,10 +327,9 @@ is_power_of_two :: inline (val: u64) -> bool {
     return val > 0 && (val & (val - 1)) == 0;
 }
 
-sort_range :: (in_vec: Int_Vector2) -> Int_Vector2 {
+sort_range :: (in_vec: Vector2i) -> Vector2i {
     return .{min(in_vec.x, in_vec.y), max(in_vec.x, in_vec.y)};
 }
-
 
 ordered_ranges_overlap :: inline (range_1_x: $T, range_1_y: T, range_2_x: T, range_2_y: T) -> bool {
     return range_2_y >= range_1_x && range_2_x <= range_1_y;
@@ -258,7 +340,7 @@ ordered_ranges_overlap :: inline (range_1: $T/Vector2Types, range_2: T) -> bool 
 }
 
 // either inclusive min and max OR inclusive min and exclusive max. 
-value_in_unordered_range :: inline (val: s32, range: Int_Vector2, $mode := enum{INCLUSIVE; EXCLUSIVE_MAX;}.INCLUSIVE) -> bool {
+value_in_unordered_range :: inline (val: s32, range: Vector2i, $mode := enum{INCLUSIVE; EXCLUSIVE_MAX;}.INCLUSIVE) -> bool {
     #if mode == .INCLUSIVE {
         return (val >= min(range.x, range.y)) & (val <= max(range.x, range.y));
     } else { // EXCLUSIVE_MAX
@@ -725,7 +807,7 @@ closest_point_on_line_segment_from_aabb_at_origin_if_intersection :: (segment_a:
 // my own super special home-cooked algorithm that might work. let's hope.
 closest_point_on_line_segment_from_aabb_at_origin :: (segment_a: Vector3, segment_b: Vector3, box_extent: Vector3) -> Vector3 {
     a_clamped, b_clamped: Vector3 = ---;
-    a_clamp_record, b_clamp_record: Int_Vector3 = ---;
+    a_clamp_record, b_clamp_record: Vector3i = ---;
 
     origin := Vector3.{};
     closest_pt_on_seg_if_intersection, success := closest_point_on_line_segment_from_aabb_at_origin_if_intersection(segment_a, segment_b, box_extent);
@@ -798,7 +880,7 @@ closest_point_on_line_segment_from_aabb_at_origin :: (segment_a: Vector3, segmen
         // essentially looking for the edge where if we made an oddly shaped plane with the four points being the two segment points and the two clamped segment points, where *might* that intersect a box edge?
         if cos_t >= 0 && cos_p >= 0 {
             closest_pt_seg, closest_pt_box: Vector3 = ---;
-            closest_point_on_each_line_segment(*segment_a, *segment_b, edge_pt_0, edge_pt_1, *closest_pt_seg, *closest_pt_box);
+            closest_point_on_each_line_segment(segment_a, segment_b, edge_pt_0.*, edge_pt_1.*, *closest_pt_seg, *closest_pt_box);
             dist_sq := distance_squared(closest_pt_seg, closest_pt_box);
             if dist_sq < shortest_dist_sq {
                 dist_sq = shortest_dist_sq;
@@ -831,7 +913,7 @@ clamp :: inline (point: Vector3, min: float, max: float) -> Vector3 {
     };
 }
 
-clamp :: inline (v: Int_Vector3, min: Int_Vector3, max: Int_Vector3) -> Int_Vector3 {
+clamp :: inline (v: Vector3i, min: Vector3i, max: Vector3i) -> Vector3i {
     return .{
         clamp(v.x, min.x, max.x),
         clamp(v.y, min.y, max.y),
@@ -839,7 +921,7 @@ clamp :: inline (v: Int_Vector3, min: Int_Vector3, max: Int_Vector3) -> Int_Vect
     };
 }
 
-clamp :: inline (v: Int_Vector2, min: Int_Vector2, max: Int_Vector2) -> Int_Vector2 {
+clamp :: inline (v: $T/Vector2Types, min: T, max: T) -> T {
     return .{
         clamp(v.x, min.x, max.x),
         clamp(v.y, min.y, max.y),
@@ -930,8 +1012,9 @@ sin_cos :: inline (x: float32) -> sin_x: float32, cos_x: float32 {
     return pos_val_sin * sin_sign, pos_val_cos * cos_sign;
 }
 
-sign :: inline (x: float32) -> float32 {
-    return ifx x < 0 then -1.0 else 1.0;
+sign :: inline (x: $T) -> T {
+    return ifx x == 0 then (0).(T) 
+        else ifx x < 0 then (-1).(T) else (1).(T);
 }
 
 project_point_onto_plane :: inline (point: Vector3, point_on_plane: Vector3, plane_normal: Vector3) -> pos: Vector3, signed_dist: float {
@@ -980,8 +1063,7 @@ Box :: struct {
     fore: Vector3;
     up: Vector3;
     right: Vector3;
-#place fore;
-    axes: [3]Vector3 = ---;
+#overlay(fore) axes: [3]Vector3 = ---;
 }
 
 Box_Point :: enum u8 {
@@ -1046,6 +1128,16 @@ closest_point_in_box :: inline (position: Vector3, box: Box) -> Vector3 {
     diff := position - box.center;
     dist_along_axes := Vector3.{dot(diff, box.right), dot(diff, box.fore), dot(diff, box.up)};
     return box.center + clamp(dist_along_axes, box.extent);
+}
+
+point_inside_box :: (point: Vector2, upper_left: Vector2, lower_right: Vector2) -> bool {
+    return point.x >= upper_left.x && point.x <= lower_right.x
+        && point.y >= upper_left.y && point.y <= lower_right.y;
+}
+
+point_inside_box :: (point: Vector2i, upper_left: Vector2i, lower_right: Vector2i) -> bool {
+    return point.x >= upper_left.x && point.x <= lower_right.x
+        && point.y >= upper_left.y && point.y <= lower_right.y;
 }
 
 linear_compress_float :: inline (x: float, $in_min: float, $in_max: float, $out_type := u16, $do_clamp := true) -> out_type {
@@ -1177,10 +1269,11 @@ to_euler_angles :: (q: Quaternion, degrees := true) -> Vector3 {
 
     // pitch (X axis rotation)
     sinp := 2.0 * (q.w * q.y - q.z * q.x);
-    if abs(sinp) >= 1
+    if abs(sinp) >= 1 {
         pitch = PI / 2 * sign(sinp); // clamp
-    else
+    } else {
         pitch = asin(sinp);
+    }
 
     if degrees {
         return .{pitch, roll, yaw} * (180.0 / PI);

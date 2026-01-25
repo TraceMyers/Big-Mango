@@ -644,7 +644,7 @@ create_swapchain :: () {
         vkDestroySwapchainKHR(logical_device, old_swapchain, null);
     }
 
-    swapchain.image_views = alloc_array(VkImageView, swapchain.images.count);
+    swapchain.image_views = array_alloc(VkImageView, swapchain.images.count);
     for swapchain.images {
         create_info := VkImageViewCreateInfo.{
             image = it,
@@ -1854,7 +1854,7 @@ create_frame_data :: () {
     auto_release_temp();
 
     assert(command_frames.data == null);
-    command_frames = alloc_array(Frame_Data, swapchain.images.count);
+    command_frames = array_alloc(Frame_Data, swapchain.images.count);
 
     command_pool_info := VkCommandPoolCreateInfo.{
         flags = .RESET_COMMAND_BUFFER_BIT,
@@ -2439,9 +2439,9 @@ vk_validate :: (result: $T, error_msg: string, msg_args: ..Any, $severity := Vk_
     return true;
 }
 
-to_string :: (data: []u8) -> string {
-    return string.{c_style_strlen(data.data), data.data};
-}
+// to_string :: (data: []u8) -> string {
+//     return string.{c_style_strlen(data.data), data.data};
+// }
 
 layers_are_supported :: (layers: []*u8) -> bool {
     auto_release_temp();
@@ -2470,7 +2470,7 @@ layers_are_supported :: (layers: []*u8) -> bool {
 get_unique_queue_family_indices :: () -> []u32 {
     already_made_queue: Queue_Family_Capability_Flags;
     queue_family_indices := queue_family_index_array(*physical_device);
-    unique_indices_buffer := alloc_array(u32, 4, temp);
+    unique_indices_buffer := array_alloc(u32, 4,, temp);
     unique_indices := bound_array(unique_indices_buffer);
     for 0..3 {
         flag := (1 << queue_family_indices[it]).(Queue_Family_Capability_Flags);
@@ -2739,7 +2739,7 @@ generate_vk_array_getter :: (gen_proc_name: string, gen_proc_args: string, vk_pr
     out_count: u32;
     result := %(%);
     if out_count == 0 % then return false, .[];
-    out_array := alloc_array(%, xx out_count, allocator);
+    out_array := array_alloc(%, xx out_count,, allocator);
     result = %(%);
     return %, out_array;
 }
@@ -3234,7 +3234,7 @@ draw_lines :: (cmd: VkCommandBuffer, view_projection: *Matrix4) {
     memcpy(constants.data, view_projection, 16 * size_of(float));
     vkCmdPushConstants(cmd, line_pipeline_layout, .VERTEX_BIT, 0, size_of(float) * 16, constants.data);
 
-    line_draw_indices := alloc_array(s64, lines.count, temp);
+    line_draw_indices := array_alloc(s64, lines.count,, temp);
     for *line_draw_indices {
         it.* = it_index;
     }
@@ -3379,8 +3379,8 @@ generate_capsule_geo :: (out_vertices: *[..]Mesh_Vertex, out_indices: *[..]u16, 
 
     half_sphere_vertex_count := 1; // at least one vertex, top center (also represents bottom center w/ symmetry)
     if half_sphere_rings >= 1 {
-        sphere_ring_radii = alloc_array(float, half_sphere_rings, temp);
-        sphere_ring_counts = alloc_array(u16, half_sphere_rings, temp);
+        sphere_ring_radii = array_alloc(float, half_sphere_rings,, temp);
+        sphere_ring_counts = array_alloc(u16, half_sphere_rings,, temp);
 
         current_belt_size : u32 = belt_vertex_count;
         for 0..half_sphere_rings-1 {
@@ -4022,7 +4022,7 @@ setup_mesh_data_for_flat_shading :: (in_vertices: []Mesh_Vertex, indices: []$T, 
 
     assert(out_vertices.count == 0);
     array_resize(out_vertices, in_vertices.count);
-    copy_array(out_vertices.*, in_vertices);
+    array_copy(out_vertices.*, in_vertices);
 
     for *(out_vertices.*) {
         it.normal = .{0,0,-1};
@@ -4361,7 +4361,7 @@ generate_primitive_mesh_loader_file :: (filename: string, data: *Mesh_Loader, wo
     auto_release_temp();
 
     s: Serializer(.STATIC);
-    s.memory = as_string(alloc_array(u8, 1024, temp));
+    s.memory = as_string(array_alloc(u8, 1024,, temp));
     set_rw_mode(*s, .WRITE, false);
 
     meta_data := Asset_Meta_Data.{type=.MESH, version=1};
@@ -4382,7 +4382,7 @@ generate_mesh_loader_file :: (filename: string, data: *Mesh_Loader, working_dir 
     auto_release_temp();
 
     s: Serializer(.STATIC);
-    s.memory = as_string(alloc_array(u8, 1024, temp));
+    s.memory = as_string(array_alloc(u8, 1024,, temp));
     set_rw_mode(*s, .WRITE, false);
 
     meta_data := Asset_Meta_Data.{type=.MESH, version=1};

@@ -3,47 +3,44 @@
 // it's super
 
 super_allocator_proc ::(mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void {
+    MIN_SIZE :: 8;
+    MAX_SIZE :: 131072;
+
     dummy_super_allocator := allocator_data.(*Super_Allocator);
-    if dummy_super_allocator.min_alloc_size == {
-    case 8;
-        super_allocator := allocator_data.(*Super_Allocator(8));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 16;
-        super_allocator := allocator_data.(*Super_Allocator(16));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 32;
-        super_allocator := allocator_data.(*Super_Allocator(32));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 64;
-        super_allocator := allocator_data.(*Super_Allocator(64));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 128;
-        super_allocator := allocator_data.(*Super_Allocator(128));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 256;
-        super_allocator := allocator_data.(*Super_Allocator(256));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 512;
-        super_allocator := allocator_data.(*Super_Allocator(512));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 1024;
-        super_allocator := allocator_data.(*Super_Allocator(1024));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 2048;
-        super_allocator := allocator_data.(*Super_Allocator(2048));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 4096;
-        super_allocator := allocator_data.(*Super_Allocator(4096));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 8192;
-        super_allocator := allocator_data.(*Super_Allocator(8192));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case 16384;
-        super_allocator := allocator_data.(*Super_Allocator(16384));
-        return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
-    case;
-        assert(false, "invalid super allocator min alloc size: %", dummy_super_allocator.min_alloc_size);
-    }
+
+    #insert -> string {
+        builder: String_Builder;
+        
+
+        print(*builder, 
+#string HERE
+        if dummy_super_allocator.min_alloc_size == {
+HERE
+        );
+
+        size := MIN_SIZE;
+        while size <= MAX_SIZE {
+            print(*builder,
+#string HERE
+        case %;   
+            super_allocator := allocator_data.(*Super_Allocator(%));
+            return super_allocator_proc_impl(mode, size, old_size, old_memory, super_allocator);
+HERE,
+                size, size
+            );
+            size <<= 1;
+        }
+
+        print(*builder,
+#string HERE
+        case;
+            assert(false, "invalid super allocator min alloc size: % (must be >= % and <= %)", dummy_super_allocator.min_alloc_size, MIN_SIZE, MAX_SIZE);
+        }
+HERE,
+            size, MIN_SIZE, MAX_SIZE
+        );
+        return builder_to_string(*builder);
+    };
     return null;
 }
 
@@ -52,9 +49,14 @@ super_allocator_proc_impl :: inline (mode: Allocator_Mode, size: s64, old_size: 
     case .ALLOCATE;
         return super_alloc(super_allocator, size);
     case .RESIZE;
-        return super_realloc(super_allocator, size, old_memory, old_size);
+        if old_memory != null {
+            super_free(super_allocator, old_memory);
+        }
+        return super_alloc(super_allocator, size);
     case .FREE;
-        super_free(super_allocator, old_memory);
+        if old_memory != null {
+            super_free(super_allocator, old_memory);
+        }
     case .STARTUP;
     case .SHUTDOWN;
     case .THREAD_START;
@@ -149,16 +151,16 @@ add_chunk_list :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), min_bytes
         rm_warning("min bytes % leads to only % chunks being allocated per super allocator heap. the number of chunks per heap should probably be somewhere between 8 and 128", min_bytes, alloc_chunk_count);
         did_small_chunk_count_warning = true;
     }
-    chunk_list.* = alloc_array(Super_Allocator_Outer_Chunk(MIN_ALLOC_SIZE), alloc_chunk_count);
+    chunk_list.* = array_alloc(Super_Allocator_Outer_Chunk(MIN_ALLOC_SIZE), alloc_chunk_count);
     grow_super_allocator_books(allocator);    
 }
 
 basic_validity_check :: inline (using header: Super_Allocation_Header) -> bool {
-    return list >= 0 && (bit_pattern & 0xf0) == VALIDATION_PATTERN;
+    return list >= 0 && (bit_pattern & 0xf0) == ALLOCATOR_VALIDATION_PATTERN;
 }
 
 super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64) -> *void {
-    allocation_size_with_header := size + MIN_ALLOCATION_SIZE;
+    allocation_size_with_header := size + HEADER_SPACE;
     ptr := try_super_alloc(allocator, allocation_size_with_header);
     // didn't find existing space, need to grow
     if ptr == null {
@@ -166,29 +168,12 @@ super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64) -
         ptr = try_super_alloc(allocator, allocation_size_with_header);
         assert(ptr != null);
     }
-    return ptr.(*u8) + MIN_ALLOCATION_SIZE;
-}
-
-super_realloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s64, old_memory: *void, old_size: s64) -> *void {
-    if size == old_size {
-        return old_memory;
-    }
-    new_memory: *void;
-    if size > 0 {
-        new_memory = super_alloc(super_allocator, size);
-    }
-    if old_memory != null {
-        if new_memory != null {
-            memcpy(new_memory, old_memory, min(size, old_size));
-        }
-        super_free(super_allocator, old_memory);
-    }
-    return new_memory;
+    return ptr.(*u8) + HEADER_SPACE;
 }
 
 super_free :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), ptr: *void) {
     byte_ptr := ptr.(*u8);
-    header := (byte_ptr - MIN_ALLOCATION_SIZE).(*Super_Allocation_Header);
+    header := (byte_ptr - HEADER_SPACE).(*Super_Allocation_Header);
     assert(basic_validity_check(header.*));
 
     list := header.list;
@@ -256,7 +241,7 @@ try_super_alloc :: (using allocator: *Super_Allocator($MIN_ALLOC_SIZE), size: s6
     if header != null {
         // (these two fields are unioned)
         header.bin = .STANDALONE;
-        header.bit_pattern |= VALIDATION_PATTERN;
+        header.bit_pattern |= ALLOCATOR_VALIDATION_PATTERN;
     }
     return header;
 }
@@ -472,7 +457,7 @@ grow_super_allocator_books :: (using allocator: *Super_Allocator($MIN_ALLOCATION
 
     if writer.head > books_allocated_size {
         new_books_data_size = ceil_to_pow2_multiple(max(writer.head, 1024), 2);
-        new_books_data_allocation = alloc_array(u8, new_books_data_size, parent_allocator).data;
+        new_books_data_allocation = array_alloc(u8, new_books_data_size,, parent_allocator).data;
         if old_allocation != null {
             free(old_allocation);
         }
@@ -555,10 +540,4 @@ Super_Allocator {
 
 did_small_chunk_count_warning := false;
 
-calc_allocator_data_offset :: () -> s64 {
-    dummy_allocator: *Super_Allocator;
-    return (*dummy_allocator.data).(s64); // poitner field given null pointer = offset from head of struct to the field
-}
-
-ALLOCATOR_DATA_OFFSET :: #run calc_allocator_data_offset();
-VALIDATION_PATTERN : u8 : 0x50;
+HEADER_SPACE :: #run ceil_to_pow2_multiple(size_of(Super_Allocation_Header), 8);

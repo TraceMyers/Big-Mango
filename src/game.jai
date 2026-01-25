@@ -85,7 +85,7 @@ pre_boot :: () {
     // circular buffer, n messages, for the gui log
     // todo: bring this up to 1000+. all it needs is a way to cull messages that won't be rendered
     LOG_MESSAGE_COUNT :: 256;
-    rm_log_messages = alloc_array(RM_Log_Message, LOG_MESSAGE_COUNT, program_runtime_allocator);
+    rm_log_messages = array_alloc(RM_Log_Message, LOG_MESSAGE_COUNT,, program_runtime_allocator);
     
     initialize_super_allocator(*rm_log_message_allocator, context.default_allocator, 0, 32);
 

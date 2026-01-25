@@ -31,6 +31,11 @@ is_array_type :: (T: Type) -> bool {
     return info.type == .ARRAY;
 }
 
+is_struct_type :: ($T: Type) -> bool {
+    info := type_info(T);
+    return info.type == .STRUCT;
+}
+
 is_string_type :: (T: Type) -> bool {
     info := T.(*Type_Info);
     return info.type == .STRING;
@@ -191,9 +196,18 @@ define_array :: ($create_infos: ..Enumarray_Create_Info, array_name: string, $st
     assignment_operator := ifx array_is_constant then "::" else ":=";
     print_to_builder(*builder, "% % %.[\n", array_name, assignment_operator, struct_type);
 
-    props_type_info := cast(*Type_Info_Struct)struct_type;
+    // props_type_info := cast(*Type_Info_Struct)struct_type;
     for create_infos {
-        print_to_builder(*builder, "\t%,\n", code_string(it.props));
+        code_str := code_string(it.props);
+        for *c : code_str {
+            if c.* == #char ";" {
+                c.* = #char " ";
+            }
+            if c.* == #char "\n" {
+                c.* = #char " ";
+            }
+        }
+        print_to_builder(*builder, "\t%,\n", code_str);
     }
 
     print_to_builder(*builder, "];");

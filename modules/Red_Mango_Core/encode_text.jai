@@ -249,19 +249,19 @@ utf32_to_utf8 :: inline (b: *u8, max_read_count := 4) -> Code_Point {
         cs.double_word = c;
         cs.count = 1;
     } else if (c & 0x07_ff) == c {
-        cs.bytes[0] = (0xc0).(u8) | ((c & 0x07_c0) >> 6).(u8);
-        cs.bytes[1] = (0x80).(u8) | ( c & 0x00_3f).(u8);
+        cs.bytes[0] = (0xc0).(u8) | ((c & 0x07_c0) >> 6 ).(u8);
+        cs.bytes[1] = (0x80).(u8) | ( c & 0x00_3f       ).(u8);
         cs.count = 2;
     } else if (c & 0xff_ff) == c {
         cs.bytes[0] = (0xe0).(u8) | ((c & 0xf0_00) >> 12).(u8);
-        cs.bytes[1] = (0x80).(u8) | ((c & 0x0f_c0) >> 6).(u8);
-        cs.bytes[2] = (0x80).(u8) | ( c & 0x00_3f).(u8);
+        cs.bytes[1] = (0x80).(u8) | ((c & 0x0f_c0) >>  6).(u8);
+        cs.bytes[2] = (0x80).(u8) | ( c & 0x00_3f       ).(u8);
         cs.count = 3;
     } else {
         cs.bytes[0] = (0xf0).(u8) | ((c & 0x1c_00_00) >> 18).(u8);
         cs.bytes[1] = (0x80).(u8) | ((c & 0x03_f0_00) >> 12).(u8);
-        cs.bytes[2] = (0x80).(u8) | ((c & 0x00_0f_c0) >> 6).(u8);
-        cs.bytes[3] = (0x80).(u8) | ( c & 0x00_00_3f).(u8);
+        cs.bytes[2] = (0x80).(u8) | ((c & 0x00_0f_c0) >>  6).(u8);
+        cs.bytes[3] = (0x80).(u8) | ( c & 0x00_00_3f       ).(u8);
         cs.count = 4;
     }
     cs.read_count = 4;
@@ -355,7 +355,6 @@ as_ansi :: inline (b: *u8, max_read_count := 4) -> Code_Point {
 as_utf8 :: inline (b: *u8, max_read_count := 4) -> Code_Point {
     cs: Code_Point;
     if (b[0] & 0x80) == 0 {
-        maybe_return_encode_failure(!is_ascii(b.*));
         cs.bytes[0] = b[0];
         cs.count = 1;
         cs.read_count = 1;
@@ -482,10 +481,8 @@ Code_Point :: struct {
     read_count: s8; 
     encode_success: bool;
 
-    #place bytes;
-        words: [2]u16 = ---;
-    #place bytes;
-        double_word: u32 = ---;
+    #overlay(bytes) words: [2]u16 = ---;
+    #overlay(bytes) double_word: u32 = ---;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

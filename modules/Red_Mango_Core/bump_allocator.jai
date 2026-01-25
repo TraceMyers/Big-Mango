@@ -20,7 +20,7 @@ bump_allocator_initialize :: (using bump: *Bump_Allocator, in_parent_allocator :
     proc = bump_allocator_proc;
     data = bump;
     heap = .{};
-    heap.bytes = alloc_array(u8, in_heap_size, parent_allocator);
+    heap.bytes = array_alloc(u8, in_heap_size,, parent_allocator);
 }
 
 bump_allocator_proc :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void {
@@ -70,6 +70,11 @@ bump_allocator_reset :: (using bump: *Bump_Allocator, keep_memory := true) {
         }
         bump.* = .{};
     }
+}
+
+auto_reset_to_high_water_mark :: (using bump: *Bump_Allocator) #expand {
+    _mark := heap.end;
+    `defer reset_to_high_water_mark(bump, _mark);
 }
 
 get_high_water_mark :: (using bump: *Bump_Allocator) -> s32 {

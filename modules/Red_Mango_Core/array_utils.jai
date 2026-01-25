@@ -80,11 +80,45 @@ temp_dynamic_array :: inline ($T: Type, reserve_count := 0) -> [..]T {
     return array;
 }
 
-alloc_array :: inline ($T: Type, count: s64, allocator:=context.allocator) -> []T {
+new_dynamic_array :: inline ($T: Type, allocator: Allocator, reserve_count := 0) -> [..]T {
+    array: [..]T;
+    array.allocator = context.allocator;
+    array_reserve(*array, reserve_count);
+    return array;
+}
+
+Array_Initialization :: enum u8 {
+    DEFAULT; ZERO; NONE; 
+}
+
+array_alloc :: ($T: Type, count: s64, initialization := Array_Initialization.DEFAULT) -> []T {
+    if count <= 0 {
+        assert(count == 0);
+        return .[];
+    }
     buffer: []T = ---;
-    buffer.data = xx alloc(count * size_of(T),, allocator);
+    alloc_size := count * size_of(T);
+    buffer.data = xx alloc(alloc_size);
     buffer.count = count;
+    if initialization == {
+    case .DEFAULT;
+        #if #run is_struct_type(T) {
+            for *buffer {
+                it.* = .{};
+            }
+        } else {
+            memset(buffer.data, 0, alloc_size);
+        }
+    case .ZERO;
+        memset(buffer.data, 0, alloc_size);
+    }
     return buffer;
+}
+
+array_free :: inline (array: *[]$T) {
+    free(array.data);
+    array.data = null;
+    array.count = 0;
 }
 
 array_element_index :: inline (array: []T, item: *$T) -> s64 {
@@ -109,24 +143,24 @@ array_append :: inline (a: *[..]$T, b: []T) {
 }
 
 concatenate :: (a: []$T, b: []T, allocator:=context.allocator) -> []T {
-    arr := array_alloc(T, a.count + b.count, allocator);
+    arr := array_alloc(T, a.count + b.count,, allocator);
     copy_memory(arr.data, a.data, a.count);
     copy_memory(arr.data + a.count, b.data, b.count);
     return arr;
 }
 
 duplicate :: (array: []$T, allocator:=context.allocator) -> []T {
-    duplicate := array_alloc(T, array.count, allocator);
-    copy_array(duplicate, array);
+    duplicate := array_alloc(T, array.count,, allocator);
+    array_copy(duplicate, array);
     return duplicate;
 }
 
-copy_array :: inline (dest: []$T, src: []T) {
+array_copy :: inline (dest: []$T, src: []T) {
     assert(dest.count >= src.count);
     copy_memory(dest.data, src.data, dest.count);
 }
 
-zero_array :: inline (array: []$T) {
+array_zero :: inline (array: []$T) {
     if array.count > 0 {
         zero_memory(array.data, array.count * size_of(T));
     }
@@ -200,6 +234,8 @@ reset_without_free :: (str: *string) {
     str.data = null;
     str.count = 0;
 }
+
+
 
 // dst: |-----|
 // src:    |-----|

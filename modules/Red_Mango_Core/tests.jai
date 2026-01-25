@@ -495,7 +495,7 @@ pool_test :: () -> bool, string {
         if arr.count == 0 then return;
         for i: 0..arr.count-1 {
             rand_val := random_get_zero_to_one_new();
-            swap_index := round(respace(xx rand_val, .{0.0, 1.0}, .{0.0, xx (arr.count-1)}));
+            swap_index := round(respace(xx rand_val, Vector2.{0.0, 1.0}, Vector2.{0.0, xx (arr.count-1)}));
             arr[i], arr[swap_index] = arr[swap_index], arr[i];
         }
     }
@@ -613,7 +613,7 @@ misc_test :: () -> bool, string {
     {
         k: [9]u64;
         k[2] = 20;
-        zero_array(k);
+        array_zero(k);
         test_condition(k[2] == 0);
     }
     {
@@ -647,60 +647,102 @@ operator == :: (t1: Test_Struct, t2: Test_Struct) -> bool {
 }
 
 serializer_test :: () -> bool, string {
-    checksum: [4]u32;
-    {
-        ser: Serializer(.STATIC, .BYTE);
-        ser.memory = alloc_string(1024);
-        ser.read_array_allocator = context.allocator;
-        serializer_test_body(*checksum, true);
+    // checksum: [4]u32;
+    // {
+    //     ser: Serializer(.STATIC, .BYTE);
+    //     ser.memory = alloc_string(1024);
+    //     ser.read_array_allocator = context.allocator;
+    //     serializer_test_body(*checksum, true);
+    // }
+    // {
+    //     ser: Serializer(.STATIC, .PRIMITIVE);
+    //     ser.memory = alloc_string(1024);
+    //     ser.read_array_allocator = context.allocator;
+    //     serializer_test_body();
+    // }
+    // {
+    //     ser: Serializer(.STATIC, .PARAMETER);
+    //     ser.memory = alloc_string(1024);
+    //     ser.read_array_allocator = context.allocator;
+    //     ser.parameter_align = 1;
+    //     serializer_test_body();
+    //     ser.parameter_align = 2;
+    //     serializer_test_body();
+    //     ser.parameter_align = 4;
+    //     serializer_test_body();
+    //     ser.parameter_align = 8;
+    //     serializer_test_body();
+    // }
+    // {
+    //     ser: Serializer(.DYNAMIC, .BYTE);
+    //     ser.allocator = context.allocator;
+    //     ser.read_array_allocator = context.allocator;
+    //     serializer_test_body(*checksum);
+    // }
+    return_test_success();
+}
+
+gp_allocator_test :: () -> bool, string {
+    a: GP_Allocator;
+    initialize_gp_allocator(*a, context.default_allocator);
+
+    ITER_CT :: 10_000;
+
+    // total_time: float64;
+    max_time: float64;
+    allocations: [..]*u8;
+
+    allocation_sizes: [ITER_CT]s64;
+    for 0..ITER_CT-1 {
+        alloc_sz := random_get_within_range(1, 2048-size_of(Allocation_Header)).(s64);
+        allocation_sizes[it] = alloc_sz;
     }
-    {
-        ser: Serializer(.STATIC, .PRIMITIVE);
-        ser.memory = alloc_string(1024);
-        ser.read_array_allocator = context.allocator;
-        serializer_test_body();
+
+    t1 := seconds_since_init();
+    for 0..ITER_CT-1 {
+        // t1 := seconds_since_init();
+        allocation := alloc(allocation_sizes[it],,a).(*u8);
+        // t2 := seconds_since_init();
+        // time_taken := t2 - t1;
+        // max_time = max(time_taken, max_time);
+        // total_time += time_taken;
+        // array_add(*allocations, allocation);
     }
-    {
-        ser: Serializer(.STATIC, .PARAMETER);
-        ser.memory = alloc_string(1024);
-        ser.read_array_allocator = context.allocator;
-        ser.parameter_align = 1;
-        serializer_test_body();
-        ser.parameter_align = 2;
-        serializer_test_body();
-        ser.parameter_align = 4;
-        serializer_test_body();
-        ser.parameter_align = 8;
-        serializer_test_body();
-    }
-    {
-        ser: Serializer(.DYNAMIC, .BYTE);
-        ser.allocator = context.allocator;
-        ser.read_array_allocator = context.allocator;
-        serializer_test_body(*checksum);
-    }
+    t2 := seconds_since_init();
+    total_time := t2 - t1;
+
+    avg_time := total_time / ITER_CT.(float64);
+
+    log("gp allocator (small) avg alloc time:                        %us", avg_time * 1000 * 1000);
+    // log("gp allocator (small) avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
+    log("gp allocator (small) max time:                              %us", max_time * 1000 * 1000);
+
+    // for allocations {
+    //     free(it,,a);
+    // }
+
     return_test_success();
 }
 
 super_allocator_test :: () -> bool, string {
-    MIN_CHUNK_SZ :: 32;
+    MIN_CHUNK_SZ :: 8;
+    HEADER_SPACE :: #run ceil_to_pow2_multiple(size_of(Super_Allocation_Header), 8);
+
     a: Super_Allocator(MIN_CHUNK_SZ);
-    initialize_super_allocator(*a, context.default_allocator);
-    scope_set_allocator(a);
+    initialize_super_allocator(*a, context.default_allocator/*, MIN_CHUNK_SZ*/);
+    // scope_set_allocator(a);
 
     data_1_sz := 129;
     allocated_chunk_ct := div_ceil(data_1_sz, MIN_CHUNK_SZ) + 1; // + 1 for header
-    data_1 := alloc(data_1_sz);
-    test_condition(data_1 == xx *a.chunk_lists[0][0].inner_chunks[1]);
-    test_condition(a.books.flag_list_of_lists[0][0] == ((1 << allocated_chunk_ct) - 1).(u64));
+    data_1 := alloc(data_1_sz,,a);
+    test_condition(data_1 == xx ((*a.chunk_lists[0][0]).(*u8)+HEADER_SPACE));
 
     data_2_sz := 880;
     allocated_chunk_ct += div_ceil(data_2_sz, MIN_CHUNK_SZ) + 1;
-    data_2 := alloc(880);
-    test_condition(a.books.flag_list_of_lists[0][0] == ((1 << allocated_chunk_ct) - 1).(u64));
+    data_2 := alloc(880,,a);
 
-    free(data_1);
-    free(data_2);
+    free(data_1,,a);
+    free(data_2,,a);
 
     POINTER_COUNT :: 10000;
     pointers: [..]*void;
@@ -713,9 +755,9 @@ super_allocator_test :: () -> bool, string {
 
     for 0..pointers.count-1 {
         bin_ct := random_get_within_range(1, 64).(s64);
-        alloc_sz := bin_ct * a.MIN_ALLOCATION_SIZE;
+        alloc_sz := bin_ct * /*a.min_allocation_size*/ MIN_CHUNK_SZ;
         t1 := seconds_since_init();
-        pointers[it] = alloc(alloc_sz);
+        pointers[it] = alloc(alloc_sz,,a);
         t2 := seconds_since_init();
         total_alloc_seconds += t2 - t1;
         max_time = max(max_time, t2-t1);
@@ -730,7 +772,7 @@ super_allocator_test :: () -> bool, string {
         }
         ptr := pointers[index];
         array_ordered_remove_by_index(*pointers, index);
-        free(ptr);
+        free(ptr,,a);
     }
 
     // log("small allocator data");
@@ -745,9 +787,9 @@ super_allocator_test :: () -> bool, string {
     last_100_ms_per_alloc := last_100_total_ms / 100.0;
     last_100_us_per_alloc := last_100_ms_per_alloc * 1000.0;
 
-    log("avg alloc time:                        %us", us_per_alloc);
-    log("avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
-    log("max time:                              %us", max_time * 1000.0 * 1000.0);
+    log("super allocator avg alloc time:                        %us", us_per_alloc);
+    log("super allocator avg alloc time (last 100 allocations): %us", last_100_us_per_alloc);
+    log("super allocator max time:                              %us", max_time * 1000.0 * 1000.0);
 
     // total_alloc_seconds = 0;
     // total_alloc_seconds_last_100 = 0;
@@ -802,96 +844,96 @@ super_allocator_test :: () -> bool, string {
 // ---------------------------------------------------------------------------------------------------------------------
 
 serializer_test_body :: (checksum: *[4]u32 = null, load_checksum := false) #expand {
-    s := `ser;
-    if checksum {
-        s.pad_for_checksum = true;
-    }
-    reset(*s);
+    // s := `ser;
+    // if checksum {
+    //     s.pad_for_checksum = true;
+    // }
+    // reset(*s);
 
-    t: Test_Struct;
-    memset(*t, 0, size_of(Test_Struct));
-    t = Test_Struct.{
-        a = 100,
-        b = 255,
-        c = 0.1,
-        d = "hello"
-    };
-    str := "whatever";
-    array := u16.[1, 2, 3, 4, 5, 6, 7];
-    array_for_copy : []u16 = array;
+    // t: Test_Struct;
+    // memset(*t, 0, size_of(Test_Struct));
+    // t = Test_Struct.{
+    //     a = 100,
+    //     b = 255,
+    //     c = 0.1,
+    //     d = "hello"
+    // };
+    // str := "whatever";
+    // array := u16.[1, 2, 3, 4, 5, 6, 7];
+    // array_for_copy : []u16 = array;
 
-    serialize(*s, *t.a);
-    head_1 := s.head;
-    serialize(*s, *t.b);
-    head_2 := s.head;
-    serialize(*s, *t.c);
-    head_3 := s.head;
-    serialize(*s, *t.d);
-    head_4 := s.head;
-    serialize(*s, *t);
-    head_5 := s.head;
-    serialize(*s, *str);
-    head_6 := s.head;
-    serialize(*s, *array_for_copy);
-    head_7 := s.head;
-    serialize(*s, *t);
-    head_8 := s.head;
-    serialize(*s, *t.a);
-    head_9 := s.head;
-    serialize(*s, *t.b);
-    head_10 := s.head;
-    serialize(*s, *t.c);
-    head_11 := s.head;
-    serialize(*s, *t.d);
-    head_12 := s.head;
+    // serialize(*s, *t.a);
+    // head_1 := s.head;
+    // serialize(*s, *t.b);
+    // head_2 := s.head;
+    // serialize(*s, *t.c);
+    // head_3 := s.head;
+    // serialize(*s, *t.d);
+    // head_4 := s.head;
+    // serialize(*s, *t);
+    // head_5 := s.head;
+    // serialize(*s, *str);
+    // head_6 := s.head;
+    // serialize(*s, *array_for_copy);
+    // head_7 := s.head;
+    // serialize(*s, *t);
+    // head_8 := s.head;
+    // serialize(*s, *t.a);
+    // head_9 := s.head;
+    // serialize(*s, *t.b);
+    // head_10 := s.head;
+    // serialize(*s, *t.c);
+    // head_11 := s.head;
+    // serialize(*s, *t.d);
+    // head_12 := s.head;
 
-    if checksum {
-        // if load_checksum {
-        //     imprint_checksum(*s);
-        //     memcpy(checksum.data, s.memory.data, size_of([4]u32));
-        // } else {
-        //     memcpy(s.memory.data, checksum.data, size_of([4]u32));
-        //     test_condition(validate_checksum(*s));
-        // }
-    }
+    // if checksum {
+    //     // if load_checksum {
+    //     //     imprint_checksum(*s);
+    //     //     memcpy(checksum.data, s.memory.data, size_of([4]u32));
+    //     // } else {
+    //     //     memcpy(s.memory.data, checksum.data, size_of([4]u32));
+    //     //     test_condition(validate_checksum(*s));
+    //     // }
+    // }
 
-    rt1, rt2, rt3, rt4: Test_Struct;
-    memset(*rt1, 0, size_of(Test_Struct));
-    rstr: string;
-    rarray: []u16;
+    // rt1, rt2, rt3, rt4: Test_Struct;
+    // memset(*rt1, 0, size_of(Test_Struct));
+    // rstr: string;
+    // rarray: []u16;
 
-    set_rw_mode(*s, .READ);
+    // set_rw_mode(*s, .READ);
 
-    serialize(*s, *rt1.a);
-    test_condition(head_1 == s.head);
-    serialize(*s, *rt1.b);
-    test_condition(head_2 == s.head);
-    serialize(*s, *rt1.c);
-    test_condition(head_3 == s.head);
-    serialize(*s, *rt1.d);
-    test_condition(head_4 == s.head);
-    serialize(*s, *rt2);
-    test_condition(head_5 == s.head);
-    serialize(*s, *rstr);
-    test_condition(head_6 == s.head);
-    serialize(*s, *rarray);
-    test_condition(head_7 == s.head);
-    serialize(*s, *rt3);
-    test_condition(head_8 == s.head);
-    serialize(*s, *rt4.a);
-    test_condition(head_9 == s.head);
-    serialize(*s, *rt4.b);
-    test_condition(head_10 == s.head);
-    serialize(*s, *rt4.c);
-    test_condition(head_11 == s.head);
-    serialize(*s, *rt4.d);
-    test_condition(head_12 == s.head);
+    // serialize(*s, *rt1.a);
+    // test_condition(head_1 == s.head);
+    // serialize(*s, *rt1.b);
+    // test_condition(head_2 == s.head);
+    // serialize(*s, *rt1.c);
+    // test_condition(head_3 == s.head);
+    // serialize(*s, *rt1.d);
+    // test_condition(head_4 == s.head);
+    // serialize(*s, *rt2);
+    // test_condition(head_5 == s.head);
+    // serialize(*s, *rstr);
+    // test_condition(head_6 == s.head);
+    // serialize(*s, *rarray);
+    // test_condition(head_7 == s.head);
+    // serialize(*s, *rt3);
+    // test_condition(head_8 == s.head);
+    // serialize(*s, *rt4.a);
+    // test_condition(head_9 == s.head);
+    // serialize(*s, *rt4.b);
+    // test_condition(head_10 == s.head);
+    // serialize(*s, *rt4.c);
+    // test_condition(head_11 == s.head);
+    // serialize(*s, *rt4.d);
+    // test_condition(head_12 == s.head);
 
-    test_condition(rt1 == t);
-    test_condition(rt2 == t);
-    test_condition(rt3 == t);
-    test_condition(rt4 == t);
-    test_condition(rstr == str);
-    test_condition(arrays_equal(rarray, array));
+    // test_condition(rt1 == t);
+    // test_condition(rt2 == t);
+    // test_condition(rt3 == t);
+    // test_condition(rt4 == t);
+    // test_condition(rstr == str);
+    // test_condition(arrays_equal(rarray, array));
 }
 

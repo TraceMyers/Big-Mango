@@ -1,3 +1,4 @@
+
 Pool_Resize_Behavior :: enum {
     DEFAULT;
     ALLOW;
@@ -141,4 +142,20 @@ is_empty :: inline (using pool: *Pool($T)) -> bool {
 
 is_item_in_use :: inline (using pool: *Pool($T), i: s64) -> bool {
     return bit_is_set(*in_use, i);
+}
+
+// for pool { ... }
+for_expansion :: (pool: Pool, body: Code, flags: For_Flags) #expand {
+    if pool.top >= 0 then for <=((flags & .REVERSE) != 0) item_index : 0..pool.top {
+        `it_index := item_index;
+        if !is_item_in_use(*pool, item_index) {
+            continue;
+        }
+        #if (flags & .POINTER) {
+            `it := *pool.items[item_index];
+        } else {
+            `it := pool.items[item_index];
+        }
+        #insert body;
+    }
 }

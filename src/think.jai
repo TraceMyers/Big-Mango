@@ -28,7 +28,7 @@ player_entity_think :: (e: *Entity) {
 
             request.channels = .DEFAULT;
             just_picked_up_entity: bool;
-            if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
+            if raycast(request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
                 hit_entity := get_entity(result.hit_entity);
                 if is_set(*hit_entity.flags, .CAN_BE_HELD) {
                     e.holding_entity = result.hit_entity;
@@ -39,7 +39,7 @@ player_entity_think :: (e: *Entity) {
                 result = .{};
                 request.channels = .GADGET;
                 request.hit_back_face = true;
-                if raycast(*request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
+                if raycast(request, *result) && !is_null(result.hit_entity) && result.hit_entity != e.ref {
                     hit_entity := get_entity(result.hit_entity);
                     assert(is_set(*hit_entity.flags, .USES_GADGET));
                     if gadget_can_take_interaction(hit_entity, e) {

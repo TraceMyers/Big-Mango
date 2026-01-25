@@ -1,23 +1,23 @@
 
-COLLISION_GRID_DIMENSIONS :: Int_Vector2.{600, 600};
+COLLISION_GRID_DIMENSIONS :: Vector2i.{600, 600};
 COLLISION_GRID_CELL_DIMENSIONS :: Vector2.{60, 60};
 COLLISION_GRID_ORIGIN :: #run Vector2.{0,0} - ((to_vector2(COLLISION_GRID_DIMENSIONS) * COLLISION_GRID_CELL_DIMENSIONS) / 2);
 
-world_to_collision_grid_position :: inline (world_pos: Vector2) -> Int_Vector2 {
+world_to_collision_grid_position :: inline (world_pos: Vector2) -> Vector2i {
     INV_COLLISION_GRID_CELL_DIMENSIONS :: #run (1 / COLLISION_GRID_CELL_DIMENSIONS);
     diff := world_pos - COLLISION_GRID_ORIGIN;
     diff *= INV_COLLISION_GRID_CELL_DIMENSIONS;
-    ivec := to_int_vector2(diff);
+    ivec := to_vector2i(diff);
     return clamp(ivec, .{}, COLLISION_GRID_DIMENSIONS-1);
 }
 
-collision_grid_position_to_index :: inline (pos: Int_Vector2) -> s32 {
+collision_grid_position_to_index :: inline (pos: Vector2i) -> s32 {
     y_part := pos.y * COLLISION_GRID_DIMENSIONS.x;
     x_part := pos.x;
     return x_part + y_part;
 }
 
-collision_grid_index_to_position :: inline (i: s32) -> Int_Vector2 {
+collision_grid_index_to_position :: inline (i: s32) -> Vector2i {
     y_part := i / COLLISION_GRID_DIMENSIONS.x;
     x_part := i - y_part * COLLISION_GRID_DIMENSIONS.x;
     return .{x_part, y_part};
@@ -197,7 +197,7 @@ find_overlaps_in_cell :: (self_ref: Entity_Ref, x: s64, y: s64, grid_index: s32,
     }
 }
 
-collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2 {
+collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) -> grid_pos_min: Vector2i, grid_pos_max: Vector2i {
     using context.world;
     self := get_entity(entity_ref);
     self_aabb := get_aabb(self);
@@ -217,7 +217,7 @@ collision_grid_iterate :: (entity_ref: Entity_Ref, time_step: float, data: *void
     return grid_pos_min, grid_pos_max;
 }
 
-collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: Int_Vector2, grid_pos_max: Int_Vector2, swept_aabb: AABB, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) {
+collision_grid_iterate :: (entity_ref: Entity_Ref, data: *void, grid_pos_min: Vector2i, grid_pos_max: Vector2i, swept_aabb: AABB, $inner_loop_proc: (entity_a: Entity_Ref, x: s64, y: s64, grid_index: s32, swept_aabb_a: AABB, data: *void)) {
     using context.world;
     for x : grid_pos_min.x..grid_pos_max.x {
         for y : grid_pos_min.y..grid_pos_max.y {

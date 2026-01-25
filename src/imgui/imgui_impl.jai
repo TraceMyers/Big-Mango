@@ -46,7 +46,7 @@ Dev_UI_Module :: enum {
     MENU_BAR;
 }
 
-dev_ui_enabled: Long_Flag_Array(Dev_UI_Module);
+dev_ui_enabled: Flag_Array(Dev_UI_Module);
 ui_options_open: bool;
 
 
@@ -66,7 +66,7 @@ _imgui :: (stage: Boot_Stage) -> bool {
         initialize_super_allocator(*test_super_allocator, context.default_allocator);
         random_seed(*test_super_allocator_random_state, 1_200_000_000);
 
-        set_multiple(*dev_ui_enabled, .[.LEFT_SIDEBAR, .CMD]);
+        set(*dev_ui_enabled, .[.LEFT_SIDEBAR, .CMD]);
 
         pool_sizes := VkDescriptorPoolSize.[
             .{.SAMPLER,                   1000},
@@ -395,9 +395,9 @@ add_perf_graph :: (menu_bar_height: float, parent_width: float) {
     scope_set_alpha(perf_opacity);
 
     window_size := ImVec2.{parent_width, PERF_HEIGHT + 4.0};
-    SetNextWindowSize(*window_size);
+    SetNextWindowSize(window_size);
     window_pos := ImVec2.{y=menu_bar_height};
-    SetNextWindowPos(*window_pos);
+    SetNextWindowPos(window_pos);
     window_open := Begin("PerformanceGraph", null, .NoTitleBar | .NoCollapse);
     defer End();
 
@@ -1188,7 +1188,7 @@ add_super_allocator_test_ui_thing :: () {
                 }
                 largest_gap_per_list = builder_to_string(*builder);
 
-                gap_list_of_lists = alloc_array(string, list_count, context.default_allocator);
+                gap_list_of_lists = array_alloc(string, list_count,, context.default_allocator);
                 for 0..list_count-1 {
                     list_length := test_super_allocator.chunk_lists[it].count;
                     for gap_list : test_super_allocator.books.gap_list_of_lists {
@@ -1199,7 +1199,7 @@ add_super_allocator_test_ui_thing :: () {
                     gap_list_of_lists[it] = builder_to_string(*builder);
                 }
 
-                flag_list_of_lists = alloc_array(string, list_count, context.default_allocator);
+                flag_list_of_lists = array_alloc(string, list_count,, context.default_allocator);
                 for 0..list_count-1 {
                     list_length := test_super_allocator.chunk_lists[it].count;
                     for flag_list : test_super_allocator.books.flag_list_of_lists {

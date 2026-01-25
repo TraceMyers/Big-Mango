@@ -30,7 +30,7 @@ program_runtime_initialize :: (pool: *Pool($T), count: s64) {
 }
 
 program_runtime_allocate :: (array: *[]$T, count: s64) {
-    array.* = alloc_array(T, count, program_runtime_allocator);
+    array.* = array_alloc(T, count,, program_runtime_allocator);
 }
 
 world_runtime_reserve :: (world: *World, array: *[..]$T, count: s64) {
@@ -53,7 +53,7 @@ world_runtime_initialize :: (world: *World, pool: *Pool($T), count: s64) {
 }
 
 world_runtime_allocate :: (world: *World, array: *[]$T, count: s64) {
-    array.* = alloc_array(T, count, world.world_runtime_allocator);
+    array.* = array_alloc(T, count,, world.world_runtime_allocator);
 }
 
 program_runtime_allocator: Allocator;

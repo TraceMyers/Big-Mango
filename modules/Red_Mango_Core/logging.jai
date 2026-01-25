@@ -51,7 +51,7 @@ report_impl :: (
     auto_release_temp();
 
     MAX_HEADER_COUNT :: 8;
-    MAX_CONTEXT_COUNT :: 16;
+    MAX_CONTEXT_COUNT :: 30;
     BRACKETS_COUNT :: 4;
     END_LEAD_SPACE :: 1;
     LEAD_BUFFER_SIZE :: MAX_HEADER_COUNT + MAX_CONTEXT_COUNT + BRACKETS_COUNT;

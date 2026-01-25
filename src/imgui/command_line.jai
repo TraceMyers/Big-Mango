@@ -116,7 +116,7 @@ get_command_line_suggestions :: () -> []*Command_Line_Procedure {
         proc: s32;
         score: s32;
     }
-    matching_procedures := alloc_array(Matching_Procedure, command_line_procedures.count, temp);
+    matching_procedures := array_alloc(Matching_Procedure, command_line_procedures.count,, temp);
     
     out_count: s32;
     for proc : command_line_procedures {
@@ -142,7 +142,7 @@ get_command_line_suggestions :: () -> []*Command_Line_Procedure {
 
     matching_procedures.count = out_count;
     quick_sort(matching_procedures, (a, b) => b.score - a.score);
-    out_procs = alloc_array(*Command_Line_Procedure, matching_procedures.count, temp);
+    out_procs = array_alloc(*Command_Line_Procedure, matching_procedures.count,, temp);
     for matching_procedures {
         out_procs[it_index] = *command_line_procedures[it.proc];
     }

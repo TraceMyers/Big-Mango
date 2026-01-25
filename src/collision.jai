@@ -65,7 +65,7 @@ solve_contacts :: () {
     {
         TRANSIENT_COLLISION_FLAGS :: Entity_Flags.[.COLLIDING_WITH_SOMETHING, .CHANGED_CELL_OCCUPATIONS];
         for e : context.world.entities {
-            unset_multiple(*e.flags, TRANSIENT_COLLISION_FLAGS);
+            unset(*e.flags, TRANSIENT_COLLISION_FLAGS);
         }
     }
 }

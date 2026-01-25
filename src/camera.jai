@@ -88,7 +88,7 @@ get_mouse_cursor_ray :: (camera: *Entity, viewport: Vector2) -> Ray3, success: b
     p: Win32.POINT;
     Win32.GetCursorPos(*p);
     success := Win32.ScreenToClient(window, *p) != 0;
-    cursor_position: Int_Vector2;
+    cursor_position: Vector2i;
     cursor_norm_position: Vector2;
     if success {
         cursor_position.x = p.x;
